@@ -3,6 +3,7 @@ import { prisma } from "@workspace/db";
 import { requireAuth, requireProviderAccess } from "../middlewares/requireAuth";
 import { isPlatformAdmin, type SessionUser } from "../lib/auth";
 import { calculateAllInPrice } from "../lib/feeCalculator";
+import { isWithinOperatingHours, getNextOpenAt } from "../lib/timezone";
 
 const router: IRouter = Router();
 
@@ -118,7 +119,7 @@ router.get("/locations/available-now", async (req, res) => {
 
 router.get("/locations/search", async (req, res) => {
   try {
-    const { lat, lng, radiusMiles, categoryCode, subtypeCode } = req.query;
+    const { lat, lng, radiusMiles, categoryCode, subtypeCode, openNow } = req.query;
 
     const where: Record<string, unknown> = { isVisible: true, provider: { isActive: true } };
 
@@ -149,14 +150,28 @@ router.get("/locations/search", async (req, res) => {
       orderBy: { name: "asc" },
     });
 
-    const mapped = locations.map((loc) => ({
-      ...loc,
-      stateCode: loc.regionCode,
-      services: loc.services.map((s) => ({
-        ...s,
-        allInPriceMinor: calculateAllInPrice(s.basePriceMinor),
-      })),
-    }));
+    const now = new Date();
+
+    let mapped = locations.map((loc) => {
+      const openStatus = isWithinOperatingHours(now, loc.timezone, loc.operatingWindows);
+      const nextOpen = openStatus ? null : getNextOpenAt(now, loc.timezone, loc.operatingWindows);
+
+      return {
+        ...loc,
+        stateCode: loc.regionCode,
+        isOpenNow: openStatus,
+        nextOpenAt: nextOpen?.toISOString() ?? null,
+        services: loc.services.map((s) => ({
+          ...s,
+          allInPriceMinor: calculateAllInPrice(s.basePriceMinor),
+        })),
+      };
+    });
+
+    // Server-side "Open Now" filter
+    if (openNow === "true") {
+      mapped = mapped.filter((loc) => loc.isOpenNow);
+    }
 
     res.json({ locations: mapped });
   } catch (err) {

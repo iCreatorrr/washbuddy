@@ -159,7 +159,14 @@ export default function LocationDetail() {
 
       <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm flex flex-col md:flex-row gap-8 justify-between items-start">
         <div>
-          <Badge className="mb-4 bg-blue-50 text-blue-700 border-blue-200">{locData.provider?.name}</Badge>
+          <div className="flex items-center gap-2 mb-4">
+            <Badge className="bg-blue-50 text-blue-700 border-blue-200">{locData.provider?.name}</Badge>
+            {(locData as any).isOpenNow ? (
+              <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200"><Clock className="h-3 w-3 mr-1" />Open Now</Badge>
+            ) : (
+              <Badge className="bg-slate-100 text-slate-500 border-slate-200">Closed</Badge>
+            )}
+          </div>
           <h1 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 mb-2">{locData.name}</h1>
           <p className="text-lg text-slate-500 flex items-center gap-2">
             <MapPin className="h-5 w-5" />
@@ -424,6 +431,40 @@ export default function LocationDetail() {
                 </div>
               </div>
             </Card>
+
+            {/* Operating Hours Schedule */}
+            {locData.operatingWindows && locData.operatingWindows.length > 0 && (
+              <Card className="p-5">
+                <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-slate-500" />
+                  Operating Hours
+                </h3>
+                <div className="space-y-1.5 text-sm">
+                  {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((dayName, dayIdx) => {
+                    const dayWindows = (locData.operatingWindows || [])
+                      .filter((w: any) => w.dayOfWeek === dayIdx)
+                      .sort((a: any, b: any) => a.openTime.localeCompare(b.openTime));
+                    const isToday = new Date().getDay() === dayIdx;
+                    return (
+                      <div key={dayIdx} className={`flex justify-between py-1 px-2 rounded ${isToday ? "bg-blue-50 font-semibold" : ""}`}>
+                        <span className={isToday ? "text-blue-700" : "text-slate-600"}>{dayName.slice(0, 3)}</span>
+                        <span className={isToday ? "text-blue-700" : "text-slate-500"}>
+                          {dayWindows.length === 0 ? "Closed" : dayWindows.map((w: any) => {
+                            const fmt = (t: string) => {
+                              const [h, m] = t.split(":").map(Number);
+                              const ampm = h >= 12 ? "PM" : "AM";
+                              const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+                              return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
+                            };
+                            return `${fmt(w.openTime)} – ${fmt(w.closeTime)}`;
+                          }).join(", ")}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            )}
 
             <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200">
               <p className="text-xs text-slate-500 leading-relaxed">

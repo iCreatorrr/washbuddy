@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { prisma } from "@workspace/db";
+import { getLocalTimeInfo, localTimeToUtc } from "../lib/timezone";
 
 const router: IRouter = Router();
 
@@ -35,8 +36,12 @@ router.get("/locations/:locationId/availability", async (req, res) => {
     }
 
     const dateStr = date as string;
-    const jsDate = new Date(dateStr + "T00:00:00");
-    const dayOfWeek = jsDate.getUTCDay();
+    const tz = location.timezone;
+
+    // Determine the day of week in the LOCATION'S timezone for the requested date.
+    // Parse the date as a local date in the location's timezone.
+    const localInfo = getLocalTimeInfo(new Date(`${dateStr}T12:00:00Z`), tz);
+    const dayOfWeek = localInfo.dayOfWeek;
 
     const windows = await prisma.operatingWindow.findMany({
       where: { locationId: location.id, dayOfWeek },
@@ -77,8 +82,9 @@ router.get("/locations/:locationId/availability", async (req, res) => {
         const startTime = `${String(startH).padStart(2, "0")}:${String(startM).padStart(2, "0")}`;
         const endTime = `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
 
-        const slotStartUtc = new Date(`${dateStr}T${startTime}:00Z`);
-        const slotEndUtc = new Date(`${dateStr}T${endTime}:00Z`);
+        // Convert local slot times to UTC using the location's timezone
+        const slotStartUtc = localTimeToUtc(dateStr, startTime, tz);
+        const slotEndUtc = localTimeToUtc(dateStr, endTime, tz);
 
         const leadTimeDeadline = new Date(slotStartUtc.getTime() - service.leadTimeMins * 60 * 1000);
         const tooLate = now > leadTimeDeadline;

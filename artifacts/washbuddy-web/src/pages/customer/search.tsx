@@ -19,15 +19,6 @@ function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function isOpenNow(operatingWindows: Array<{ dayOfWeek: number; openTime: string; closeTime: string }> | undefined): boolean {
-  if (!operatingWindows || operatingWindows.length === 0) return false;
-  const now = new Date();
-  const dayOfWeek = now.getDay();
-  const currentTime = now.getHours().toString().padStart(2, "0") + ":" + now.getMinutes().toString().padStart(2, "0");
-  return operatingWindows.some(
-    (w) => w.dayOfWeek === dayOfWeek && w.openTime <= currentTime && w.closeTime > currentTime
-  );
-}
 
 function formatDistance(miles: number): string {
   if (miles < 1) return `${Math.round(miles * 5280)} ft`;
@@ -114,6 +105,8 @@ type LocationWithMeta = {
   provider?: { id: string; name: string };
   services?: Array<{ id: string; name: string; basePriceMinor: number; allInPriceMinor?: number; durationMins: number }>;
   operatingWindows?: Array<{ dayOfWeek: number; openTime: string; closeTime: string }>;
+  isOpenNow?: boolean;
+  nextOpenAt?: string | null;
   distance?: number;
   isOpen: boolean;
 };
@@ -164,7 +157,7 @@ export default function CustomerSearch() {
   }, [bookingsData]);
 
   const enrichedLocations: LocationWithMeta[] = useMemo(() => {
-    const locs = (data?.locations || []) as Array<LocationWithMeta & { operatingWindows?: Array<{ dayOfWeek: number; openTime: string; closeTime: string }> }>;
+    const locs = (data?.locations || []) as Array<LocationWithMeta>;
     return locs.map((loc) => {
       const dist = userLat != null && userLng != null && loc.latitude && loc.longitude
         ? haversineDistance(userLat, userLng, loc.latitude, loc.longitude)
@@ -172,7 +165,7 @@ export default function CustomerSearch() {
       return {
         ...loc,
         distance: dist,
-        isOpen: isOpenNow(loc.operatingWindows),
+        isOpen: loc.isOpenNow ?? false,
       };
     });
   }, [data, userLat, userLng]);
@@ -232,7 +225,9 @@ export default function CustomerSearch() {
                     <Clock className="h-3 w-3 mr-1" />Open Now
                   </Badge>
                 ) : (
-                  <Badge className="bg-slate-100 text-slate-500 border-slate-200">Closed</Badge>
+                  <Badge className="bg-slate-100 text-slate-500 border-slate-200">
+                    Closed{loc.nextOpenAt ? ` · Opens ${new Date(loc.nextOpenAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}
+                  </Badge>
                 )}
               </div>
               <div className="bg-slate-50 p-2 rounded-full text-slate-400 group-hover:bg-primary group-hover:text-white transition-colors">
