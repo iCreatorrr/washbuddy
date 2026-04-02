@@ -1,0 +1,21 @@
+packages:
+  "framer-motion": "For elegant page transitions, staggering list items, and interactive animations"
+  "date-fns": "For robust and human-readable date formatting and manipulation"
+  "clsx": "Utility for constructing className strings conditionally"
+  "tailwind-merge": "Utility for merging tailwind classes without conflicts"
+  "react-hook-form": "For performant, flexible, and extensible form state management"
+  "@hookform/resolvers": "For Zod schema validation integration in forms"
+
+images:
+  - path: "artifacts/washbuddy-web/public/images/auth-bg.png"
+    description: "A stunning, hyper-realistic macro shot of a pristine modern commercial bus being washed. Glowing water droplets, dramatic neon studio lighting with deep ocean blues and cyan tones, highly detailed, 8k resolution, cinematic composition."
+    aspect_ratio: "16:9"
+  - path: "artifacts/washbuddy-web/public/images/dashboard-hero.png"
+    description: "Abstract architectural 3D shapes in deep blue and vivid teal colors. Modern SaaS aesthetic, soft diffused studio lighting, clean minimal background with subtle glassmorphism elements."
+    aspect_ratio: "16:9"
+
+notes:
+  - API hooks are available from @workspace/api-client-react.
+  - Using credentials: 'include' on all requests to ensure session cookies are passed.
+  - Using standard Wouter for routing.
+  - Forms use React Hook Form + Zod.

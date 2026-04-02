@@ -1,0 +1,33 @@
+{
+  "name": "@workspace/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "prisma generate --schema=./prisma/schema.prisma",
+    "migrate:dev": "prisma migrate dev --schema=./prisma/schema.prisma",
+    "migrate:deploy": "prisma migrate deploy --schema=./prisma/schema.prisma",
+    "db:push": "prisma db push --schema=./prisma/schema.prisma",
+    "db:push-force": "prisma db push --force-reset --schema=./prisma/schema.prisma",
+    "db:seed": "tsx src/seed.ts",
+    "demo:seed": "tsx src/demo-seed/scripts/seed.ts",
+    "demo:purge": "tsx src/demo-seed/scripts/purge.ts",
+    "demo:export": "tsx src/demo-seed/scripts/export.ts",
+    "demo:validate": "tsx src/demo-seed/scripts/validate.ts",
+    "demo:seed-future": "tsx src/demo-seed/scripts/seed-future-bookings.ts",
+    "demo:validate-future": "tsx src/demo-seed/scripts/validate-future-bookings.ts",
+    "demo:purge-future": "tsx src/demo-seed/scripts/purge.ts",
+    "studio": "prisma studio --schema=./prisma/schema.prisma"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "prisma": "5.22.0",
+    "tsx": "catalog:"
+  },
+  "dependencies": {
+    "@prisma/client": "5.22.0"
+  }
+}

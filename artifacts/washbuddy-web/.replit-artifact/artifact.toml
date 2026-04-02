@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "WashBuddy"
+version = "1.0.0"
+id = "artifacts/washbuddy-web"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22667
+
+[services.development]
+run = "pnpm --filter @workspace/washbuddy-web run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/washbuddy-web", "run", "build" ]
+publicDir = "artifacts/washbuddy-web/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22667"
+BASE_PATH = "/"

@@ -1,0 +1,1971 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: WashBuddy API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: auth
+    description: Authentication
+  - name: providers
+    description: Provider management
+  - name: locations
+    description: Location management
+  - name: services
+    description: Service management
+  - name: vehicles
+    description: Vehicle management
+  - name: availability
+    description: Slot availability
+  - name: bookings
+    description: Booking lifecycle
+  - name: reviews
+    description: Reviews and ratings
+  - name: notifications
+    description: In-app notifications
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Register a new account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "409":
+          description: Email already exists
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: Logged out
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Not authenticated
+
+  /providers:
+    get:
+      operationId: listProviders
+      tags: [providers]
+      summary: List providers
+      responses:
+        "200":
+          description: Provider list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  providers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Provider"
+                required: [providers]
+    post:
+      operationId: createProvider
+      tags: [providers]
+      summary: Create provider (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProviderInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  provider:
+                    $ref: "#/components/schemas/Provider"
+                required: [provider]
+
+  /providers/{providerId}:
+    get:
+      operationId: getProvider
+      tags: [providers]
+      summary: Get provider detail
+      parameters:
+        - $ref: "#/components/parameters/ProviderId"
+      responses:
+        "200":
+          description: Provider detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  provider:
+                    $ref: "#/components/schemas/Provider"
+                required: [provider]
+    patch:
+      operationId: updateProvider
+      tags: [providers]
+      summary: Update provider
+      parameters:
+        - $ref: "#/components/parameters/ProviderId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProviderInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  provider:
+                    $ref: "#/components/schemas/Provider"
+                required: [provider]
+
+  /providers/{providerId}/locations:
+    get:
+      operationId: listLocations
+      tags: [locations]
+      summary: List provider locations
+      parameters:
+        - $ref: "#/components/parameters/ProviderId"
+      responses:
+        "200":
+          description: Location list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  locations:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Location"
+                required: [locations]
+    post:
+      operationId: createLocation
+      tags: [locations]
+      summary: Create location
+      parameters:
+        - $ref: "#/components/parameters/ProviderId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLocationInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  location:
+                    $ref: "#/components/schemas/Location"
+                required: [location]
+
+  /providers/{providerId}/locations/{locationId}:
+    patch:
+      operationId: updateLocation
+      tags: [locations]
+      summary: Update location
+      parameters:
+        - $ref: "#/components/parameters/ProviderId"
+        - $ref: "#/components/parameters/LocationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLocationInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  location:
+                    $ref: "#/components/schemas/Location"
+                required: [location]
+
+  /providers/{providerId}/locations/{locationId}/hours:
+    put:
+      operationId: setOperatingHours
+      tags: [locations]
+      summary: Set operating hours
+      parameters:
+        - $ref: "#/components/parameters/ProviderId"
+        - $ref: "#/components/parameters/LocationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                windows:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/OperatingWindowInput"
+              required: [windows]
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  windows:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OperatingWindow"
+                required: [windows]
+
+  /locations/search:
+    get:
+      operationId: searchLocations
+      tags: [locations]
+      summary: Search visible locations
+      parameters:
+        - name: lat
+          in: query
+          schema:
+            type: number
+        - name: lng
+          in: query
+          schema:
+            type: number
+        - name: radiusMi
+          in: query
+          schema:
+            type: number
+        - name: state
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Location search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  locations:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LocationSearchResult"
+                required: [locations]
+
+  /locations/available-now:
+    get:
+      operationId: getAvailableNowLocations
+      tags: [locations]
+      summary: Get location IDs with wash bay availability in the current hour
+      responses:
+        "200":
+          description: List of location IDs with immediate availability
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  locationIds:
+                    type: array
+                    items:
+                      type: string
+                required: [locationIds]
+
+  /providers/{providerId}/locations/{locationId}/services:
+    get:
+      operationId: listServices
+      tags: [services]
+      summary: List services for a location
+      parameters:
+        - $ref: "#/components/parameters/ProviderId"
+        - $ref: "#/components/parameters/LocationId"
+      responses:
+        "200":
+          description: Service list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  services:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Service"
+                required: [services]
+    post:
+      operationId: createService
+      tags: [services]
+      summary: Create service
+      parameters:
+        - $ref: "#/components/parameters/ProviderId"
+        - $ref: "#/components/parameters/LocationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateServiceInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service:
+                    $ref: "#/components/schemas/Service"
+                required: [service]
+
+  /providers/{providerId}/locations/{locationId}/services/{serviceId}:
+    patch:
+      operationId: updateService
+      tags: [services]
+      summary: Update service
+      parameters:
+        - $ref: "#/components/parameters/ProviderId"
+        - $ref: "#/components/parameters/LocationId"
+        - $ref: "#/components/parameters/ServiceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateServiceInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service:
+                    $ref: "#/components/schemas/Service"
+                required: [service]
+
+  /vehicles:
+    get:
+      operationId: listVehicles
+      tags: [vehicles]
+      summary: List vehicles
+      responses:
+        "200":
+          description: Vehicle list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vehicles:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Vehicle"
+                required: [vehicles]
+    post:
+      operationId: createVehicle
+      tags: [vehicles]
+      summary: Create vehicle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVehicleInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vehicle:
+                    $ref: "#/components/schemas/Vehicle"
+                required: [vehicle]
+
+  /vehicles/{vehicleId}:
+    patch:
+      operationId: updateVehicle
+      tags: [vehicles]
+      summary: Update vehicle
+      parameters:
+        - name: vehicleId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateVehicleInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vehicle:
+                    $ref: "#/components/schemas/Vehicle"
+                required: [vehicle]
+
+  /locations/{locationId}/availability:
+    get:
+      operationId: getAvailability
+      tags: [availability]
+      summary: Get slot availability for a date
+      parameters:
+        - $ref: "#/components/parameters/LocationId"
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: serviceId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Available slots
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date:
+                    type: string
+                  locationId:
+                    type: string
+                  serviceId:
+                    type: string
+                  slots:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AvailabilitySlot"
+                required: [date, locationId, serviceId, slots]
+
+  /bookings/hold:
+    post:
+      operationId: createBookingHold
+      tags: [bookings]
+      summary: Create a slot hold (10 min TTL)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateHoldInput"
+      responses:
+        "201":
+          description: Hold created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hold:
+                    $ref: "#/components/schemas/BookingHold"
+                required: [hold]
+        "409":
+          description: Slot full or past lead time
+
+  /bookings:
+    get:
+      operationId: listBookings
+      tags: [bookings]
+      summary: List bookings (paginated, role-scoped)
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: locationId
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Booking list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookingListResponse"
+    post:
+      operationId: createBooking
+      tags: [bookings]
+      summary: Create booking from hold
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBookingInput"
+      responses:
+        "201":
+          description: Booking created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  booking:
+                    $ref: "#/components/schemas/Booking"
+                required: [booking]
+
+  /bookings/{bookingId}:
+    get:
+      operationId: getBooking
+      tags: [bookings]
+      summary: Get booking detail
+      parameters:
+        - $ref: "#/components/parameters/BookingId"
+      responses:
+        "200":
+          description: Booking detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  booking:
+                    $ref: "#/components/schemas/BookingDetail"
+                required: [booking]
+
+  /bookings/{bookingId}/confirm:
+    post:
+      operationId: confirmBooking
+      tags: [bookings]
+      summary: Provider confirms booking
+      parameters:
+        - $ref: "#/components/parameters/BookingId"
+      responses:
+        "200":
+          description: Confirmed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  booking:
+                    $ref: "#/components/schemas/Booking"
+                required: [booking]
+
+  /bookings/{bookingId}/decline:
+    post:
+      operationId: declineBooking
+      tags: [bookings]
+      summary: Provider declines booking
+      parameters:
+        - $ref: "#/components/parameters/BookingId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reasonCode:
+                  type: string
+      responses:
+        "200":
+          description: Declined
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  booking:
+                    $ref: "#/components/schemas/Booking"
+                required: [booking]
+
+  /bookings/{bookingId}/cancel:
+    post:
+      operationId: cancelBooking
+      tags: [bookings]
+      summary: Cancel booking
+      parameters:
+        - $ref: "#/components/parameters/BookingId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reasonCode:
+                  type: string
+      responses:
+        "200":
+          description: Cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  booking:
+                    $ref: "#/components/schemas/Booking"
+                required: [booking]
+
+  /bookings/{bookingId}/checkin:
+    post:
+      operationId: checkinBooking
+      tags: [bookings]
+      summary: Provider checks in vehicle
+      parameters:
+        - $ref: "#/components/parameters/BookingId"
+      responses:
+        "200":
+          description: Checked in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  booking:
+                    $ref: "#/components/schemas/Booking"
+                required: [booking]
+
+  /bookings/{bookingId}/start-service:
+    post:
+      operationId: startService
+      tags: [bookings]
+      summary: Start wash service
+      parameters:
+        - $ref: "#/components/parameters/BookingId"
+      responses:
+        "200":
+          description: Service started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  booking:
+                    $ref: "#/components/schemas/Booking"
+                required: [booking]
+
+  /bookings/{bookingId}/complete:
+    post:
+      operationId: completeBooking
+      tags: [bookings]
+      summary: Complete wash service
+      parameters:
+        - $ref: "#/components/parameters/BookingId"
+      responses:
+        "200":
+          description: Completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  booking:
+                    $ref: "#/components/schemas/Booking"
+                required: [booking]
+
+
+  /reviews:
+    post:
+      operationId: createReview
+      tags: [reviews]
+      summary: Submit a review for a completed booking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReviewInput"
+      responses:
+        "201":
+          description: Review created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
+
+  /reviews/pending:
+    get:
+      operationId: getPendingReviews
+      tags: [reviews]
+      summary: Get completed bookings awaiting review
+      responses:
+        "200":
+          description: Pending reviews
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  bookings:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Booking"
+                required: [bookings]
+
+  /reviews/provider:
+    get:
+      operationId: getProviderReviews
+      tags: [reviews]
+      summary: Get reviews for provider locations
+      parameters:
+        - name: locationId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Provider reviews
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderReviewsResponse"
+
+  /reviews/admin:
+    get:
+      operationId: getAdminReviews
+      tags: [reviews]
+      summary: Get all reviews for admin moderation
+      parameters:
+        - name: flagged
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Admin reviews
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reviews:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AdminReview"
+                required: [reviews]
+
+  /reviews/aggregate/{locationId}:
+    get:
+      operationId: getReviewAggregate
+      tags: [reviews]
+      summary: Get rating aggregate for a location
+      parameters:
+        - $ref: "#/components/parameters/LocationId"
+      responses:
+        "200":
+          description: Rating aggregate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewAggregate"
+
+  /locations/{locationId}/reviews:
+    get:
+      operationId: getLocationReviews
+      tags: [reviews]
+      summary: Get paginated reviews for a location
+      parameters:
+        - $ref: "#/components/parameters/LocationId"
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Location reviews
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LocationReviewsResponse"
+
+  /reviews/{reviewId}/reply:
+    post:
+      operationId: replyToReview
+      tags: [reviews]
+      summary: Provider replies to a customer review
+      parameters:
+        - $ref: "#/components/parameters/ReviewId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reply:
+                  type: string
+              required: [reply]
+      responses:
+        "200":
+          description: Reply added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
+
+  /reviews/{reviewId}:
+    patch:
+      operationId: editReview
+      tags: [reviews]
+      summary: Edit a review within 72 hours
+      parameters:
+        - $ref: "#/components/parameters/ReviewId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rating:
+                  type: integer
+                comment:
+                  type: string
+      responses:
+        "200":
+          description: Review updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
+
+  /reviews/{reviewId}/vote:
+    post:
+      operationId: voteOnReview
+      tags: [reviews]
+      summary: Vote a review as helpful or unhelpful
+      parameters:
+        - $ref: "#/components/parameters/ReviewId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                isHelpful:
+                  type: boolean
+              required: [isHelpful]
+      responses:
+        "200":
+          description: Vote recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  isHelpful:
+                    type: boolean
+                required: [id, isHelpful]
+
+  /reviews/{reviewId}/hide:
+    post:
+      operationId: hideReview
+      tags: [reviews]
+      summary: Admin hides an inappropriate review
+      parameters:
+        - $ref: "#/components/parameters/ReviewId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+              required: [reason]
+      responses:
+        "200":
+          description: Review hidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Review"
+
+  /notifications:
+    get:
+      operationId: listNotifications
+      tags: [notifications]
+      summary: List user notifications
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationListResponse"
+
+  /notifications/unread-count:
+    get:
+      operationId: getUnreadNotificationCount
+      tags: [notifications]
+      summary: Get count of unread notifications
+      responses:
+        "200":
+          description: Unread count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                required: [count]
+
+  /notifications/{notificationId}/read:
+    post:
+      operationId: markNotificationRead
+      tags: [notifications]
+      summary: Mark a notification as read
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Marked as read
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                required: [success]
+
+  /notifications/read-all:
+    post:
+      operationId: markAllNotificationsRead
+      tags: [notifications]
+      summary: Mark all notifications as read
+      responses:
+        "200":
+          description: All marked as read
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                required: [success]
+
+components:
+  parameters:
+    ProviderId:
+      name: providerId
+      in: path
+      required: true
+      schema:
+        type: string
+    LocationId:
+      name: locationId
+      in: path
+      required: true
+      schema:
+        type: string
+    ServiceId:
+      name: serviceId
+      in: path
+      required: true
+      schema:
+        type: string
+    BookingId:
+      name: bookingId
+      in: path
+      required: true
+      schema:
+        type: string
+    ReviewId:
+      name: reviewId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required: [status]
+
+    RegisterInput:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        phone:
+          type: string
+      required: [email, password, firstName, lastName]
+
+    LoginInput:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+      required: [email, password]
+
+    UserRole:
+      type: object
+      properties:
+        role:
+          type: string
+        scope:
+          type: string
+        scopeId:
+          type: ["string", "null"]
+      required: [role, scope]
+
+    AuthUser:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserRole"
+      required: [id, email, firstName, lastName, roles]
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/AuthUser"
+      required: [user]
+
+    Provider:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        legalName:
+          type: ["string", "null"]
+        slug:
+          type: string
+        contactEmail:
+          type: ["string", "null"]
+        contactPhone:
+          type: ["string", "null"]
+        billingMode:
+          type: string
+        payoutReady:
+          type: boolean
+        createdAt:
+          type: string
+      required: [id, name, slug, billingMode, payoutReady]
+
+    CreateProviderInput:
+      type: object
+      properties:
+        name:
+          type: string
+        legalName:
+          type: string
+        slug:
+          type: string
+        contactEmail:
+          type: string
+        contactPhone:
+          type: string
+        billingMode:
+          type: string
+      required: [name, slug]
+
+    UpdateProviderInput:
+      type: object
+      properties:
+        name:
+          type: string
+        legalName:
+          type: string
+        contactEmail:
+          type: string
+        contactPhone:
+          type: string
+
+    Location:
+      type: object
+      properties:
+        id:
+          type: string
+        providerId:
+          type: string
+        name:
+          type: string
+        addressLine1:
+          type: string
+        city:
+          type: string
+        stateCode:
+          type: string
+        postalCode:
+          type: string
+        timezone:
+          type: string
+        isVisible:
+          type: boolean
+        latitude:
+          type: ["number", "null"]
+        longitude:
+          type: ["number", "null"]
+        responseSlaFutureMins:
+          type: integer
+        responseSlaUnder1hMins:
+          type: integer
+        provider:
+          $ref: "#/components/schemas/Provider"
+        operatingWindows:
+          type: array
+          items:
+            $ref: "#/components/schemas/OperatingWindow"
+      required: [id, providerId, name, addressLine1, city, stateCode, postalCode, timezone, isVisible]
+
+    CreateLocationInput:
+      type: object
+      properties:
+        name:
+          type: string
+        addressLine1:
+          type: string
+        addressLine2:
+          type: string
+        city:
+          type: string
+        stateCode:
+          type: string
+        postalCode:
+          type: string
+        countryCode:
+          type: string
+        timezone:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        isVisible:
+          type: boolean
+      required: [name, addressLine1, city, stateCode, postalCode, timezone]
+
+    UpdateLocationInput:
+      type: object
+      properties:
+        name:
+          type: string
+        addressLine1:
+          type: string
+        city:
+          type: string
+        stateCode:
+          type: string
+        postalCode:
+          type: string
+        timezone:
+          type: string
+        isVisible:
+          type: boolean
+        latitude:
+          type: number
+        longitude:
+          type: number
+
+    LocationSearchResult:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        addressLine1:
+          type: string
+        city:
+          type: string
+        stateCode:
+          type: string
+        postalCode:
+          type: string
+        latitude:
+          type: ["number", "null"]
+        longitude:
+          type: ["number", "null"]
+        provider:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+          required: [id, name]
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceSummary"
+        operatingWindows:
+          type: array
+          items:
+            $ref: "#/components/schemas/OperatingWindowSummary"
+      required: [id, name, addressLine1, city, stateCode, postalCode]
+
+    OperatingWindowSummary:
+      type: object
+      properties:
+        dayOfWeek:
+          type: integer
+        openTime:
+          type: string
+        closeTime:
+          type: string
+      required: [dayOfWeek, openTime, closeTime]
+
+    OperatingWindow:
+      type: object
+      properties:
+        id:
+          type: string
+        dayOfWeek:
+          type: integer
+        openTime:
+          type: string
+        closeTime:
+          type: string
+      required: [id, dayOfWeek, openTime, closeTime]
+
+    OperatingWindowInput:
+      type: object
+      properties:
+        dayOfWeek:
+          type: integer
+        openTime:
+          type: string
+        closeTime:
+          type: string
+      required: [dayOfWeek, openTime, closeTime]
+
+    Service:
+      type: object
+      properties:
+        id:
+          type: string
+        locationId:
+          type: string
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        durationMins:
+          type: integer
+        basePriceMinor:
+          type: integer
+        platformFeeMinor:
+          type: integer
+        currencyCode:
+          type: string
+        capacityPerSlot:
+          type: integer
+        leadTimeMins:
+          type: integer
+        requiresConfirmation:
+          type: boolean
+        isVisible:
+          type: boolean
+      required: [id, locationId, name, durationMins, basePriceMinor, platformFeeMinor, currencyCode, capacityPerSlot, isVisible]
+
+    ServiceSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        basePriceMinor:
+          type: integer
+        durationMins:
+          type: integer
+      required: [id, name, basePriceMinor, durationMins]
+
+    CreateServiceInput:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        durationMins:
+          type: integer
+        basePriceMinor:
+          type: integer
+        platformFeeMinor:
+          type: integer
+        capacityPerSlot:
+          type: integer
+        leadTimeMins:
+          type: integer
+        requiresConfirmation:
+          type: boolean
+      required: [name, durationMins, basePriceMinor]
+
+    UpdateServiceInput:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        durationMins:
+          type: integer
+        basePriceMinor:
+          type: integer
+        platformFeeMinor:
+          type: integer
+        capacityPerSlot:
+          type: integer
+        leadTimeMins:
+          type: integer
+        isVisible:
+          type: boolean
+
+    Vehicle:
+      type: object
+      properties:
+        id:
+          type: string
+        ownerId:
+          type: string
+        fleetId:
+          type: ["string", "null"]
+        unitNumber:
+          type: string
+        vin:
+          type: ["string", "null"]
+        licensePlate:
+          type: ["string", "null"]
+        categoryCode:
+          type: string
+        subtypeCode:
+          type: ["string", "null"]
+        lengthFt:
+          type: ["number", "null"]
+        heightFt:
+          type: ["number", "null"]
+        isActive:
+          type: boolean
+      required: [id, ownerId, unitNumber, categoryCode, isActive]
+
+    CreateVehicleInput:
+      type: object
+      properties:
+        unitNumber:
+          type: string
+        vin:
+          type: string
+        licensePlate:
+          type: string
+        categoryCode:
+          type: string
+        subtypeCode:
+          type: string
+        lengthFt:
+          type: number
+        heightFt:
+          type: number
+        fleetId:
+          type: string
+      required: [unitNumber, categoryCode]
+
+    UpdateVehicleInput:
+      type: object
+      properties:
+        unitNumber:
+          type: string
+        licensePlate:
+          type: string
+        categoryCode:
+          type: string
+        subtypeCode:
+          type: string
+        lengthFt:
+          type: number
+        heightFt:
+          type: number
+        isActive:
+          type: boolean
+
+    AvailabilitySlot:
+      type: object
+      properties:
+        startTime:
+          type: string
+        endTime:
+          type: string
+        startUtc:
+          type: string
+        endUtc:
+          type: string
+        capacity:
+          type: integer
+        booked:
+          type: integer
+        held:
+          type: integer
+        remaining:
+          type: integer
+        available:
+          type: boolean
+      required: [startTime, endTime, startUtc, endUtc, capacity, booked, held, remaining, available]
+
+    CreateHoldInput:
+      type: object
+      properties:
+        locationId:
+          type: string
+        serviceId:
+          type: string
+        slotStartUtc:
+          type: string
+      required: [locationId, serviceId, slotStartUtc]
+
+    BookingHold:
+      type: object
+      properties:
+        id:
+          type: string
+        requestId:
+          type: string
+        slotStartUtc:
+          type: string
+        slotEndUtc:
+          type: string
+        expiresAtUtc:
+          type: string
+      required: [id, requestId, slotStartUtc, slotEndUtc, expiresAtUtc]
+
+    CreateBookingInput:
+      type: object
+      properties:
+        holdId:
+          type: string
+        vehicleId:
+          type: string
+        fleetPlaceholderClass:
+          type: string
+        idempotencyKey:
+          type: string
+      required: [holdId, idempotencyKey]
+
+    Booking:
+      type: object
+      properties:
+        id:
+          type: string
+        locationId:
+          type: string
+        serviceId:
+          type: string
+        customerId:
+          type: string
+        vehicleId:
+          type: ["string", "null"]
+        status:
+          type: string
+        serviceNameSnapshot:
+          type: string
+        totalPriceMinor:
+          type: integer
+        currencyCode:
+          type: string
+        scheduledStartAtUtc:
+          type: string
+        scheduledEndAtUtc:
+          type: string
+        createdAt:
+          type: string
+        location:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            timezone:
+              type: string
+            provider:
+              type: object
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
+              required: [id, name]
+          required: [id, name, timezone]
+        service:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+          required: [id, name]
+        customer:
+          type: object
+          properties:
+            id:
+              type: string
+            email:
+              type: string
+            firstName:
+              type: string
+            lastName:
+              type: string
+          required: [id, email, firstName, lastName]
+        vehicle:
+          type: ["object", "null"]
+          properties:
+            id:
+              type: string
+            unitNumber:
+              type: string
+            categoryCode:
+              type: string
+      required: [id, locationId, serviceId, customerId, status, serviceNameSnapshot, totalPriceMinor, currencyCode, scheduledStartAtUtc, scheduledEndAtUtc]
+
+    BookingDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        locationId:
+          type: string
+        serviceId:
+          type: string
+        customerId:
+          type: string
+        vehicleId:
+          type: ["string", "null"]
+        status:
+          type: string
+        serviceNameSnapshot:
+          type: string
+        serviceBasePriceMinor:
+          type: integer
+        platformFeeMinor:
+          type: integer
+        totalPriceMinor:
+          type: integer
+        currencyCode:
+          type: string
+        scheduledStartAtUtc:
+          type: string
+        scheduledEndAtUtc:
+          type: string
+        providerCheckedInAtUtc:
+          type: ["string", "null"]
+        serviceStartedAtUtc:
+          type: ["string", "null"]
+        serviceCompletedAtUtc:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        location:
+          $ref: "#/components/schemas/Location"
+        service:
+          $ref: "#/components/schemas/Service"
+        customer:
+          $ref: "#/components/schemas/AuthUser"
+        vehicle:
+          type: ["object", "null"]
+        statusHistory:
+          type: array
+          items:
+            $ref: "#/components/schemas/StatusHistoryEntry"
+      required: [id, locationId, serviceId, customerId, status, serviceNameSnapshot, totalPriceMinor, currencyCode, scheduledStartAtUtc, scheduledEndAtUtc]
+
+    StatusHistoryEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        fromStatus:
+          type: ["string", "null"]
+        toStatus:
+          type: string
+        changedBy:
+          type: string
+        reason:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required: [id, toStatus, changedBy, createdAt]
+
+    BookingListResponse:
+      type: object
+      properties:
+        bookings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Booking"
+        pagination:
+          type: object
+          properties:
+            page:
+              type: integer
+            limit:
+              type: integer
+            total:
+              type: integer
+            totalPages:
+              type: integer
+          required: [page, limit, total, totalPages]
+      required: [bookings, pagination]
+
+    CreateReviewInput:
+      type: object
+      properties:
+        bookingId:
+          type: string
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+      required: [bookingId, rating]
+
+    Review:
+      type: object
+      properties:
+        id:
+          type: string
+        bookingId:
+          type: string
+        authorId:
+          type: string
+        subjectId:
+          type: string
+        locationId:
+          type: ["string", "null"]
+        rating:
+          type: integer
+        comment:
+          type: ["string", "null"]
+        isEdited:
+          type: boolean
+        editedAt:
+          type: ["string", "null"]
+        isHidden:
+          type: boolean
+        hiddenReason:
+          type: ["string", "null"]
+        providerReply:
+          type: ["string", "null"]
+        providerReplyAt:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        author:
+          type: object
+          properties:
+            id:
+              type: string
+            firstName:
+              type: string
+            lastName:
+              type: string
+      required: [id, bookingId, authorId, rating, createdAt]
+
+    ReviewAggregate:
+      type: object
+      properties:
+        averageRating:
+          type: ["number", "null"]
+        totalReviews:
+          type: integer
+        distribution:
+          type: object
+          additionalProperties:
+            type: integer
+        responseRate:
+          type: integer
+      required: [totalReviews, distribution, responseRate]
+
+    LocationReviewItem:
+      type: object
+      properties:
+        id:
+          type: string
+        bookingId:
+          type: string
+        authorId:
+          type: string
+        authorName:
+          type: string
+        rating:
+          type: integer
+        comment:
+          type: ["string", "null"]
+        isEdited:
+          type: boolean
+        providerReply:
+          type: ["string", "null"]
+        providerReplyAt:
+          type: ["string", "null"]
+        helpfulCount:
+          type: integer
+        unhelpfulCount:
+          type: integer
+        createdAt:
+          type: string
+      required: [id, bookingId, authorId, authorName, rating, createdAt]
+
+    LocationReviewsResponse:
+      type: object
+      properties:
+        reviews:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocationReviewItem"
+        total:
+          type: integer
+        hasMore:
+          type: boolean
+        nextCursor:
+          type: ["string", "null"]
+        aggregate:
+          $ref: "#/components/schemas/ReviewAggregate"
+      required: [reviews, total, hasMore, aggregate]
+
+    ProviderReviewItem:
+      type: object
+      properties:
+        id:
+          type: string
+        bookingId:
+          type: string
+        authorName:
+          type: string
+        locationId:
+          type: ["string", "null"]
+        locationName:
+          type: ["string", "null"]
+        serviceName:
+          type: string
+        scheduledAt:
+          type: string
+        rating:
+          type: integer
+        comment:
+          type: ["string", "null"]
+        isEdited:
+          type: boolean
+        providerReply:
+          type: ["string", "null"]
+        providerReplyAt:
+          type: ["string", "null"]
+        helpfulCount:
+          type: integer
+        createdAt:
+          type: string
+      required: [id, bookingId, authorName, rating, createdAt]
+
+    ProviderReviewsResponse:
+      type: object
+      properties:
+        reviews:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProviderReviewItem"
+        needsReply:
+          type: integer
+        total:
+          type: integer
+      required: [reviews, needsReply, total]
+
+    AdminReview:
+      type: object
+      properties:
+        id:
+          type: string
+        bookingId:
+          type: string
+        authorName:
+          type: string
+        locationId:
+          type: ["string", "null"]
+        locationName:
+          type: ["string", "null"]
+        rating:
+          type: integer
+        comment:
+          type: ["string", "null"]
+        isHidden:
+          type: boolean
+        hiddenReason:
+          type: ["string", "null"]
+        providerReply:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required: [id, bookingId, authorName, rating, isHidden, createdAt]
+
+    NotificationItem:
+      type: object
+      properties:
+        id:
+          type: string
+        subject:
+          type: ["string", "null"]
+        body:
+          type: string
+        actionUrl:
+          type: ["string", "null"]
+        metadata:
+          type: object
+        readAt:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required: [id, body, createdAt]
+
+    NotificationListResponse:
+      type: object
+      properties:
+        notifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationItem"
+        hasMore:
+          type: boolean
+        nextCursor:
+          type: ["string", "null"]
+      required: [notifications, hasMore]
+
