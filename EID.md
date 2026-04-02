@@ -1,8 +1,8 @@
 WASHBUDDY — ENGINEERING IMPLEMENTATION DOCUMENT (EID)
-Version: 1.0 Date: April 2, 2026 Status: Ready for Engineering Companion Document: docs/PRD.md (must be read in full before beginning any work) Repository: github.com/iCreatorrr/washbuddy
+Version: 1.0 Date: April 2, 2026 Status: Ready for Engineering Companion Document: PRD.md (must be read in full before beginning any work) Repository: github.com/iCreatorrr/washbuddy
 
 PREAMBLE — INSTRUCTIONS FOR AI AGENTS
-Before implementing any task in this document, read docs/PRD.md in full. The PRD is the authoritative source for all business rules, pricing logic, role permissions, feature requirements, and acceptance criteria. This EID tells you HOW and WHERE to implement. The PRD tells you WHAT and WHY.
+Before implementing any task in this document, read PRD.md in full. The PRD is the authoritative source for all business rules, pricing logic, role permissions, feature requirements, and acceptance criteria. This EID tells you HOW and WHERE to implement. The PRD tells you WHAT and WHY.
 This codebase is a TypeScript monorepo managed with pnpm workspaces. The structure is:
 washbuddy/
 ├── artifacts/
