@@ -1056,7 +1056,7 @@ export default function RoutePlanner() {
                               key={svc.id}
                               className="text-xs bg-slate-50 text-slate-600 px-2 py-0.5 rounded-md"
                             >
-                              {svc.name} · {formatCurrency(svc.basePriceMinor)}
+                              {svc.name} · {formatCurrency((svc as any).allInPriceMinor ?? svc.basePriceMinor)}
                             </span>
                           ))}
                           {loc.services.length > 2 && (

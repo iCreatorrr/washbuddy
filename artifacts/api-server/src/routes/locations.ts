@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { prisma } from "@workspace/db";
 import { requireAuth, requireProviderAccess } from "../middlewares/requireAuth";
 import { isPlatformAdmin, type SessionUser } from "../lib/auth";
+import { calculateAllInPrice } from "../lib/feeCalculator";
 
 const router: IRouter = Router();
 
@@ -151,6 +152,10 @@ router.get("/locations/search", async (req, res) => {
     const mapped = locations.map((loc) => ({
       ...loc,
       stateCode: loc.regionCode,
+      services: loc.services.map((s) => ({
+        ...s,
+        allInPriceMinor: calculateAllInPrice(s.basePriceMinor),
+      })),
     }));
 
     res.json({ locations: mapped });

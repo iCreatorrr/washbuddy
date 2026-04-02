@@ -3,6 +3,7 @@ import { prisma } from "@workspace/db";
 import { requireAuth, requireProviderAccess, requirePlatformAdmin } from "../middlewares/requireAuth";
 import { isPlatformAdmin, isProviderRole, isFleetRole, type SessionUser } from "../lib/auth";
 import { canTransition, isCancellable, isActiveBooking } from "../lib/bookingStateMachine";
+import { calculatePlatformFee } from "../lib/feeCalculator";
 import crypto from "crypto";
 
 const router: IRouter = Router();
@@ -150,7 +151,8 @@ router.post("/bookings", requireAuth, async (req, res) => {
         throw new Error("SERVICE_NOT_FOUND");
       }
 
-      const totalPrice = service.basePriceMinor + service.platformFeeMinor;
+      const calculatedFee = calculatePlatformFee(service.basePriceMinor);
+      const totalPrice = service.basePriceMinor + calculatedFee;
 
       const responseSla = hold.slotStartAtUtc.getTime() - now.getTime() < 3600000
         ? service.location.responseSlaUnder1hMins
@@ -169,7 +171,7 @@ router.post("/bookings", requireAuth, async (req, res) => {
           idempotencyKey,
           serviceNameSnapshot: service.name,
           serviceBasePriceMinor: service.basePriceMinor,
-          platformFeeMinor: service.platformFeeMinor,
+          platformFeeMinor: calculatedFee,
           totalPriceMinor: totalPrice,
           currencyCode: service.currencyCode,
           locationTimezone: service.location.timezone,

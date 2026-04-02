@@ -142,7 +142,7 @@ export default function LocationDetail() {
     }
   };
 
-  const totalPrice = selectedSvc ? selectedSvc.basePriceMinor + ((selectedSvc as any).platformFeeMinor || 0) : 0;
+  const totalPrice = selectedSvc ? ((selectedSvc as any).allInPriceMinor ?? selectedSvc.basePriceMinor) : 0;
 
   const stepComplete = (step: number) => {
     if (step === 1) return !!selectedService;
@@ -211,7 +211,7 @@ export default function LocationDetail() {
                       >
                         <div className="flex justify-between items-start mb-2">
                           <h3 className="font-bold text-lg text-slate-900">{svc.name}</h3>
-                          <span className="font-display font-bold text-xl text-primary">{formatCurrency(svc.basePriceMinor)}</span>
+                          <span className="font-display font-bold text-xl text-primary">{formatCurrency((svc as any).allInPriceMinor ?? svc.basePriceMinor)}</span>
                         </div>
                         <div className="flex gap-4 text-xs font-semibold text-slate-400">
                           <span className="flex items-center gap-1"><Clock className="h-4 w-4" /> {svc.durationMins} min</span>
@@ -224,7 +224,7 @@ export default function LocationDetail() {
             </AnimatePresence>
             {bookingStep > 1 && selectedSvc && (
               <div className="px-6 py-4 bg-slate-50 text-sm text-slate-600 flex items-center justify-between">
-                <span><span className="font-semibold text-slate-900">{selectedSvc.name}</span> — {formatCurrency(selectedSvc.basePriceMinor)} · {selectedSvc.durationMins} min</span>
+                <span><span className="font-semibold text-slate-900">{selectedSvc.name}</span> — {formatCurrency((selectedSvc as any).allInPriceMinor ?? selectedSvc.basePriceMinor)} · {selectedSvc.durationMins} min</span>
               </div>
             )}
           </Card>

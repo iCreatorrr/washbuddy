@@ -112,7 +112,7 @@ type LocationWithMeta = {
   latitude?: number | null;
   longitude?: number | null;
   provider?: { id: string; name: string };
-  services?: Array<{ id: string; name: string; basePriceMinor: number; durationMins: number }>;
+  services?: Array<{ id: string; name: string; basePriceMinor: number; allInPriceMinor?: number; durationMins: number }>;
   operatingWindows?: Array<{ dayOfWeek: number; openTime: string; closeTime: string }>;
   distance?: number;
   isOpen: boolean;
@@ -262,7 +262,7 @@ export default function CustomerSearch() {
               {loc.services?.slice(0, 2).map((svc) => (
                 <div key={svc.id} className="flex justify-between items-center text-sm">
                   <span className="font-medium text-slate-700">{svc.name}</span>
-                  <span className="font-bold text-slate-900">{formatCurrency(svc.basePriceMinor)}</span>
+                  <span className="font-bold text-slate-900">{formatCurrency(svc.allInPriceMinor ?? svc.basePriceMinor)}</span>
                 </div>
               ))}
               {(loc.services?.length || 0) > 2 && (
