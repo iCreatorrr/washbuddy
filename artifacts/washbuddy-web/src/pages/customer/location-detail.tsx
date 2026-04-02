@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useRoute, useLocation } from "wouter";
 import { useSearchLocations, useGetAvailability, useCreateBookingHold, useCreateBooking, useListVehicles } from "@workspace/api-client-react";
 import { Card, Button, Badge, ErrorState } from "@/components/ui";
-import { MapPin, Clock, Truck, ShieldCheck, CheckCircle2, ChevronLeft, ArrowRight, Navigation, Star } from "lucide-react";
+import { MapPin, Clock, Truck, ShieldCheck, CheckCircle2, ChevronLeft, ArrowRight, Navigation, Star, Zap, AlertTriangle, Timer } from "lucide-react";
 import { LocationReviews } from "@/components/location-reviews";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { format, addDays } from "date-fns";
@@ -55,6 +55,9 @@ export default function LocationDetail() {
   const [bookingStep, setBookingStep] = useState(1);
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [etaMins, setEtaMins] = useState<number | null>(null);
+  const [bookingResult, setBookingResult] = useState<{ id: string; status: string } | null>(null);
+  const [holdExpiresAt, setHoldExpiresAt] = useState<Date | null>(null);
+  const [holdTimeLeft, setHoldTimeLeft] = useState<number | null>(null);
 
   const { data: searchData, isLoading: isSearchLoading, isError: isSearchError, refetch: refetchSearch } = useSearchLocations({}, { request: { credentials: 'include' } });
   const locData = searchData?.locations.find(l => l.id === locationId);
@@ -105,6 +108,32 @@ export default function LocationDetail() {
     }
   }, [bookingStep, vehicles]);
 
+  // Hold countdown timer
+  useEffect(() => {
+    if (!holdExpiresAt) { setHoldTimeLeft(null); return; }
+    const tick = () => {
+      const remaining = Math.max(0, Math.floor((holdExpiresAt.getTime() - Date.now()) / 1000));
+      setHoldTimeLeft(remaining);
+      if (remaining <= 0) { setHoldExpiresAt(null); }
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [holdExpiresAt]);
+
+  // Vehicle compatibility helper
+  const isVehicleCompatible = (vehicle: any, service: any): boolean => {
+    const rules = (service as any).compatibilityRules;
+    if (!rules || rules.length === 0) return true; // No rules = all compatible
+    return rules.some((rule: any) => {
+      if (rule.categoryCode !== vehicle.categoryCode) return false;
+      if (rule.subtypeCode && rule.subtypeCode !== vehicle.subtypeCode) return false;
+      if (rule.maxLengthInches && vehicle.lengthInches > rule.maxLengthInches) return false;
+      if (rule.maxHeightInches && vehicle.heightInches > rule.maxHeightInches) return false;
+      return true;
+    });
+  };
+
   const advanceFromSlot = () => {
     if (vehicles.length === 1) {
       setSelectedVehicle(vehicles[0].id);
@@ -121,24 +150,46 @@ export default function LocationDetail() {
   if (isSearchLoading) return <div className="p-12 text-center text-slate-500"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto" /></div>;
   if (!locData) return <div className="max-w-5xl mx-auto py-8"><ErrorState message="Location not found. It may have been removed." /></div>;
 
-  const handleBook = async () => {
+  const [holdId, setHoldId] = useState<string | null>(null);
+
+  const handleCreateHold = async () => {
     if (!selectedService || !selectedSlot) return;
     setBookingError(null);
     try {
       const holdRes = await holdMutation.mutateAsync({
         data: { locationId, serviceId: selectedService, slotStartUtc: selectedSlot }
       });
+      setHoldId(holdRes.hold.id);
+      setHoldExpiresAt(new Date(holdRes.hold.expiresAtUtc));
+      advanceFromSlot();
+    } catch (err: any) {
+      setBookingError(err?.message || "This slot is no longer available. Please select another time.");
+    }
+  };
+
+  const handleConfirmBooking = async () => {
+    if (!holdId) return;
+    setBookingError(null);
+    try {
       const idempotencyKey = crypto.randomUUID();
       const bookRes = await bookMutation.mutateAsync({
         data: {
-          holdId: holdRes.hold.id,
+          holdId,
           vehicleId: selectedVehicle || undefined,
           idempotencyKey
         }
       });
-      setNav(`/bookings/${bookRes.booking.id}`);
+      setBookingResult({ id: bookRes.booking.id, status: bookRes.booking.status });
+      setHoldExpiresAt(null);
     } catch (err: any) {
-      setBookingError(err?.message || "Failed to book slot. It might have been taken. Please try again.");
+      if (err?.message?.includes("hold") || err?.status === 410) {
+        setBookingError("Your hold has expired. Please select a new time slot.");
+        setHoldId(null);
+        setHoldExpiresAt(null);
+        setBookingStep(2);
+      } else {
+        setBookingError(err?.message || "Failed to complete booking. Please try again.");
+      }
     }
   };
 
@@ -210,21 +261,47 @@ export default function LocationDetail() {
                   <div className="p-6 space-y-3">
                     {services.length === 0 ? (
                       <div className="text-center py-8 text-slate-400">No services available at this location.</div>
-                    ) : services.map(svc => (
-                      <div
-                        key={svc.id}
-                        onClick={() => { setSelectedService(svc.id); setBookingStep(2); setSelectedSlot(null); }}
-                        className={`p-5 rounded-2xl border-2 cursor-pointer transition-all hover:shadow-md ${selectedService === svc.id ? 'border-primary bg-blue-50/50 shadow-sm' : 'border-slate-200 hover:border-primary/40'}`}
-                      >
-                        <div className="flex justify-between items-start mb-2">
-                          <h3 className="font-bold text-lg text-slate-900">{svc.name}</h3>
-                          <span className="font-display font-bold text-xl text-primary">{formatCurrency((svc as any).allInPriceMinor ?? svc.basePriceMinor)}</span>
+                    ) : services.map(svc => {
+                      const selectedVeh = selectedVehicle ? vehicles.find(v => v.id === selectedVehicle) : (vehicles.length === 1 ? vehicles[0] : null);
+                      const compatible = !selectedVeh || isVehicleCompatible(selectedVeh, svc);
+                      return (
+                        <div
+                          key={svc.id}
+                          onClick={() => { if (!compatible) return; setSelectedService(svc.id); setBookingStep(2); setSelectedSlot(null); setHoldId(null); setHoldExpiresAt(null); setBookingResult(null); }}
+                          className={`p-5 rounded-2xl border-2 transition-all ${
+                            !compatible
+                              ? 'opacity-60 cursor-not-allowed border-slate-200 bg-slate-50'
+                              : selectedService === svc.id
+                                ? 'cursor-pointer border-primary bg-blue-50/50 shadow-sm'
+                                : 'cursor-pointer border-slate-200 hover:border-primary/40 hover:shadow-md'
+                          }`}
+                        >
+                          <div className="flex justify-between items-start mb-1">
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-bold text-lg text-slate-900">{svc.name}</h3>
+                              {(svc as any).requiresConfirmation === false ? (
+                                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-xs"><Zap className="h-3 w-3 mr-0.5" />Instant Book</Badge>
+                              ) : (
+                                <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-xs">Request</Badge>
+                              )}
+                            </div>
+                            <span className="font-display font-bold text-xl text-primary">{formatCurrency((svc as any).allInPriceMinor ?? svc.basePriceMinor)}</span>
+                          </div>
+                          {(svc as any).description && (
+                            <p className="text-sm text-slate-500 mb-2">{(svc as any).description}</p>
+                          )}
+                          <div className="flex gap-4 text-xs font-semibold text-slate-400">
+                            <span className="flex items-center gap-1"><Clock className="h-4 w-4" /> {svc.durationMins} min</span>
+                          </div>
+                          {!compatible && selectedVeh && (
+                            <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 px-3 py-1.5 rounded-lg">
+                              <AlertTriangle className="h-3.5 w-3.5" />
+                              Your vehicle ({selectedVeh.unitNumber}) exceeds this service's size limit
+                            </div>
+                          )}
                         </div>
-                        <div className="flex gap-4 text-xs font-semibold text-slate-400">
-                          <span className="flex items-center gap-1"><Clock className="h-4 w-4" /> {svc.durationMins} min</span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </motion.div>
               )}
@@ -304,11 +381,12 @@ export default function LocationDetail() {
 
                     <div className="mt-8 flex justify-end">
                       <Button
-                        disabled={!selectedSlot}
-                        onClick={advanceFromSlot}
+                        disabled={!selectedSlot || holdMutation.isPending}
+                        isLoading={holdMutation.isPending}
+                        onClick={handleCreateHold}
                         className="gap-2"
                       >
-                        Continue <ArrowRight className="h-4 w-4" />
+                        Hold Slot & Continue <ArrowRight className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
@@ -321,6 +399,22 @@ export default function LocationDetail() {
               </div>
             )}
           </Card>
+
+          {/* Hold countdown banner */}
+          {holdTimeLeft != null && holdTimeLeft > 0 && bookingStep >= 3 && (
+            <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm">
+              <Timer className="h-4 w-4 text-amber-600" />
+              <span className="text-amber-800 font-medium">
+                Slot held for <span className="font-bold">{Math.floor(holdTimeLeft / 60)}:{String(holdTimeLeft % 60).padStart(2, "0")}</span> — complete your booking before the hold expires.
+              </span>
+            </div>
+          )}
+          {holdTimeLeft === 0 && bookingStep >= 3 && !bookingResult && (
+            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-sm">
+              <AlertTriangle className="h-4 w-4 text-red-600" />
+              <span className="text-red-800 font-medium">Your hold has expired. <button onClick={() => { setBookingStep(2); setHoldId(null); setSelectedSlot(null); }} className="underline font-bold">Select a new time slot</button></span>
+            </div>
+          )}
 
           {/* Step 3: Vehicle Selection (only if multiple vehicles) */}
           {vehicles.length > 1 && (
@@ -341,21 +435,33 @@ export default function LocationDetail() {
                   <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
                     <div className="p-6">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
-                        {vehicles.map(v => (
-                          <div
-                            key={v.id}
-                            onClick={() => setSelectedVehicle(v.id)}
-                            className={`p-4 rounded-xl border-2 cursor-pointer flex items-center gap-4 transition-all hover:shadow-sm ${selectedVehicle === v.id ? 'border-primary bg-blue-50 shadow-sm' : 'border-slate-200 hover:border-primary/40'}`}
-                          >
-                            <div className={`p-3 rounded-xl ${selectedVehicle === v.id ? 'bg-primary text-white' : 'bg-slate-100 text-slate-400'}`}>
-                              <Truck className="h-5 w-5" />
+                        {vehicles.map(v => {
+                          const compat = selectedSvc ? isVehicleCompatible(v, selectedSvc) : true;
+                          return (
+                            <div
+                              key={v.id}
+                              onClick={() => { if (compat) setSelectedVehicle(v.id); }}
+                              className={`p-4 rounded-xl border-2 flex items-center gap-4 transition-all ${
+                                !compat
+                                  ? 'opacity-50 cursor-not-allowed border-slate-200 bg-slate-50'
+                                  : selectedVehicle === v.id
+                                    ? 'cursor-pointer border-primary bg-blue-50 shadow-sm'
+                                    : 'cursor-pointer border-slate-200 hover:border-primary/40 hover:shadow-sm'
+                              }`}
+                            >
+                              <div className={`p-3 rounded-xl ${selectedVehicle === v.id ? 'bg-primary text-white' : 'bg-slate-100 text-slate-400'}`}>
+                                <Truck className="h-5 w-5" />
+                              </div>
+                              <div className="flex-1">
+                                <div className="font-bold text-slate-900">{v.unitNumber}</div>
+                                <div className="text-xs text-slate-500 capitalize">{(v as any).subtypeCode?.replace(/_/g, ' ').toLowerCase() || v.categoryCode?.replace(/_/g, ' ').toLowerCase()}</div>
+                              </div>
+                              {!compat && (
+                                <span className="text-xs text-amber-600 font-medium">Too large</span>
+                              )}
                             </div>
-                            <div>
-                              <div className="font-bold text-slate-900">{v.unitNumber}</div>
-                              <div className="text-xs text-slate-500 capitalize">{v.categoryCode?.replace(/_/g, ' ').toLowerCase()}</div>
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                       <div className="flex items-center justify-between">
                         <button onClick={() => { setSelectedVehicle(null); setBookingStep(4); }} className="text-sm text-slate-500 hover:text-slate-700 font-medium">
@@ -377,26 +483,64 @@ export default function LocationDetail() {
             </Card>
           )}
 
-          {/* Step 4 (or 3 if single vehicle): Book Now */}
-          <Card className={`transition-all duration-300 ${(vehicles.length > 1 ? bookingStep < 4 : bookingStep < 3) ? "opacity-50 pointer-events-none" : ""}`}>
-            <div className="p-6">
-              {bookingError && (
-                <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm font-medium">
-                  {bookingError}
-                </div>
-              )}
-              <Button
-                size="lg"
-                className="w-full h-14 text-lg gap-2"
-                onClick={handleBook}
-                disabled={!selectedService || !selectedSlot || holdMutation.isPending || bookMutation.isPending}
-                isLoading={holdMutation.isPending || bookMutation.isPending}
-              >
-                <CheckCircle2 className="h-5 w-5" /> Book Now
-              </Button>
-              <p className="text-center text-xs text-slate-400 mt-3">You will receive a confirmation after the provider reviews your booking.</p>
+          {/* No vehicles message */}
+          {vehicles.length === 0 && bookingStep >= 3 && !bookingResult && (
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-600">
+              <span className="font-semibold">No vehicles assigned to your account.</span> Contact your fleet manager to assign a vehicle, or proceed without one.
             </div>
-          </Card>
+          )}
+
+          {/* Step 4 (or 3 if single vehicle): Confirm Booking */}
+          {!bookingResult ? (
+            <Card className={`transition-all duration-300 ${(vehicles.length > 1 ? bookingStep < 4 : bookingStep < 3) ? "opacity-50 pointer-events-none" : ""}`}>
+              <div className="p-6">
+                {bookingError && (
+                  <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm font-medium">
+                    {bookingError}
+                  </div>
+                )}
+                <Button
+                  size="lg"
+                  className="w-full h-14 text-lg gap-2"
+                  onClick={handleConfirmBooking}
+                  disabled={!holdId || holdTimeLeft === 0 || bookMutation.isPending}
+                  isLoading={bookMutation.isPending}
+                >
+                  <CheckCircle2 className="h-5 w-5" /> Confirm Booking
+                </Button>
+                <p className="text-center text-xs text-slate-400 mt-3">
+                  {selectedSvc && (selectedSvc as any).requiresConfirmation === false
+                    ? "This is an instant booking — it will be confirmed immediately."
+                    : "The provider will review and confirm your booking request."}
+                </p>
+              </div>
+            </Card>
+          ) : (
+            /* Booking Confirmation Screen */
+            <Card className="border-2 border-green-200 bg-green-50/30">
+              <div className="p-8 text-center">
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <CheckCircle2 className="h-8 w-8 text-green-600" />
+                </div>
+                <h2 className="text-2xl font-display font-bold text-slate-900 mb-2">
+                  {bookingResult.status === "PROVIDER_CONFIRMED" ? "Booking Confirmed!" : "Request Submitted!"}
+                </h2>
+                <p className="text-slate-600 mb-6">
+                  {bookingResult.status === "PROVIDER_CONFIRMED"
+                    ? "Your wash has been confirmed. Show up at the scheduled time and you're all set."
+                    : "Your booking request has been sent to the provider. You'll be notified when they respond."}
+                </p>
+                <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                  <Button onClick={() => setNav(`/bookings/${bookingResult.id}`)} className="gap-2">
+                    View Booking Details <ArrowRight className="h-4 w-4" />
+                  </Button>
+                  <Button variant="outline" onClick={() => setNav("/my-bookings")}>
+                    My Bookings
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          )}
         </div>
 
         {/* Right Col - Booking Summary */}

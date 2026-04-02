@@ -140,6 +140,14 @@ router.get("/locations/search", async (req, res) => {
             capacityPerSlot: true,
             leadTimeMins: true,
             requiresConfirmation: true,
+            compatibilityRules: {
+              select: {
+                categoryCode: true,
+                subtypeCode: true,
+                maxLengthInches: true,
+                maxHeightInches: true,
+              },
+            },
           },
         },
         operatingWindows: {
