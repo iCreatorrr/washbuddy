@@ -79,6 +79,7 @@ export * from "./provider";
 export * from "./providerReviewItem";
 export * from "./providerReviewsResponse";
 export * from "./registerInput";
+export * from "./registerInputAccountType";
 export * from "./replyToReviewBody";
 export * from "./review";
 export * from "./reviewAggregate";

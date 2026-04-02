@@ -5,6 +5,7 @@
  * WashBuddy API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { RegisterInputAccountType } from "./registerInputAccountType";
 
 export interface RegisterInput {
   email: string;
@@ -12,4 +13,6 @@ export interface RegisterInput {
   firstName: string;
   lastName: string;
   phone?: string;
+  accountType: RegisterInputAccountType;
+  businessName?: string;
 }

@@ -1114,7 +1114,12 @@ components:
           type: string
         phone:
           type: string
-      required: [email, password, firstName, lastName]
+        accountType:
+          type: string
+          enum: [driver, fleet_admin, provider_admin]
+        businessName:
+          type: string
+      required: [email, password, firstName, lastName, accountType]
 
     LoginInput:
       type: object

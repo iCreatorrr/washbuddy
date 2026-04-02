@@ -9,12 +9,23 @@ export interface HealthStatus {
   status: string;
 }
 
+export type RegisterInputAccountType =
+  (typeof RegisterInputAccountType)[keyof typeof RegisterInputAccountType];
+
+export const RegisterInputAccountType = {
+  driver: "driver",
+  fleet_admin: "fleet_admin",
+  provider_admin: "provider_admin",
+} as const;
+
 export interface RegisterInput {
   email: string;
   password: string;
   firstName: string;
   lastName: string;
   phone?: string;
+  accountType: RegisterInputAccountType;
+  businessName?: string;
 }
 
 export interface LoginInput {

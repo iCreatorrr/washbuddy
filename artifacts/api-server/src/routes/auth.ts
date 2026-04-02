@@ -7,7 +7,7 @@ const router: IRouter = Router();
 
 router.post("/auth/register", async (req, res) => {
   try {
-    const { email, password, firstName, lastName, phone } = req.body;
+    const { email, password, firstName, lastName, phone, accountType, businessName } = req.body;
 
     if (!email || !password || !firstName || !lastName) {
       res.status(400).json({
@@ -25,6 +25,23 @@ router.post("/auth/register", async (req, res) => {
       return;
     }
 
+    const validAccountTypes = ["driver", "fleet_admin", "provider_admin"];
+    if (accountType && !validAccountTypes.includes(accountType)) {
+      res.status(400).json({
+        errorCode: "VALIDATION_ERROR",
+        message: "accountType must be one of: driver, fleet_admin, provider_admin",
+      });
+      return;
+    }
+
+    if ((accountType === "fleet_admin" || accountType === "provider_admin") && !businessName?.trim()) {
+      res.status(400).json({
+        errorCode: "VALIDATION_ERROR",
+        message: "businessName is required for fleet_admin and provider_admin accounts",
+      });
+      return;
+    }
+
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
       res.status(409).json({
@@ -36,16 +53,56 @@ router.post("/auth/register", async (req, res) => {
 
     const passwordHash = await hashPassword(password);
 
-    const user = await prisma.user.create({
-      data: {
-        email,
-        passwordHash,
-        firstName,
-        lastName,
-        phoneE164: phone || null,
-        isActive: true,
-        emailVerifiedAt: new Date(),
-      },
+    // Create user and role-specific records in a transaction
+    const user = await prisma.$transaction(async (tx) => {
+      const newUser = await tx.user.create({
+        data: {
+          email,
+          passwordHash,
+          firstName,
+          lastName,
+          phoneE164: phone || null,
+          isActive: true,
+          emailVerifiedAt: new Date(),
+        },
+      });
+
+      if (accountType === "fleet_admin") {
+        const fleet = await tx.fleet.create({
+          data: {
+            name: businessName.trim(),
+            billingMode: "FLEET_PAYS",
+            currencyCode: "USD",
+            defaultTimezone: "America/New_York",
+          },
+        });
+        await tx.fleetMembership.create({
+          data: {
+            fleetId: fleet.id,
+            userId: newUser.id,
+            role: "FLEET_ADMIN",
+            isActive: true,
+          },
+        });
+      } else if (accountType === "provider_admin") {
+        const provider = await tx.provider.create({
+          data: {
+            name: businessName.trim(),
+            isActive: true,
+          },
+        });
+        await tx.providerMembership.create({
+          data: {
+            providerId: provider.id,
+            userId: newUser.id,
+            role: "PROVIDER_ADMIN",
+            isActive: true,
+          },
+        });
+      }
+      // "driver" accountType (or no accountType): user only, no membership needed
+
+      return newUser;
     });
 
     req.session.userId = user.id;
