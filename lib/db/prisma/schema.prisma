@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 // ─── ENUMS ──────────────────────────────────────────────────────────────────
@@ -134,24 +134,25 @@ model User {
   smsVerifiedAt   DateTime? @map("sms_verified_at") @db.Timestamptz
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  accountType     String?   @map("account_type") // "customer" | "provider" | "fleet_admin"
   deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
 
-  fleetMemberships    FleetMembership[]
-  providerMemberships ProviderMembership[]
-  platformRoles       UserPlatformRole[]
-  vehiclesOwned       Vehicle[]          @relation("vehicle_owner")
-  bookingsAsCustomer  Booking[]          @relation("booking_customer")
-  reviewsAuthored     Review[]           @relation("review_author")
-  reviewsReceived     Review[]           @relation("review_subject")
-  reviewVotes         ReviewVote[]
-  disputesOpened      Dispute[]          @relation("dispute_opened_by")
-  notifications       Notification[]
-  uploadedFiles       FileAsset[]
-  auditEvents         AuditEvent[]       @relation("audit_actor")
-  driverAssignments   FleetDriverAssignment[] @relation("driver_assignments")
-  washRequestsAsDriver WashRequest[]     @relation("wash_request_driver")
-  washRequestRevisions WashRequestRevision[] @relation("wash_request_revision_actor")
-  washRequestMessages WashRequestMessage[] @relation("wash_request_message_author")
+  fleetMemberships     FleetMembership[]
+  providerMemberships  ProviderMembership[]
+  platformRoles        UserPlatformRole[]
+  vehiclesOwned        Vehicle[]               @relation("vehicle_owner")
+  bookingsAsCustomer   Booking[]               @relation("booking_customer")
+  reviewsAuthored      Review[]                @relation("review_author")
+  reviewsReceived      Review[]                @relation("review_subject")
+  reviewVotes          ReviewVote[]
+  disputesOpened       Dispute[]               @relation("dispute_opened_by")
+  notifications        Notification[]
+  uploadedFiles        FileAsset[]
+  auditEvents          AuditEvent[]            @relation("audit_actor")
+  driverAssignments    FleetDriverAssignment[] @relation("driver_assignments")
+  washRequestsAsDriver WashRequest[]           @relation("wash_request_driver")
+  washRequestRevisions WashRequestRevision[]   @relation("wash_request_revision_actor")
+  washRequestMessages  WashRequestMessage[]    @relation("wash_request_message_author")
 
   @@index([isActive])
   @@map("users")
@@ -164,7 +165,7 @@ model Fleet {
   name                     String
   status                   FleetStatus @default(ACTIVE)
   billingMode              BillingMode @map("billing_mode")
-  currencyCode             String      @db.Char(3) @map("currency_code")
+  currencyCode             String      @map("currency_code") @db.Char(3)
   defaultTimezone          String      @default("America/New_York") @map("default_timezone")
   requireVehicleAssignMins Int         @default(30) @map("require_vehicle_assign_mins")
   requestPolicyJson        Json        @default("{}") @map("request_policy_json")
@@ -217,22 +218,22 @@ model UserPlatformRole {
 // ─── FLEET DEPOTS ──────────────────────────────────────────────────────────
 
 model FleetDepot {
-  id                              String   @id @default(uuid()) @db.Uuid
-  fleetId                         String   @map("fleet_id") @db.Uuid
-  name                            String
-  timezone                        String
-  addressLine1                    String?  @map("address_line_1")
-  city                            String?
-  regionCode                      String?  @map("region_code")
-  postalCode                      String?  @map("postal_code")
-  countryCode                     String?  @db.Char(2) @map("country_code")
-  defaultProviderPreferencesJson  Json     @default("{}") @map("default_provider_preferences_json")
-  isActive                        Boolean  @default(true) @map("is_active")
-  createdAt                       DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt                       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                             String   @id @default(uuid()) @db.Uuid
+  fleetId                        String   @map("fleet_id") @db.Uuid
+  name                           String
+  timezone                       String
+  addressLine1                   String?  @map("address_line_1")
+  city                           String?
+  regionCode                     String?  @map("region_code")
+  postalCode                     String?  @map("postal_code")
+  countryCode                    String?  @map("country_code") @db.Char(2)
+  defaultProviderPreferencesJson Json     @default("{}") @map("default_provider_preferences_json")
+  isActive                       Boolean  @default(true) @map("is_active")
+  createdAt                      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                      DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  fleet    Fleet     @relation(fields: [fleetId], references: [id])
-  vehicles Vehicle[] @relation("vehicle_depot")
+  fleet             Fleet                   @relation(fields: [fleetId], references: [id])
+  vehicles          Vehicle[]               @relation("vehicle_depot")
   recurringPrograms FleetRecurringProgram[]
 
   @@index([fleetId])
@@ -250,9 +251,9 @@ model FleetVehicleGroup {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  fleet   Fleet                        @relation(fields: [fleetId], references: [id])
-  members FleetVehicleGroupMembership[]
-  recurringPrograms FleetRecurringProgram[] @relation("recurring_program_vehicle_group")
+  fleet             Fleet                         @relation(fields: [fleetId], references: [id])
+  members           FleetVehicleGroupMembership[]
+  recurringPrograms FleetRecurringProgram[]       @relation("recurring_program_vehicle_group")
 
   @@unique([fleetId, name])
   @@map("fleet_vehicle_groups")
@@ -274,14 +275,14 @@ model FleetVehicleGroupMembership {
 // ─── FLEET DRIVER ASSIGNMENTS ──────────────────────────────────────────────
 
 model FleetDriverAssignment {
-  id          String    @id @default(uuid()) @db.Uuid
-  fleetId     String    @map("fleet_id") @db.Uuid
-  vehicleId   String    @map("vehicle_id") @db.Uuid
-  driverUserId String   @map("driver_user_id") @db.Uuid
-  startsAt    DateTime  @map("starts_at") @db.Timestamptz
-  endsAt      DateTime? @map("ends_at") @db.Timestamptz
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  id           String    @id @default(uuid()) @db.Uuid
+  fleetId      String    @map("fleet_id") @db.Uuid
+  vehicleId    String    @map("vehicle_id") @db.Uuid
+  driverUserId String    @map("driver_user_id") @db.Uuid
+  startsAt     DateTime  @map("starts_at") @db.Timestamptz
+  endsAt       DateTime? @map("ends_at") @db.Timestamptz
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
   fleet   Fleet   @relation(fields: [fleetId], references: [id])
   vehicle Vehicle @relation(fields: [vehicleId], references: [id])
@@ -296,41 +297,41 @@ model FleetDriverAssignment {
 // ─── WASH REQUESTS ─────────────────────────────────────────────────────────
 
 model WashRequest {
-  id                  String            @id @default(uuid()) @db.Uuid
-  fleetId             String            @map("fleet_id") @db.Uuid
-  vehicleId           String            @map("vehicle_id") @db.Uuid
-  driverUserId        String            @map("driver_user_id") @db.Uuid
-  requestType         WashRequestType   @map("request_type")
-  status              WashRequestStatus @default(REQUEST_CREATED)
-  desiredProviderId   String?           @map("desired_provider_id") @db.Uuid
-  desiredLocationId   String?           @map("desired_location_id") @db.Uuid
-  desiredStartAtUtc   DateTime?         @map("desired_start_at_utc") @db.Timestamptz
-  desiredServiceIdsJson Json?           @map("desired_service_ids_json")
-  timeWindowCode      String?           @map("time_window_code")
-  notes               String?
-  approvedProviderId  String?           @map("approved_provider_id") @db.Uuid
-  approvedLocationId  String?           @map("approved_location_id") @db.Uuid
-  approvedStartAtUtc  DateTime?         @map("approved_start_at_utc") @db.Timestamptz
-  approvedServiceIdsJson Json?          @map("approved_service_ids_json")
-  approvalNotes       String?           @map("approval_notes")
-  declineReasonCode   String?           @map("decline_reason_code")
-  declineNotes        String?           @map("decline_notes")
-  linkedBookingId     String?           @unique @map("linked_booking_id") @db.Uuid
-  expiresAtUtc        DateTime?         @map("expires_at_utc") @db.Timestamptz
-  idempotencyKey      String            @unique @map("idempotency_key")
-  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt           DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+  id                     String            @id @default(uuid()) @db.Uuid
+  fleetId                String            @map("fleet_id") @db.Uuid
+  vehicleId              String            @map("vehicle_id") @db.Uuid
+  driverUserId           String            @map("driver_user_id") @db.Uuid
+  requestType            WashRequestType   @map("request_type")
+  status                 WashRequestStatus @default(REQUEST_CREATED)
+  desiredProviderId      String?           @map("desired_provider_id") @db.Uuid
+  desiredLocationId      String?           @map("desired_location_id") @db.Uuid
+  desiredStartAtUtc      DateTime?         @map("desired_start_at_utc") @db.Timestamptz
+  desiredServiceIdsJson  Json?             @map("desired_service_ids_json")
+  timeWindowCode         String?           @map("time_window_code")
+  notes                  String?
+  approvedProviderId     String?           @map("approved_provider_id") @db.Uuid
+  approvedLocationId     String?           @map("approved_location_id") @db.Uuid
+  approvedStartAtUtc     DateTime?         @map("approved_start_at_utc") @db.Timestamptz
+  approvedServiceIdsJson Json?             @map("approved_service_ids_json")
+  approvalNotes          String?           @map("approval_notes")
+  declineReasonCode      String?           @map("decline_reason_code")
+  declineNotes           String?           @map("decline_notes")
+  linkedBookingId        String?           @unique @map("linked_booking_id") @db.Uuid
+  expiresAtUtc           DateTime?         @map("expires_at_utc") @db.Timestamptz
+  idempotencyKey         String            @unique @map("idempotency_key")
+  createdAt              DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime          @updatedAt @map("updated_at") @db.Timestamptz
 
-  fleet           Fleet     @relation(fields: [fleetId], references: [id])
-  vehicle         Vehicle   @relation(fields: [vehicleId], references: [id])
-  driver          User      @relation("wash_request_driver", fields: [driverUserId], references: [id])
-  desiredProvider Provider? @relation("wash_request_desired_provider", fields: [desiredProviderId], references: [id])
-  desiredLocation Location? @relation("wash_request_desired_location", fields: [desiredLocationId], references: [id])
-  approvedProvider Provider? @relation("wash_request_approved_provider", fields: [approvedProviderId], references: [id])
-  approvedLocation Location? @relation("wash_request_approved_location", fields: [approvedLocationId], references: [id])
-  linkedBooking   Booking?  @relation("wash_request_booking", fields: [linkedBookingId], references: [id])
-  revisions       WashRequestRevision[]
-  thread          WashRequestThread?
+  fleet            Fleet                 @relation(fields: [fleetId], references: [id])
+  vehicle          Vehicle               @relation(fields: [vehicleId], references: [id])
+  driver           User                  @relation("wash_request_driver", fields: [driverUserId], references: [id])
+  desiredProvider  Provider?             @relation("wash_request_desired_provider", fields: [desiredProviderId], references: [id])
+  desiredLocation  Location?             @relation("wash_request_desired_location", fields: [desiredLocationId], references: [id])
+  approvedProvider Provider?             @relation("wash_request_approved_provider", fields: [approvedProviderId], references: [id])
+  approvedLocation Location?             @relation("wash_request_approved_location", fields: [approvedLocationId], references: [id])
+  linkedBooking    Booking?              @relation("wash_request_booking", fields: [linkedBookingId], references: [id])
+  revisions        WashRequestRevision[]
+  thread           WashRequestThread?
 
   @@index([fleetId, status])
   @@index([driverUserId])
@@ -383,26 +384,26 @@ model WashRequestMessage {
 // ─── FLEET RECURRING PROGRAMS ──────────────────────────────────────────────
 
 model FleetRecurringProgram {
-  id                String              @id @default(uuid()) @db.Uuid
-  fleetId           String              @map("fleet_id") @db.Uuid
-  name              String
-  scopeType         String              @map("scope_type")
-  scopeDepotId      String?             @map("scope_depot_id") @db.Uuid
-  scopeVehicleGroupId String?           @map("scope_vehicle_group_id") @db.Uuid
-  cadenceType       RecurringCadenceType @map("cadence_type")
-  cadenceConfigJson Json                @map("cadence_config_json")
-  servicePolicyJson Json                @map("service_policy_json")
-  providerPolicyJson Json               @map("provider_policy_json")
-  horizonDays       Int                 @default(30) @map("horizon_days")
-  isActive          Boolean             @default(false) @map("is_active")
-  lastGeneratedAt   DateTime?           @map("last_generated_at") @db.Timestamptz
-  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+  id                  String               @id @default(uuid()) @db.Uuid
+  fleetId             String               @map("fleet_id") @db.Uuid
+  name                String
+  scopeType           String               @map("scope_type")
+  scopeDepotId        String?              @map("scope_depot_id") @db.Uuid
+  scopeVehicleGroupId String?              @map("scope_vehicle_group_id") @db.Uuid
+  cadenceType         RecurringCadenceType @map("cadence_type")
+  cadenceConfigJson   Json                 @map("cadence_config_json")
+  servicePolicyJson   Json                 @map("service_policy_json")
+  providerPolicyJson  Json                 @map("provider_policy_json")
+  horizonDays         Int                  @default(30) @map("horizon_days")
+  isActive            Boolean              @default(false) @map("is_active")
+  lastGeneratedAt     DateTime?            @map("last_generated_at") @db.Timestamptz
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz
 
-  fleet         Fleet              @relation(fields: [fleetId], references: [id])
-  scopeDepot    FleetDepot?        @relation(fields: [scopeDepotId], references: [id])
-  scopeVehicleGroup FleetVehicleGroup? @relation("recurring_program_vehicle_group", fields: [scopeVehicleGroupId], references: [id])
-  generatedTasks FleetGeneratedTask[]
+  fleet             Fleet                @relation(fields: [fleetId], references: [id])
+  scopeDepot        FleetDepot?          @relation(fields: [scopeDepotId], references: [id])
+  scopeVehicleGroup FleetVehicleGroup?   @relation("recurring_program_vehicle_group", fields: [scopeVehicleGroupId], references: [id])
+  generatedTasks    FleetGeneratedTask[]
 
   @@index([fleetId])
   @@map("fleet_recurring_programs")
@@ -448,21 +449,27 @@ model FleetPolicyOverride {
 // ─── PROVIDERS ──────────────────────────────────────────────────────────────
 
 model Provider {
-  id                    String   @id @default(uuid()) @db.Uuid
-  name                  String
-  externalPayoutAcctId  String?  @unique @map("stripe_connected_acct_id")
-  payoutReady           Boolean  @default(false) @map("payout_ready")
-  isActive              Boolean  @default(true) @map("is_active")
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                   String    @id @default(uuid()) @db.Uuid
+  name                 String
+  externalPayoutAcctId String?   @unique @map("stripe_connected_acct_id")
+  payoutReady          Boolean   @default(false) @map("payout_ready")
+  isActive             Boolean   @default(true) @map("is_active")
+  approvalStatus       String    @default("PENDING") @map("approval_status") // PENDING, APPROVED, REJECTED, SUSPENDED
+  approvedAt           DateTime? @map("approved_at") @db.Timestamptz
+  approvedBy           String?   @map("approved_by") @db.Uuid
+  rejectionReason      String?   @map("rejection_reason")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  memberships  ProviderMembership[]
-  locations    Location[]
-  payoutBatches ProviderPayoutBatch[]
-  washRequestsDesired  WashRequest[] @relation("wash_request_desired_provider")
-  washRequestsApproved WashRequest[] @relation("wash_request_approved_provider")
+  memberships          ProviderMembership[]
+  locations            Location[]
+  payoutBatches        ProviderPayoutBatch[]
+  responseMetrics      ProviderResponseMetric[]
+  washRequestsDesired  WashRequest[]            @relation("wash_request_desired_provider")
+  washRequestsApproved WashRequest[]            @relation("wash_request_approved_provider")
 
   @@index([isActive])
+  @@index([approvalStatus])
   @@map("providers")
 }
 
@@ -485,6 +492,28 @@ model ProviderMembership {
   @@map("provider_memberships")
 }
 
+// ─── PROVIDER RESPONSE METRICS ─────────────────────────────────────────────
+
+model ProviderResponseMetric {
+  id              String   @id @default(uuid()) @db.Uuid
+  providerId      String   @map("provider_id") @db.Uuid
+  locationId      String   @map("location_id") @db.Uuid
+  periodStart     DateTime @map("period_start") @db.Timestamptz
+  periodEnd       DateTime @map("period_end") @db.Timestamptz
+  totalRequests   Int      @default(0) @map("total_requests")
+  respondedInSla  Int      @default(0) @map("responded_in_sla")
+  missedSla       Int      @default(0) @map("missed_sla")
+  avgResponseSecs Int?     @map("avg_response_secs")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  provider Provider @relation(fields: [providerId], references: [id])
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@unique([providerId, locationId, periodStart])
+  @@map("provider_response_metrics")
+}
+
 // ─── LOCATIONS ──────────────────────────────────────────────────────────────
 
 model Location {
@@ -497,7 +526,7 @@ model Location {
   city                   String
   regionCode             String   @map("region_code")
   postalCode             String   @map("postal_code")
-  countryCode            String   @db.Char(2) @map("country_code")
+  countryCode            String   @map("country_code") @db.Char(2)
   latitude               Decimal  @db.Decimal(9, 6)
   longitude              Decimal  @db.Decimal(9, 6)
   responseSlaUnder1hMins Int      @default(5) @map("response_sla_under_1h_mins")
@@ -507,18 +536,21 @@ model Location {
   createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  provider           Provider             @relation(fields: [providerId], references: [id])
-  services           Service[]
-  operatingWindows   OperatingWindow[]
-  bookings           Booking[]
-  bookingHolds       BookingHold[]
-  providerMemberships ProviderMembership[]
-  reviews            Review[]
-  washRequestsDesired  WashRequest[] @relation("wash_request_desired_location")
-  washRequestsApproved WashRequest[] @relation("wash_request_approved_location")
+  provider             Provider                 @relation(fields: [providerId], references: [id])
+  services             Service[]
+  operatingWindows     OperatingWindow[]
+  bookings             Booking[]
+  bookingHolds         BookingHold[]
+  providerMemberships  ProviderMembership[]
+  reviews              Review[]
+  responseMetrics      ProviderResponseMetric[]
+  washRequestsDesired  WashRequest[]            @relation("wash_request_desired_location")
+  washRequestsApproved WashRequest[]            @relation("wash_request_approved_location")
 
   @@index([providerId])
   @@index([isVisible])
+  @@index([isVisible, providerId])
+  @@index([latitude, longitude])
   @@map("locations")
 }
 
@@ -540,31 +572,31 @@ model OperatingWindow {
 // ─── VEHICLES ───────────────────────────────────────────────────────────────
 
 model Vehicle {
-  id            String   @id @default(uuid()) @db.Uuid
-  fleetId       String?  @map("fleet_id") @db.Uuid
-  ownerUserId   String?  @map("owner_user_id") @db.Uuid
-  depotId       String?  @map("depot_id") @db.Uuid
-  categoryCode  String   @map("category_code")
-  subtypeCode   String   @map("subtype_code")
-  lengthInches  Int      @map("length_inches")
-  heightInches  Int      @map("height_inches")
-  hasRestroom   Boolean  @default(false) @map("has_restroom")
-  unitNumber    String   @map("unit_number")
-  licensePlate  String?  @map("license_plate")
-  lastWashAtUtc DateTime? @map("last_wash_at_utc") @db.Timestamptz
+  id               String    @id @default(uuid()) @db.Uuid
+  fleetId          String?   @map("fleet_id") @db.Uuid
+  ownerUserId      String?   @map("owner_user_id") @db.Uuid
+  depotId          String?   @map("depot_id") @db.Uuid
+  categoryCode     String    @map("category_code")
+  subtypeCode      String    @map("subtype_code")
+  lengthInches     Int       @map("length_inches")
+  heightInches     Int       @map("height_inches")
+  hasRestroom      Boolean   @default(false) @map("has_restroom")
+  unitNumber       String    @map("unit_number")
+  licensePlate     String?   @map("license_plate")
+  lastWashAtUtc    DateTime? @map("last_wash_at_utc") @db.Timestamptz
   nextWashDueAtUtc DateTime? @map("next_wash_due_at_utc") @db.Timestamptz
-  isActive      Boolean  @default(true) @map("is_active")
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  isActive         Boolean   @default(true) @map("is_active")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  fleet    Fleet? @relation(fields: [fleetId], references: [id])
-  owner    User?  @relation("vehicle_owner", fields: [ownerUserId], references: [id])
-  depot    FleetDepot? @relation("vehicle_depot", fields: [depotId], references: [id])
-  bookings Booking[]
-  driverAssignments FleetDriverAssignment[]
-  washRequests      WashRequest[]
+  fleet                   Fleet?                        @relation(fields: [fleetId], references: [id])
+  owner                   User?                         @relation("vehicle_owner", fields: [ownerUserId], references: [id])
+  depot                   FleetDepot?                   @relation("vehicle_depot", fields: [depotId], references: [id])
+  bookings                Booking[]
+  driverAssignments       FleetDriverAssignment[]
+  washRequests            WashRequest[]
   vehicleGroupMemberships FleetVehicleGroupMembership[]
-  generatedTasks    FleetGeneratedTask[]
+  generatedTasks          FleetGeneratedTask[]
 
   @@index([fleetId])
   @@index([ownerUserId])
@@ -575,25 +607,25 @@ model Vehicle {
 // ─── SERVICES ───────────────────────────────────────────────────────────────
 
 model Service {
-  id                      String   @id @default(uuid()) @db.Uuid
-  locationId              String   @map("location_id") @db.Uuid
-  name                    String
-  description             String?
-  durationMins            Int      @map("duration_mins")
-  basePriceMinor          Int      @map("base_price_minor")
-  currencyCode            String   @db.Char(3) @map("currency_code")
-  platformFeeMinor        Int      @map("platform_fee_minor")
-  capacityPerSlot         Int      @default(1) @map("capacity_per_slot")
-  leadTimeMins            Int      @default(60) @map("lead_time_mins")
-  requiresConfirmation    Boolean  @default(true) @map("requires_confirmation")
-  isVisible               Boolean  @default(false) @map("is_visible")
-  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt               DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                   String   @id @default(uuid()) @db.Uuid
+  locationId           String   @map("location_id") @db.Uuid
+  name                 String
+  description          String?
+  durationMins         Int      @map("duration_mins")
+  basePriceMinor       Int      @map("base_price_minor")
+  currencyCode         String   @map("currency_code") @db.Char(3)
+  platformFeeMinor     Int      @map("platform_fee_minor")
+  capacityPerSlot      Int      @default(1) @map("capacity_per_slot")
+  leadTimeMins         Int      @default(60) @map("lead_time_mins")
+  requiresConfirmation Boolean  @default(true) @map("requires_confirmation")
+  isVisible            Boolean  @default(false) @map("is_visible")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  location             Location               @relation(fields: [locationId], references: [id])
-  compatibilityRules   ServiceCompatibility[]
-  bookings             Booking[]
-  bookingHolds         BookingHold[]
+  location           Location               @relation(fields: [locationId], references: [id])
+  compatibilityRules ServiceCompatibility[]
+  bookings           Booking[]
+  bookingHolds       BookingHold[]
 
   @@index([locationId])
   @@index([isVisible])
@@ -601,12 +633,12 @@ model Service {
 }
 
 model ServiceCompatibility {
-  id              String @id @default(uuid()) @db.Uuid
-  serviceId       String @map("service_id") @db.Uuid
-  categoryCode    String @map("category_code")
+  id              String  @id @default(uuid()) @db.Uuid
+  serviceId       String  @map("service_id") @db.Uuid
+  categoryCode    String  @map("category_code")
   subtypeCode     String? @map("subtype_code")
-  maxLengthInches Int?   @map("max_length_inches")
-  maxHeightInches Int?   @map("max_height_inches")
+  maxLengthInches Int?    @map("max_length_inches")
+  maxHeightInches Int?    @map("max_height_inches")
 
   service Service @relation(fields: [serviceId], references: [id])
 
@@ -617,17 +649,17 @@ model ServiceCompatibility {
 // ─── BOOKING HOLDS ──────────────────────────────────────────────────────────
 
 model BookingHold {
-  id              String   @id @default(uuid()) @db.Uuid
-  locationId      String   @map("location_id") @db.Uuid
-  serviceId       String   @map("service_id") @db.Uuid
-  slotStartAtUtc  DateTime @map("slot_start_at_utc") @db.Timestamptz
-  slotEndAtUtc    DateTime @map("slot_end_at_utc") @db.Timestamptz
-  expiresAtUtc    DateTime @map("expires_at_utc") @db.Timestamptz
-  bookingId       String?  @map("booking_id") @db.Uuid
-  requestId       String   @map("request_id")
-  userId          String   @map("user_id") @db.Uuid
-  isReleased      Boolean  @default(false) @map("is_released")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id             String   @id @default(uuid()) @db.Uuid
+  locationId     String   @map("location_id") @db.Uuid
+  serviceId      String   @map("service_id") @db.Uuid
+  slotStartAtUtc DateTime @map("slot_start_at_utc") @db.Timestamptz
+  slotEndAtUtc   DateTime @map("slot_end_at_utc") @db.Timestamptz
+  expiresAtUtc   DateTime @map("expires_at_utc") @db.Timestamptz
+  bookingId      String?  @map("booking_id") @db.Uuid
+  requestId      String   @map("request_id")
+  userId         String   @map("user_id") @db.Uuid
+  isReleased     Boolean  @default(false) @map("is_released")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   location Location @relation(fields: [locationId], references: [id])
   service  Service  @relation(fields: [serviceId], references: [id])
@@ -640,67 +672,70 @@ model BookingHold {
 // ─── BOOKINGS ───────────────────────────────────────────────────────────────
 
 model Booking {
-  id                          String        @id @default(uuid()) @db.Uuid
-  locationId                  String        @map("location_id") @db.Uuid
-  serviceId                   String        @map("service_id") @db.Uuid
-  customerId                  String        @map("customer_id") @db.Uuid
-  vehicleId                   String?       @map("vehicle_id") @db.Uuid
-  fleetPlaceholderClass       String?       @map("fleet_placeholder_class")
-  status                      BookingStatus @default(REQUESTED)
-  idempotencyKey              String        @unique @map("idempotency_key")
+  id                    String        @id @default(uuid()) @db.Uuid
+  locationId            String        @map("location_id") @db.Uuid
+  serviceId             String        @map("service_id") @db.Uuid
+  customerId            String        @map("customer_id") @db.Uuid
+  vehicleId             String?       @map("vehicle_id") @db.Uuid
+  fleetPlaceholderClass String?       @map("fleet_placeholder_class")
+  status                BookingStatus @default(REQUESTED)
+  idempotencyKey        String        @unique @map("idempotency_key")
 
-  serviceNameSnapshot         String        @map("service_name_snapshot")
-  serviceBasePriceMinor       Int           @map("service_base_price_minor")
-  platformFeeMinor            Int           @map("platform_fee_minor")
-  totalPriceMinor             Int           @map("total_price_minor")
-  taxAmountMinor              Int           @default(0) @map("tax_amount_minor")
-  currencyCode                String        @db.Char(3) @map("currency_code")
-  locationTimezone            String        @map("location_timezone")
+  serviceNameSnapshot   String @map("service_name_snapshot")
+  serviceBasePriceMinor Int    @map("service_base_price_minor")
+  platformFeeMinor      Int    @map("platform_fee_minor")
+  totalPriceMinor       Int    @map("total_price_minor")
+  taxAmountMinor        Int    @default(0) @map("tax_amount_minor")
+  currencyCode          String @map("currency_code") @db.Char(3)
+  locationTimezone      String @map("location_timezone")
 
-  scheduledStartAtUtc         DateTime      @map("scheduled_start_at_utc") @db.Timestamptz
-  scheduledEndAtUtc           DateTime      @map("scheduled_end_at_utc") @db.Timestamptz
-  providerResponseDeadlineUtc DateTime?     @map("provider_response_deadline_utc") @db.Timestamptz
-  bookingHoldExpiresUtc       DateTime?     @map("booking_hold_expires_utc") @db.Timestamptz
+  scheduledStartAtUtc         DateTime  @map("scheduled_start_at_utc") @db.Timestamptz
+  scheduledEndAtUtc           DateTime  @map("scheduled_end_at_utc") @db.Timestamptz
+  providerResponseDeadlineUtc DateTime? @map("provider_response_deadline_utc") @db.Timestamptz
+  bookingHoldExpiresUtc       DateTime? @map("booking_hold_expires_utc") @db.Timestamptz
 
-  customerArrivedAtUtc        DateTime?     @map("customer_arrived_at_utc") @db.Timestamptz
-  providerCheckedInAtUtc      DateTime?     @map("provider_checked_in_at_utc") @db.Timestamptz
-  serviceStartedAtUtc         DateTime?     @map("service_started_at_utc") @db.Timestamptz
-  serviceCompletedAtUtc       DateTime?     @map("service_completed_at_utc") @db.Timestamptz
-  completionWindowEndsUtc     DateTime?     @map("completion_window_ends_utc") @db.Timestamptz
+  customerArrivedAtUtc    DateTime? @map("customer_arrived_at_utc") @db.Timestamptz
+  providerCheckedInAtUtc  DateTime? @map("provider_checked_in_at_utc") @db.Timestamptz
+  serviceStartedAtUtc     DateTime? @map("service_started_at_utc") @db.Timestamptz
+  serviceCompletedAtUtc   DateTime? @map("service_completed_at_utc") @db.Timestamptz
+  completionWindowEndsUtc DateTime? @map("completion_window_ends_utc") @db.Timestamptz
 
-  declineReasonCode           String?       @map("decline_reason_code")
-  cancellationReasonCode      String?       @map("cancellation_reason_code")
+  declineReasonCode      String?   @map("decline_reason_code")
+  cancellationReasonCode String?   @map("cancellation_reason_code")
+  reminderSentAt         DateTime? @map("reminder_sent_at") @db.Timestamptz
 
-  createdAt                   DateTime      @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt                   DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  location         Location              @relation(fields: [locationId], references: [id])
-  service          Service               @relation(fields: [serviceId], references: [id])
-  customer         User                  @relation("booking_customer", fields: [customerId], references: [id])
-  vehicle          Vehicle?              @relation(fields: [vehicleId], references: [id])
-  statusHistory    BookingStatusHistory[]
-  paymentIntents   PaymentIntentInternal[]
-  holds            BookingHold[]
-  reviews          Review[]
-  disputes         Dispute[]
-  payoutItems      ProviderPayoutItem[]
-  washRequest      WashRequest?          @relation("wash_request_booking")
-  generatedTask    FleetGeneratedTask?   @relation("generated_task_booking")
+  location       Location                @relation(fields: [locationId], references: [id])
+  service        Service                 @relation(fields: [serviceId], references: [id])
+  customer       User                    @relation("booking_customer", fields: [customerId], references: [id])
+  vehicle        Vehicle?                @relation(fields: [vehicleId], references: [id])
+  statusHistory  BookingStatusHistory[]
+  paymentIntents PaymentIntentInternal[]
+  holds          BookingHold[]
+  reviews        Review[]
+  disputes       Dispute[]
+  payoutItems    ProviderPayoutItem[]
+  washRequest    WashRequest?            @relation("wash_request_booking")
+  generatedTask  FleetGeneratedTask?     @relation("generated_task_booking")
 
   @@index([locationId, scheduledStartAtUtc, scheduledEndAtUtc, status])
   @@index([customerId])
   @@index([status])
+  @@index([vehicleId])
+  @@index([status, providerResponseDeadlineUtc])
   @@map("bookings")
 }
 
 model BookingStatusHistory {
-  id            String        @id @default(uuid()) @db.Uuid
-  bookingId     String        @map("booking_id") @db.Uuid
-  fromStatus    BookingStatus? @map("from_status")
-  toStatus      BookingStatus @map("to_status")
-  changedBy     String?       @map("changed_by") @db.Uuid
-  reason        String?
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  id         String         @id @default(uuid()) @db.Uuid
+  bookingId  String         @map("booking_id") @db.Uuid
+  fromStatus BookingStatus? @map("from_status")
+  toStatus   BookingStatus  @map("to_status")
+  changedBy  String?        @map("changed_by") @db.Uuid
+  reason     String?
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz
 
   booking Booking @relation(fields: [bookingId], references: [id])
 
@@ -711,20 +746,20 @@ model BookingStatusHistory {
 // ─── PAYMENTS ───────────────────────────────────────────────────────────────
 
 model PaymentIntentInternal {
-  id                     String        @id @default(uuid()) @db.Uuid
-  bookingId              String        @map("booking_id") @db.Uuid
-  externalPaymentId      String?       @unique @map("stripe_payment_intent_id")
-  externalCustomerId     String?       @map("stripe_customer_id")
-  status                 PaymentStatus @default(AUTHORIZATION_PENDING)
-  amountMinor            Int           @map("amount_minor")
-  currencyCode           String        @db.Char(3) @map("currency_code")
-  capturedAmountMinor    Int           @default(0) @map("captured_amount_minor")
-  refundedAmountMinor    Int           @default(0) @map("refunded_amount_minor")
-  failureCode            String?       @map("failure_code")
-  failureMessage         String?       @map("failure_message")
-  metadata               Json?         @default("{}")
-  createdAt              DateTime      @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt              DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+  id                  String        @id @default(uuid()) @db.Uuid
+  bookingId           String        @map("booking_id") @db.Uuid
+  externalPaymentId   String?       @unique @map("stripe_payment_intent_id")
+  externalCustomerId  String?       @map("stripe_customer_id")
+  status              PaymentStatus @default(AUTHORIZATION_PENDING)
+  amountMinor         Int           @map("amount_minor")
+  currencyCode        String        @map("currency_code") @db.Char(3)
+  capturedAmountMinor Int           @default(0) @map("captured_amount_minor")
+  refundedAmountMinor Int           @default(0) @map("refunded_amount_minor")
+  failureCode         String?       @map("failure_code")
+  failureMessage      String?       @map("failure_message")
+  metadata            Json?         @default("{}")
+  createdAt           DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime      @updatedAt @map("updated_at") @db.Timestamptz
 
   booking       Booking          @relation(fields: [bookingId], references: [id])
   paymentEvents PaymentEvent[]
@@ -735,12 +770,12 @@ model PaymentIntentInternal {
 }
 
 model PaymentEvent {
-  id                  String   @id @default(uuid()) @db.Uuid
-  paymentIntentId     String   @map("payment_intent_id") @db.Uuid
-  externalEventId     String?  @unique @map("stripe_event_id")
-  eventType           String   @map("event_type")
-  eventData           Json?    @map("event_data")
-  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id              String   @id @default(uuid()) @db.Uuid
+  paymentIntentId String   @map("payment_intent_id") @db.Uuid
+  externalEventId String?  @unique @map("stripe_event_id")
+  eventType       String   @map("event_type")
+  eventData       Json?    @map("event_data")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   paymentIntent PaymentIntentInternal @relation(fields: [paymentIntentId], references: [id])
 
@@ -749,13 +784,13 @@ model PaymentEvent {
 }
 
 model RefundInternal {
-  id                String   @id @default(uuid()) @db.Uuid
-  paymentIntentId   String   @map("payment_intent_id") @db.Uuid
-  externalRefundId  String?  @unique @map("stripe_refund_id")
-  amountMinor       Int      @map("amount_minor")
-  reason            String
-  initiatedBy       String?  @map("initiated_by") @db.Uuid
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id               String   @id @default(uuid()) @db.Uuid
+  paymentIntentId  String   @map("payment_intent_id") @db.Uuid
+  externalRefundId String?  @unique @map("stripe_refund_id")
+  amountMinor      Int      @map("amount_minor")
+  reason           String
+  initiatedBy      String?  @map("initiated_by") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   paymentIntent PaymentIntentInternal @relation(fields: [paymentIntentId], references: [id])
 
@@ -766,17 +801,17 @@ model RefundInternal {
 // ─── PROVIDER PAYOUTS ───────────────────────────────────────────────────────
 
 model ProviderPayoutBatch {
-  id              String   @id @default(uuid()) @db.Uuid
-  providerId      String   @map("provider_id") @db.Uuid
-  currencyCode    String   @db.Char(3) @map("currency_code")
-  totalAmountMinor Int     @map("total_amount_minor")
-  itemCount       Int      @map("item_count")
+  id               String   @id @default(uuid()) @db.Uuid
+  providerId       String   @map("provider_id") @db.Uuid
+  currencyCode     String   @map("currency_code") @db.Char(3)
+  totalAmountMinor Int      @map("total_amount_minor")
+  itemCount        Int      @map("item_count")
   externalPayoutId String?  @unique @map("stripe_payout_id")
-  status          String   @default("PENDING")
-  periodStartUtc  DateTime @map("period_start_utc") @db.Timestamptz
-  periodEndUtc    DateTime @map("period_end_utc") @db.Timestamptz
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  status           String   @default("PENDING")
+  periodStartUtc   DateTime @map("period_start_utc") @db.Timestamptz
+  periodEndUtc     DateTime @map("period_end_utc") @db.Timestamptz
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   provider Provider             @relation(fields: [providerId], references: [id])
   items    ProviderPayoutItem[]
@@ -786,11 +821,11 @@ model ProviderPayoutBatch {
 }
 
 model ProviderPayoutItem {
-  id              String   @id @default(uuid()) @db.Uuid
-  batchId         String   @map("batch_id") @db.Uuid
-  bookingId       String   @map("booking_id") @db.Uuid
-  amountMinor     Int      @map("amount_minor")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id          String   @id @default(uuid()) @db.Uuid
+  batchId     String   @map("batch_id") @db.Uuid
+  bookingId   String   @map("booking_id") @db.Uuid
+  amountMinor Int      @map("amount_minor")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   batch   ProviderPayoutBatch @relation(fields: [batchId], references: [id])
   booking Booking             @relation(fields: [bookingId], references: [id])
@@ -859,9 +894,9 @@ model Dispute {
   createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz
 
-  booking   Booking           @relation(fields: [bookingId], references: [id])
-  openedBy  User              @relation("dispute_opened_by", fields: [openedById], references: [id])
-  evidence  DisputeEvidence[]
+  booking  Booking           @relation(fields: [bookingId], references: [id])
+  openedBy User              @relation("dispute_opened_by", fields: [openedById], references: [id])
+  evidence DisputeEvidence[]
 
   @@index([status, createdAt])
   @@map("disputes")
@@ -917,8 +952,8 @@ model FileAsset {
   purposeCode      String   @map("purpose_code")
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
 
-  uploadedBy       User?             @relation(fields: [uploadedByUserId], references: [id])
-  disputeEvidence  DisputeEvidence[]
+  uploadedBy      User?             @relation(fields: [uploadedByUserId], references: [id])
+  disputeEvidence DisputeEvidence[]
 
   @@map("file_assets")
 }
@@ -926,14 +961,14 @@ model FileAsset {
 // ─── AUDIT EVENTS ───────────────────────────────────────────────────────────
 
 model AuditEvent {
-  id          String   @id @default(uuid()) @db.Uuid
-  actorId     String?  @map("actor_id") @db.Uuid
-  entityType  String   @map("entity_type")
-  entityId    String   @map("entity_id") @db.Uuid
-  action      String
-  metadata    Json?    @default("{}")
-  ipAddress   String?  @map("ip_address")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @map("actor_id") @db.Uuid
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id") @db.Uuid
+  action     String
+  metadata   Json?    @default("{}")
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   actor User? @relation("audit_actor", fields: [actorId], references: [id])
 
@@ -944,15 +979,15 @@ model AuditEvent {
 // ─── DEMO DATA REGISTRY ────────────────────────────────────────────────────
 
 model DemoDataRegistry {
-  id                String   @id @default(uuid()) @db.Uuid
-  tableName         String   @map("table_name")
-  recordId          String   @map("record_id") @db.Uuid
-  seedBatchId       String   @map("seed_batch_id")
-  seedMode          String   @map("seed_mode")
-  seedRegionCode    String?  @map("seed_region_code")
-  demoScenarioCode  String?  @map("demo_scenario_code")
-  demoPersonaCode   String?  @map("demo_persona_code")
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  id               String   @id @default(uuid()) @db.Uuid
+  tableName        String   @map("table_name")
+  recordId         String   @map("record_id") @db.Uuid
+  seedBatchId      String   @map("seed_batch_id")
+  seedMode         String   @map("seed_mode")
+  seedRegionCode   String?  @map("seed_region_code")
+  demoScenarioCode String?  @map("demo_scenario_code")
+  demoPersonaCode  String?  @map("demo_persona_code")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   @@unique([tableName, recordId])
   @@index([seedBatchId])
