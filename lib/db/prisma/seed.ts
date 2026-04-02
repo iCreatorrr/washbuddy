@@ -398,6 +398,34 @@ async function main() {
     },
   });
 
+  const maintUser = await prisma.user.upsert({
+    where: { email: "fleet.maint@washbuddy.com" },
+    update: { passwordHash: DEFAULT_PASSWORD, isActive: true },
+    create: {
+      email: "fleet.maint@washbuddy.com",
+      phoneE164: "+12125559010",
+      firstName: "Grace",
+      lastName: "Okonkwo",
+      passwordHash: DEFAULT_PASSWORD,
+      isActive: true,
+      emailVerifiedAt: new Date(),
+    },
+  });
+
+  const analystUser = await prisma.user.upsert({
+    where: { email: "fleet.analyst@washbuddy.com" },
+    update: { passwordHash: DEFAULT_PASSWORD, isActive: true },
+    create: {
+      email: "fleet.analyst@washbuddy.com",
+      phoneE164: "+12125559011",
+      firstName: "Daniel",
+      lastName: "Reeves",
+      passwordHash: DEFAULT_PASSWORD,
+      isActive: true,
+      emailVerifiedAt: new Date(),
+    },
+  });
+
   // Platform admin role
   await prisma.userPlatformRole.upsert({
     where: { userId_role: { userId: adminUser.id, role: "PLATFORM_SUPER_ADMIN" } },
@@ -405,7 +433,7 @@ async function main() {
     create: { userId: adminUser.id, role: "PLATFORM_SUPER_ADMIN", isActive: true },
   });
 
-  console.log("  ✓ 6 demo user accounts upserted.\n");
+  console.log("  ✓ 8 demo user accounts upserted.\n");
 
   // ── Step 3: Create Fleet + memberships ─────────────────────────────
   console.log("Step 3: Creating fleet 'Northeast Bus Lines'...");
@@ -420,8 +448,15 @@ async function main() {
     },
   });
 
+  // Fleet memberships — all 5 fleet-scoped users
   await prisma.fleetMembership.create({
     data: { fleetId: fleet.id, userId: fleetAdminUser.id, role: "FLEET_ADMIN", isActive: true },
+  });
+  await prisma.fleetMembership.create({
+    data: { fleetId: fleet.id, userId: maintUser.id, role: "MAINTENANCE_MANAGER", isActive: true },
+  });
+  await prisma.fleetMembership.create({
+    data: { fleetId: fleet.id, userId: analystUser.id, role: "READ_ONLY_ANALYST", isActive: true },
   });
   await prisma.fleetMembership.create({
     data: { fleetId: fleet.id, userId: driverUser.id, role: "DRIVER", isActive: true },
@@ -430,13 +465,61 @@ async function main() {
     data: { fleetId: fleet.id, userId: driver1User.id, role: "DRIVER", isActive: true },
   });
 
-  // Create vehicles for the fleet
+  // Fleet depots
+  const depotNYC = await prisma.fleetDepot.create({
+    data: {
+      fleetId: fleet.id,
+      name: "NYC Main Depot",
+      timezone: "America/New_York",
+      addressLine1: "1200 Zerega Ave",
+      city: "Bronx",
+      regionCode: "NY",
+      postalCode: "10462",
+      countryCode: "US",
+      isActive: true,
+    },
+  });
+
+  const depotNJ = await prisma.fleetDepot.create({
+    data: {
+      fleetId: fleet.id,
+      name: "Newark Satellite Depot",
+      timezone: "America/New_York",
+      addressLine1: "450 Doremus Ave",
+      city: "Newark",
+      regionCode: "NJ",
+      postalCode: "07105",
+      countryCode: "US",
+      isActive: true,
+    },
+  });
+
+  // Fleet vehicle groups
+  const groupCoaches = await prisma.fleetVehicleGroup.create({
+    data: {
+      fleetId: fleet.id,
+      name: "Coaches",
+      criteriaJson: { subtypeCode: "COACH" },
+      isActive: true,
+    },
+  });
+
+  const groupLocal = await prisma.fleetVehicleGroup.create({
+    data: {
+      fleetId: fleet.id,
+      name: "Local Service",
+      criteriaJson: { subtypeCodes: ["STANDARD", "SHUTTLE"] },
+      isActive: true,
+    },
+  });
+
+  // Create vehicles for the fleet — assigned to depots
   const vehicleData = [
-    { unitNumber: "NEB-101", subtypeCode: "STANDARD", lengthInches: 480, heightInches: 132, hasRestroom: false, licensePlate: "NY-BUS-101" },
-    { unitNumber: "NEB-102", subtypeCode: "STANDARD", lengthInches: 456, heightInches: 130, hasRestroom: false, licensePlate: "NY-BUS-102" },
-    { unitNumber: "NEB-201", subtypeCode: "COACH", lengthInches: 540, heightInches: 156, hasRestroom: true, licensePlate: "NY-BUS-201" },
-    { unitNumber: "NEB-202", subtypeCode: "COACH", lengthInches: 528, heightInches: 150, hasRestroom: true, licensePlate: "NY-BUS-202" },
-    { unitNumber: "NEB-301", subtypeCode: "SHUTTLE", lengthInches: 300, heightInches: 108, hasRestroom: false, licensePlate: "NY-BUS-301" },
+    { unitNumber: "NEB-101", subtypeCode: "STANDARD", lengthInches: 480, heightInches: 132, hasRestroom: false, licensePlate: "NY-BUS-101", depotId: depotNYC.id },
+    { unitNumber: "NEB-102", subtypeCode: "STANDARD", lengthInches: 456, heightInches: 130, hasRestroom: false, licensePlate: "NY-BUS-102", depotId: depotNYC.id },
+    { unitNumber: "NEB-201", subtypeCode: "COACH", lengthInches: 540, heightInches: 156, hasRestroom: true, licensePlate: "NY-BUS-201", depotId: depotNJ.id },
+    { unitNumber: "NEB-202", subtypeCode: "COACH", lengthInches: 528, heightInches: 150, hasRestroom: true, licensePlate: "NY-BUS-202", depotId: depotNJ.id },
+    { unitNumber: "NEB-301", subtypeCode: "SHUTTLE", lengthInches: 300, heightInches: 108, hasRestroom: false, licensePlate: "NY-BUS-301", depotId: depotNYC.id },
   ];
 
   const vehicles = [];
@@ -445,6 +528,19 @@ async function main() {
       data: { fleetId: fleet.id, categoryCode: "BUS", ...v, isActive: true },
     });
     vehicles.push(vehicle);
+  }
+
+  // Vehicle group memberships — coaches in "Coaches" group, standard+shuttle in "Local Service"
+  for (const v of vehicles) {
+    if (v.subtypeCode === "COACH") {
+      await prisma.fleetVehicleGroupMembership.create({
+        data: { vehicleGroupId: groupCoaches.id, vehicleId: v.id },
+      });
+    } else {
+      await prisma.fleetVehicleGroupMembership.create({
+        data: { vehicleGroupId: groupLocal.id, vehicleId: v.id },
+      });
+    }
   }
 
   // Assign vehicles to drivers: Alex gets 3, Mike gets 2
@@ -459,7 +555,7 @@ async function main() {
     });
   }
 
-  console.log("  ✓ Fleet created with 5 vehicles and 2 drivers.\n");
+  console.log("  ✓ Fleet created with 2 depots, 2 vehicle groups, 5 vehicles, and 4 members.\n");
 
   // ── Step 4: Create 50 providers with locations and services ────────
   console.log("Step 4: Creating 50 providers with locations and services...");
