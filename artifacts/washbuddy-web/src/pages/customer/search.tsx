@@ -125,10 +125,14 @@ export default function CustomerSearch() {
   const [filterAvailNow, setFilterAvailNow] = useState(false);
   const [userLat, setUserLat] = useState<number | null>(null);
   const [userLng, setUserLng] = useState<number | null>(null);
+  const [geoStatus, setGeoStatus] = useState<"pending" | "granted" | "denied">("pending");
   const [, setLocation] = useLocation();
   const { user } = useAuth();
 
-  const { data, isLoading, isError, refetch } = useSearchLocations({}, { request: { credentials: "include" } });
+  const { data, isLoading, isError, refetch } = useSearchLocations(
+    {},
+    { request: { credentials: "include" }, query: { enabled: true, staleTime: 60_000 } }
+  );
   const { data: bookingsData } = useListBookings(
     { status: "COMPLETED", limit: 100 },
     { request: { credentials: "include" }, query: { enabled: !!user } }
@@ -143,9 +147,14 @@ export default function CustomerSearch() {
         (pos) => {
           setUserLat(pos.coords.latitude);
           setUserLng(pos.coords.longitude);
+          setGeoStatus("granted");
         },
-        () => {}
+        () => {
+          setGeoStatus("denied");
+        }
       );
+    } else {
+      setGeoStatus("denied");
     }
   }, []);
 
@@ -290,12 +299,25 @@ export default function CustomerSearch() {
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <Button size="lg" className="h-14 rounded-2xl px-8 shadow-blue-500/25">
+            <Button
+              size="lg"
+              className="h-14 rounded-2xl px-8 shadow-blue-500/25"
+              onClick={() => refetch()}
+            >
               Search
             </Button>
           </div>
         </div>
       </div>
+
+      {geoStatus === "denied" && (
+        <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl text-sm">
+          <Navigation className="h-5 w-5 text-amber-600 shrink-0" />
+          <p className="text-amber-800">
+            <span className="font-semibold">Enable location services</span> to see wash facilities sorted by distance from you. Showing all locations alphabetically.
+          </p>
+        </div>
+      )}
 
       <div className="space-y-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
