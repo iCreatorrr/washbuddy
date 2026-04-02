@@ -1,5 +1,6 @@
 import createApp from "./app";
 import { logger } from "./lib/logger";
+import { startSlaEnforcer } from "./lib/slaEnforcer";
 
 const rawPort = process.env["PORT"];
 
@@ -23,6 +24,9 @@ createApp().then((app) => {
     }
 
     logger.info({ port }, "Server listening");
+
+    // Start background jobs
+    startSlaEnforcer(60_000); // Check for expired bookings every 60 seconds
   });
 }).catch((err) => {
   logger.error({ err }, "Failed to create app");

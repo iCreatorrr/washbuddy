@@ -4,6 +4,7 @@ import { requireAuth, requireProviderAccess, requirePlatformAdmin } from "../mid
 import { isPlatformAdmin, isProviderRole, isFleetRole, type SessionUser } from "../lib/auth";
 import { canTransition, isCancellable, isActiveBooking } from "../lib/bookingStateMachine";
 import { calculatePlatformFee } from "../lib/feeCalculator";
+import { incrementRespondedInSla } from "../lib/slaEnforcer";
 import crypto from "crypto";
 
 const router: IRouter = Router();
@@ -154,7 +155,9 @@ router.post("/bookings", requireAuth, async (req, res) => {
       const calculatedFee = calculatePlatformFee(service.basePriceMinor);
       const totalPrice = service.basePriceMinor + calculatedFee;
 
-      const responseSla = hold.slotStartAtUtc.getTime() - now.getTime() < 3600000
+      // PRD 3.3: 5 min SLA for bookings within 24h, 10 min for 24h+ out
+      const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+      const responseSla = hold.slotStartAtUtc.getTime() - now.getTime() < TWENTY_FOUR_HOURS_MS
         ? service.location.responseSlaUnder1hMins
         : service.location.responseSlaFutureMins;
 
@@ -377,6 +380,14 @@ router.post("/bookings/:bookingId/confirm", requireAuth, async (req, res) => {
       { providerResponseDeadlineUtc: null },
     );
 
+    // Track SLA metric — provider responded
+    try {
+      const responseTimeSecs = Math.round((Date.now() - booking.createdAt.getTime()) / 1000);
+      await incrementRespondedInSla(booking.location.providerId, booking.locationId, responseTimeSecs);
+    } catch (metricErr) {
+      req.log.warn({ err: metricErr }, "Failed to update SLA metrics on confirm");
+    }
+
     res.json({ booking: updated });
   } catch (err: any) {
     if (err?.message === "INVALID_TRANSITION") {
@@ -440,6 +451,14 @@ router.post("/bookings/:bookingId/decline", requireAuth, async (req, res) => {
 
       return result;
     });
+
+    // Track SLA metric — provider responded (declined counts as a response)
+    try {
+      const responseTimeSecs = Math.round((Date.now() - booking.createdAt.getTime()) / 1000);
+      await incrementRespondedInSla(booking.location.providerId, booking.locationId, responseTimeSecs);
+    } catch (metricErr) {
+      req.log.warn({ err: metricErr }, "Failed to update SLA metrics on decline");
+    }
 
     res.json({ booking: updated });
   } catch (err: any) {
