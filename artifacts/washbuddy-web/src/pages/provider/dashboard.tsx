@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { useListBookings, useConfirmBooking, useDeclineBooking, useCheckinBooking, useStartService, useCompleteBooking } from "@workspace/api-client-react";
+import { useListBookings, useListProviders, useConfirmBooking, useDeclineBooking, useCheckinBooking, useStartService, useCompleteBooking } from "@workspace/api-client-react";
 import { Card, Badge, Button, ErrorState } from "@/components/ui";
 import { getStatusColor, getStatusLabel, formatCurrency, formatDate } from "@/lib/utils";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { ClipboardList, Clock, CheckCircle2, XCircle, Play, Truck, AlertTriangle, Timer } from "lucide-react";
+import { ClipboardList, Clock, CheckCircle2, XCircle, Play, Truck, AlertTriangle, Timer, Info } from "lucide-react";
 import { toast, Toaster } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -62,6 +62,10 @@ export default function ProviderDashboard() {
   const checkinMutation = useCheckinBooking({ request: { credentials: "include" } });
   const startMutation = useStartService({ request: { credentials: "include" } });
   const completeMutation = useCompleteBooking({ request: { credentials: "include" } });
+
+  const { data: providerData } = useListProviders({ request: { credentials: "include" } });
+  const myProvider = (providerData?.providers || [])[0];
+  const isPending = myProvider && (myProvider as any).approvalStatus === "PENDING";
 
   const bookings = data?.bookings || [];
 
@@ -334,6 +338,16 @@ export default function ProviderDashboard() {
         <h1 className="text-3xl font-display font-bold text-slate-900">Provider Dashboard</h1>
         <p className="text-slate-500 mt-2">Manage your incoming bookings and active washes.</p>
       </div>
+
+      {isPending && (
+        <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+          <Info className="h-5 w-5 text-amber-600 shrink-0" />
+          <div>
+            <p className="font-semibold text-amber-800">Your listing is pending review</p>
+            <p className="text-sm text-amber-700">A WashBuddy admin will review your submission and you'll be notified when approved. You can still edit your location and services in Settings.</p>
+          </div>
+        </div>
+      )}
 
       {isError ? (
         <ErrorState message="Could not load bookings." onRetry={() => refetch()} />

@@ -88,7 +88,8 @@ router.post("/auth/register", async (req, res) => {
         const provider = await tx.provider.create({
           data: {
             name: businessName.trim(),
-            isActive: true,
+            isActive: false,
+            approvalStatus: "PENDING",
           },
         });
         await tx.providerMembership.create({

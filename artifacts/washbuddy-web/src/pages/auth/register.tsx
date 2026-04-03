@@ -72,7 +72,7 @@ export default function Register() {
         accountType: accountType!,
         businessName: needsBusinessName ? (fd.get("businessName") as string) : undefined,
       });
-      setLocation("/");
+      setLocation(accountType === "provider_admin" ? "/provider/onboarding" : "/");
     } catch (err: any) {
       setError(err.message || "Failed to create account.");
       setLoading(false);

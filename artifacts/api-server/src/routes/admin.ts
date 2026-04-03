@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { prisma } from "@workspace/db";
 import { requireAuth, requirePlatformAdmin } from "../middlewares/requireAuth";
+import { createNotification } from "../lib/notifications";
 
 const router: IRouter = Router();
 
@@ -114,6 +115,35 @@ router.get("/admin/dashboard", requireAuth, requirePlatformAdmin, async (req, re
   } catch (err: any) {
     req.log.error({ err }, "Failed to load admin dashboard");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to load dashboard" });
+  }
+});
+
+// ─── PROVIDER ONBOARDING NOTIFICATION ────────────────────────────────────────
+
+router.post("/providers/notify-onboarding-complete", requireAuth, async (req, res) => {
+  try {
+    const user = req.user as any;
+    const { providerName } = req.body;
+
+    // Find all platform admins to notify
+    const adminRoles = await prisma.userPlatformRole.findMany({
+      where: { role: "PLATFORM_SUPER_ADMIN", isActive: true },
+      select: { userId: true },
+    });
+
+    for (const role of adminRoles) {
+      await createNotification(role.userId, {
+        subject: "New provider registration",
+        body: `${providerName || "A new provider"} has submitted their listing for review.`,
+        actionUrl: "/admin/providers?status=PENDING",
+        metadata: { type: "NEW_PROVIDER_ONBOARDING" },
+      });
+    }
+
+    res.json({ success: true });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to send onboarding notification");
+    res.json({ success: false }); // Non-critical — don't fail
   }
 });
 

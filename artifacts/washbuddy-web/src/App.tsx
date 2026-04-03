@@ -14,6 +14,7 @@ import RoutePlanner from "./pages/customer/route-planner";
 import ProviderDashboard from "./pages/provider/dashboard";
 import ProviderSettings from "./pages/provider/settings";
 import ProviderReviews from "./pages/provider/reviews";
+import ProviderOnboarding from "./pages/provider/onboarding";
 import AdminDashboard from "./pages/admin/dashboard";
 import AdminBookings from "./pages/admin/bookings";
 import AdminProviders from "./pages/admin/providers";
@@ -116,6 +117,9 @@ function Router() {
       </Route>
 
       {/* Provider Routes */}
+      <Route path="/provider/onboarding">
+        <RouteGuard allowedRoles={["PROVIDER_ADMIN"]}><ProviderOnboarding /></RouteGuard>
+      </Route>
       <Route path="/provider">
         <RouteGuard allowedRoles={["PROVIDER_ADMIN", "PROVIDER_STAFF"]}><ProviderDashboard /></RouteGuard>
       </Route>
