@@ -1,6 +1,7 @@
 import createApp from "./app";
 import { logger } from "./lib/logger";
 import { startSlaEnforcer } from "./lib/slaEnforcer";
+import { startReminderScheduler } from "./lib/reminderScheduler";
 
 const rawPort = process.env["PORT"];
 
@@ -27,6 +28,7 @@ createApp().then((app) => {
 
     // Start background jobs
     startSlaEnforcer(60_000); // Check for expired bookings every 60 seconds
+    startReminderScheduler(5 * 60 * 1000); // Send booking reminders every 5 minutes
   });
 }).catch((err) => {
   logger.error({ err }, "Failed to create app");
