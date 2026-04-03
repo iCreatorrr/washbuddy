@@ -268,6 +268,155 @@ router.get("/fleet/vehicles", requireAuth, requireFleetMember, async (req, res) 
   }
 });
 
+// ─── FLEET VEHICLE CRUD ─────────────────────────────────────────────────────
+
+const VALID_SUBTYPES = ["STANDARD", "COACH", "MINIBUS", "SHUTTLE", "DOUBLE_DECKER", "SCHOOL_BUS", "ARTICULATED"];
+
+router.post("/fleet/vehicles", requireAuth, requireFleetMember, requireFleetAdmin, async (req, res) => {
+  try {
+    const fleetId = (req as any).fleetId;
+    if (!fleetId) { res.status(403).json({ errorCode: "FORBIDDEN", message: "No fleet" }); return; }
+
+    const { unitNumber, categoryCode, subtypeCode, lengthInches, heightInches, hasRestroom, licensePlate, depotId } = req.body;
+
+    if (!unitNumber || !subtypeCode || !lengthInches || !heightInches) {
+      res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "unitNumber, subtypeCode, lengthInches, and heightInches are required" });
+      return;
+    }
+    if (!VALID_SUBTYPES.includes(subtypeCode)) {
+      res.status(400).json({ errorCode: "VALIDATION_ERROR", message: `subtypeCode must be one of: ${VALID_SUBTYPES.join(", ")}` });
+      return;
+    }
+    if (typeof lengthInches !== "number" || lengthInches <= 0 || typeof heightInches !== "number" || heightInches <= 0) {
+      res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "lengthInches and heightInches must be positive numbers" });
+      return;
+    }
+    if (depotId) {
+      const depot = await prisma.fleetDepot.findFirst({ where: { id: depotId, fleetId } });
+      if (!depot) { res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "Depot not found in this fleet" }); return; }
+    }
+
+    const duplicate = await prisma.vehicle.findFirst({ where: { fleetId, unitNumber } });
+    if (duplicate) {
+      res.status(409).json({ errorCode: "DUPLICATE_UNIT_NUMBER", message: `Unit number "${unitNumber}" already exists in this fleet` });
+      return;
+    }
+
+    const vehicle = await prisma.vehicle.create({
+      data: {
+        fleetId,
+        categoryCode: categoryCode || "BUS",
+        subtypeCode,
+        lengthInches,
+        heightInches,
+        hasRestroom: hasRestroom ?? false,
+        unitNumber,
+        licensePlate: licensePlate || null,
+        depotId: depotId || null,
+        isActive: true,
+      },
+    });
+
+    res.status(201).json({ vehicle });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to create fleet vehicle");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to create vehicle" });
+  }
+});
+
+router.patch("/fleet/vehicles/:vehicleId", requireAuth, requireFleetMember, requireFleetAdmin, async (req, res) => {
+  try {
+    const fleetId = (req as any).fleetId;
+    const vehicle = await prisma.vehicle.findFirst({ where: { id: req.params.vehicleId, fleetId } });
+    if (!vehicle) { res.status(404).json({ errorCode: "NOT_FOUND", message: "Vehicle not found in this fleet" }); return; }
+
+    const { unitNumber, categoryCode, subtypeCode, lengthInches, heightInches, hasRestroom, licensePlate, depotId, isActive } = req.body;
+    const data: Record<string, unknown> = {};
+
+    if (unitNumber !== undefined) {
+      const duplicate = await prisma.vehicle.findFirst({ where: { fleetId, unitNumber, id: { not: vehicle.id } } });
+      if (duplicate) { res.status(409).json({ errorCode: "DUPLICATE_UNIT_NUMBER", message: `Unit number "${unitNumber}" already exists in this fleet` }); return; }
+      data.unitNumber = unitNumber;
+    }
+    if (subtypeCode !== undefined) {
+      if (!VALID_SUBTYPES.includes(subtypeCode)) { res.status(400).json({ errorCode: "VALIDATION_ERROR", message: `Invalid subtypeCode` }); return; }
+      data.subtypeCode = subtypeCode;
+    }
+    if (categoryCode !== undefined) data.categoryCode = categoryCode;
+    if (lengthInches !== undefined) {
+      if (typeof lengthInches !== "number" || lengthInches <= 0) { res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "lengthInches must be positive" }); return; }
+      data.lengthInches = lengthInches;
+    }
+    if (heightInches !== undefined) {
+      if (typeof heightInches !== "number" || heightInches <= 0) { res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "heightInches must be positive" }); return; }
+      data.heightInches = heightInches;
+    }
+    if (hasRestroom !== undefined) data.hasRestroom = hasRestroom;
+    if (licensePlate !== undefined) data.licensePlate = licensePlate || null;
+    if (depotId !== undefined) {
+      if (depotId) {
+        const depot = await prisma.fleetDepot.findFirst({ where: { id: depotId, fleetId } });
+        if (!depot) { res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "Depot not found in this fleet" }); return; }
+      }
+      data.depotId = depotId || null;
+    }
+    if (isActive !== undefined) data.isActive = isActive;
+
+    const updated = await prisma.vehicle.update({ where: { id: vehicle.id }, data });
+    res.json({ vehicle: updated });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to update fleet vehicle");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to update vehicle" });
+  }
+});
+
+router.post("/fleet/vehicles/:vehicleId/assign-driver", requireAuth, requireFleetMember, requireFleetAdmin, async (req, res) => {
+  try {
+    const fleetId = (req as any).fleetId;
+    const vehicle = await prisma.vehicle.findFirst({ where: { id: req.params.vehicleId, fleetId } });
+    if (!vehicle) { res.status(404).json({ errorCode: "NOT_FOUND", message: "Vehicle not found in this fleet" }); return; }
+
+    const { userId } = req.body;
+    if (!userId) { res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "userId is required" }); return; }
+
+    const driverMembership = await prisma.fleetMembership.findFirst({ where: { fleetId, userId, role: "DRIVER", isActive: true } });
+    if (!driverMembership) { res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "User is not an active driver in this fleet" }); return; }
+
+    const existing = await prisma.fleetDriverAssignment.findFirst({
+      where: { fleetId, vehicleId: vehicle.id, driverUserId: userId, endsAt: null },
+    });
+    if (existing) { res.status(409).json({ errorCode: "ALREADY_ASSIGNED", message: "Driver is already assigned to this vehicle" }); return; }
+
+    const assignment = await prisma.fleetDriverAssignment.create({
+      data: { fleetId, vehicleId: vehicle.id, driverUserId: userId, startsAt: new Date() },
+      include: { driver: { select: { id: true, firstName: true, lastName: true, email: true } } },
+    });
+
+    res.status(201).json({ assignment });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to assign driver");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to assign driver" });
+  }
+});
+
+router.delete("/fleet/vehicles/:vehicleId/assign-driver/:assignmentId", requireAuth, requireFleetMember, requireFleetAdmin, async (req, res) => {
+  try {
+    const fleetId = (req as any).fleetId;
+    const assignment = await prisma.fleetDriverAssignment.findFirst({
+      where: { id: req.params.assignmentId, vehicleId: req.params.vehicleId, fleetId },
+    });
+    if (!assignment) { res.status(404).json({ errorCode: "NOT_FOUND", message: "Assignment not found" }); return; }
+
+    await prisma.fleetDriverAssignment.delete({ where: { id: assignment.id } });
+    res.json({ success: true });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to remove driver assignment");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to remove assignment" });
+  }
+});
+
+// ─── FLEET WASH REQUESTS ────────────────────────────────────────────────────
+
 router.get("/fleet/wash-requests", requireAuth, requireFleetMember, async (req, res) => {
   try {
     const user = req.user as SessionUser;
