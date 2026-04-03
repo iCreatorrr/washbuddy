@@ -1,11 +1,37 @@
 import { Router, type IRouter } from "express";
+import rateLimit from "express-rate-limit";
 import { prisma } from "@workspace/db";
 import { hashPassword, verifyPassword, loadSessionUser } from "../lib/auth";
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
-router.post("/auth/register", async (req, res) => {
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { errorCode: "RATE_LIMITED", message: "Too many attempts. Please try again in 15 minutes." },
+});
+
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { errorCode: "RATE_LIMITED", message: "Too many registration attempts. Please try again later." },
+});
+
+function validatePassword(password: string): string | null {
+  if (typeof password !== "string" || password.length < 8) return "Password must be at least 8 characters";
+  if (password.length > 128) return "Password must be 128 characters or fewer";
+  if (!/[A-Z]/.test(password)) return "Password must contain at least one uppercase letter";
+  if (!/[a-z]/.test(password)) return "Password must contain at least one lowercase letter";
+  if (!/[0-9]/.test(password)) return "Password must contain at least one number";
+  return null;
+}
+
+router.post("/auth/register", registerLimiter, async (req, res) => {
   try {
     const { email, password, firstName, lastName, phone, accountType, businessName } = req.body;
 
@@ -17,11 +43,9 @@ router.post("/auth/register", async (req, res) => {
       return;
     }
 
-    if (typeof password !== "string" || password.length < 8) {
-      res.status(400).json({
-        errorCode: "VALIDATION_ERROR",
-        message: "Password must be at least 8 characters",
-      });
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      res.status(400).json({ errorCode: "VALIDATION_ERROR", message: passwordError });
       return;
     }
 
@@ -129,7 +153,7 @@ router.post("/auth/register", async (req, res) => {
   }
 });
 
-router.post("/auth/login", async (req, res) => {
+router.post("/auth/login", authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
