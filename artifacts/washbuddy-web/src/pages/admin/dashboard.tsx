@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Card, Badge, ErrorState } from "@/components/ui";
 import { Activity, Users, Calendar, DollarSign, ChevronRight, ArrowRight, AlertTriangle, CheckCircle2, Clock, Shield, CreditCard, BarChart3 } from "lucide-react";
 import { getStatusColor, getStatusLabel, formatCurrency, formatDate } from "@/lib/utils";
+import { formatLocationDisplay } from "@/lib/format-location";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
 
@@ -223,7 +224,7 @@ export default function AdminDashboard() {
                   {data.recentBookings.map((b: any) => (
                     <tr key={b.id} onClick={() => window.location.href = `/bookings/${b.id}`} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors">
                       <td className="py-2.5 px-3 font-medium text-slate-900">{b.service}</td>
-                      <td className="py-2.5 px-3 text-slate-500 hidden md:table-cell">{b.provider} — {b.location}</td>
+                      <td className="py-2.5 px-3 text-slate-500 hidden md:table-cell">{formatLocationDisplay(b.provider, b.location)}</td>
                       <td className="py-2.5 px-3 text-slate-600">{b.customer}</td>
                       <td className="py-2.5 px-3 text-slate-500">{formatDate(b.date, "MMM d")}</td>
                       <td className="py-2.5 px-3"><Badge className={getStatusColor(b.status)}>{getStatusLabel(b.status)}</Badge></td>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Card, Badge, Button, ErrorState } from "@/components/ui";
 import { getStatusColor, getStatusLabel, formatCurrency, formatDate } from "@/lib/utils";
+import { formatLocationDisplay } from "@/lib/format-location";
 import { Link } from "wouter";
 import { Calendar, Search, ChevronRight, Filter, ChevronLeft, Truck, Building2 } from "lucide-react";
 import { motion } from "framer-motion";
@@ -163,7 +164,7 @@ export default function AdminBookings() {
                     className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-slate-400">{b.id.slice(0, 8)}</td>
                     <td className="px-4 py-3 font-medium text-slate-900">{b.service}</td>
-                    <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{b.provider} — {b.location}</td>
+                    <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{formatLocationDisplay(b.provider, b.location)}</td>
                     <td className="px-4 py-3 text-slate-700">{b.customer}</td>
                     <td className="px-4 py-3 text-slate-500 hidden xl:table-cell">{b.fleet || "—"}</td>
                     <td className="px-4 py-3 text-slate-500 hidden xl:table-cell">{b.vehicle || "—"}</td>

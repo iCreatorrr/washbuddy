@@ -3,6 +3,7 @@ import { Card, Badge, Button } from "@/components/ui";
 import { Link } from "wouter";
 import { Truck, AlertTriangle, Clock, ClipboardList, RotateCcw, Building2, Users, Calendar, ChevronRight, ArrowRight, CheckCircle2, Loader2, Droplets, DollarSign, Search, Settings } from "lucide-react";
 import { formatCurrency, formatDate, getStatusColor, getStatusLabel } from "@/lib/utils";
+import { formatLocationDisplay } from "@/lib/format-location";
 import { motion } from "framer-motion";
 import { useAuth } from "@/contexts/auth";
 
@@ -155,7 +156,7 @@ export default function FleetOverview() {
                     <tr key={b.id} onClick={() => window.location.href = `/bookings/${b.id}`} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors">
                       <td className="py-2.5 px-3 font-medium text-slate-900">{b.vehicle?.unitNumber || "—"}</td>
                       <td className="py-2.5 px-3 text-slate-600">{b.serviceNameSnapshot}</td>
-                      <td className="py-2.5 px-3 text-slate-500 hidden md:table-cell">{b.location?.provider?.name} — {b.location?.name}</td>
+                      <td className="py-2.5 px-3 text-slate-500 hidden md:table-cell">{formatLocationDisplay(b.location?.provider?.name, b.location?.name)}</td>
                       <td className="py-2.5 px-3 text-slate-500">{formatDate(b.scheduledStartAtUtc, "MMM d")}</td>
                       <td className="py-2.5 px-3"><Badge className={getStatusColor(b.status)}>{getStatusLabel(b.status)}</Badge></td>
                       <td className="py-2.5 px-3 text-right font-bold text-slate-900">{formatCurrency(b.totalPriceMinor, b.currencyCode)}</td>

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { useListBookings, useCancelBooking } from "@workspace/api-client-react";
 import { Card, Badge, Button, ErrorState } from "@/components/ui";
 import { getStatusColor, getStatusLabel, formatCurrency, formatDate } from "@/lib/utils";
+import { formatLocationDisplay } from "@/lib/format-location";
 import { Link, useLocation } from "wouter";
 import { Calendar, MapPin, Truck, Search, Star, XCircle, AlertTriangle } from "lucide-react";
 import { motion } from "framer-motion";
@@ -173,7 +174,7 @@ export default function MyBookings() {
                     </span>
                     <span className="flex items-center gap-1.5">
                       <MapPin className="h-4 w-4 text-slate-400" />
-                      {booking.location?.provider?.name} — {booking.location?.name}
+                      {formatLocationDisplay(booking.location?.provider?.name, booking.location?.name)}
                     </span>
                     {booking.vehicle && (
                       <span className="flex items-center gap-1.5">

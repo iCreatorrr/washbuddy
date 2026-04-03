@@ -3,6 +3,7 @@ import { Card, Badge, Button } from "@/components/ui";
 import { BarChart3, AlertTriangle, CheckCircle2, Clock, TrendingUp, Layers, Activity, Droplets, Truck, DollarSign, Calendar } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn, formatCurrency, formatDate, getStatusColor, getStatusLabel } from "@/lib/utils";
+import { formatLocationDisplay } from "@/lib/format-location";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -417,7 +418,7 @@ function WashActivityTab() {
                   <td className="px-4 py-3 text-slate-600">{formatDate(b.date, "MMM d, yyyy")}</td>
                   <td className="px-4 py-3 font-medium text-slate-900">{b.vehicle?.unitNumber || "—"}</td>
                   <td className="px-4 py-3 text-slate-600 hidden md:table-cell">{b.driver?.firstName} {b.driver?.lastName}</td>
-                  <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{b.provider} — {b.location}</td>
+                  <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{formatLocationDisplay(b.provider, b.location)}</td>
                   <td className="px-4 py-3 text-slate-600">{b.service}</td>
                   <td className="px-4 py-3"><Badge className={getStatusColor(b.status)}>{getStatusLabel(b.status)}</Badge></td>
                   <td className="px-4 py-3 text-right font-bold text-slate-900">{formatCurrency(b.cost, b.currencyCode)}</td>
