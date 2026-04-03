@@ -8,6 +8,8 @@
 
 import { prisma } from "@workspace/db";
 import { createNotification } from "./notifications";
+import { sendEmail } from "./emailService";
+import * as templates from "./emailTemplates";
 import { logger } from "./logger";
 
 const SLA_ENFORCER_LOCK_ID = 8675309; // Arbitrary advisory lock ID
@@ -115,7 +117,7 @@ export async function enforceExpiredBookings(): Promise<number> {
                 name: true,
                 memberships: {
                   where: { role: "PROVIDER_ADMIN", isActive: true },
-                  select: { userId: true },
+                  include: { user: { select: { id: true, email: true, firstName: true } } },
                   take: 5,
                 },
               },
@@ -123,7 +125,7 @@ export async function enforceExpiredBookings(): Promise<number> {
           },
         },
         service: { select: { name: true } },
-        customer: { select: { id: true, firstName: true, lastName: true } },
+        customer: { select: { id: true, email: true, firstName: true, lastName: true } },
       },
     });
 
@@ -189,10 +191,18 @@ export async function enforceExpiredBookings(): Promise<number> {
           },
         });
 
+        // Email to customer
+        if (booking.customer.email) {
+          await sendEmail({ to: booking.customer.email, ...templates.bookingExpired({
+            customerName: booking.customer.firstName, serviceName: booking.service.name,
+            locationName: booking.location.name, alternatives: [], actionUrl: "/search",
+          })});
+        }
+
         // Notify provider admin(s)
-        const providerAdminUserIds = booking.location.provider.memberships.map((m) => m.userId);
-        for (const adminUserId of providerAdminUserIds) {
-          await createNotification(adminUserId, {
+        const providerAdmins = booking.location.provider.memberships;
+        for (const admin of providerAdmins) {
+          await createNotification(admin.user.id, {
             subject: "Missed booking request",
             body: `You missed a booking request for ${booking.service.name} at ${booking.location.name} on ${scheduledDate}. Repeated failures to respond during your operating hours will impact your platform rating.`,
             actionUrl: `/provider`,
@@ -202,6 +212,14 @@ export async function enforceExpiredBookings(): Promise<number> {
               type: "PROVIDER_MISSED_SLA",
             },
           });
+          // Email to provider
+          const revenueLost = `$${(booking.serviceBasePriceMinor / 100).toFixed(2)}`;
+          await sendEmail({ to: admin.user.email, ...templates.providerMissedSLA({
+            providerName: admin.user.firstName, serviceName: booking.service.name,
+            locationName: booking.location.name,
+            customerName: `${booking.customer.firstName} ${booking.customer.lastName}`,
+            revenueLost, actionUrl: "/provider",
+          })});
         }
 
         // Update provider response metrics

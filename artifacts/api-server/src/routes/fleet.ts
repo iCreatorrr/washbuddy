@@ -4,6 +4,7 @@ import { requireAuth } from "../middlewares/requireAuth";
 import type { SessionUser } from "../lib/auth";
 import { isFleetRole, isFleetMember, getFleetId, isPlatformAdmin } from "../lib/auth";
 import { createNotification, createBulkNotifications } from "../lib/notifications";
+import { notifyWashRequestSubmitted } from "../lib/bookingNotifier";
 
 async function getFleetApproverUserIds(fleetId: string, excludeUserId?: string): Promise<string[]> {
   const members = await prisma.fleetMembership.findMany({
@@ -845,6 +846,7 @@ router.post("/fleet/wash-requests", requireAuth, requireFleetMember, async (req,
     }
 
     res.status(201).json({ request: washRequest });
+    notifyWashRequestSubmitted(washRequest.id, fleetId).catch(() => {});
   } catch (err: any) {
     req.log.error({ err }, "Failed to create wash request");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to create wash request" });

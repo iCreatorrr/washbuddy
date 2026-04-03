@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { prisma } from "@workspace/db";
 import { requireAuth, requirePlatformAdmin } from "../middlewares/requireAuth";
 import { createNotification } from "../lib/notifications";
+import { notifyProviderApproved } from "../lib/bookingNotifier";
 
 const router: IRouter = Router();
 
@@ -383,6 +384,7 @@ router.post("/admin/providers/:providerId/approve", requireAuth, requirePlatform
       data: { isVisible: true },
     });
     res.json({ provider });
+    notifyProviderApproved(provider.id).catch(() => {});
   } catch (err: any) {
     req.log.error({ err }, "Failed to approve provider");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to approve provider" });

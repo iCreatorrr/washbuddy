@@ -6,6 +6,7 @@ import { canTransition, isCancellable, isActiveBooking } from "../lib/bookingSta
 import { calculatePlatformFee, calculateAllInPrice } from "../lib/feeCalculator";
 import { incrementRespondedInSla } from "../lib/slaEnforcer";
 import { isDriver, getFleetId } from "../lib/auth";
+import { notifyBookingRequested, notifyBookingConfirmed, notifyBookingDeclined, notifyBookingCancelled, notifyBookingCompleted } from "../lib/bookingNotifier";
 import crypto from "crypto";
 
 const router: IRouter = Router();
@@ -273,6 +274,13 @@ router.post("/bookings", requireAuth, async (req, res) => {
     }, { isolationLevel: "Serializable" });
 
     res.status(201).json({ booking });
+
+    // Fire-and-forget notifications
+    if (booking.status === "REQUESTED") {
+      notifyBookingRequested(booking.id).catch(() => {});
+    } else if (booking.status === "PROVIDER_CONFIRMED") {
+      notifyBookingConfirmed(booking.id).catch(() => {});
+    }
   } catch (err: any) {
     if (err?.message === "HOLD_NOT_AVAILABLE") {
       res.status(410).json({ errorCode: "HOLD_EXPIRED", message: "Hold is no longer available. Please create a new hold." });
@@ -458,6 +466,7 @@ router.post("/bookings/:bookingId/confirm", requireAuth, async (req, res) => {
     }
 
     res.json({ booking: updated });
+    notifyBookingConfirmed(booking.id).catch(() => {});
   } catch (err: any) {
     if (err?.message === "INVALID_TRANSITION") {
       res.status(409).json({ errorCode: "INVALID_TRANSITION", message: "Cannot confirm booking in its current status" });
@@ -530,6 +539,7 @@ router.post("/bookings/:bookingId/decline", requireAuth, async (req, res) => {
     }
 
     res.json({ booking: updated });
+    notifyBookingDeclined(booking.id, reasonCode).catch(() => {});
   } catch (err: any) {
     if (err?.message === "INVALID_TRANSITION") {
       res.status(409).json({ errorCode: "INVALID_TRANSITION", message: "Cannot decline booking in its current status" });
@@ -598,6 +608,7 @@ router.post("/bookings/:bookingId/cancel", requireAuth, async (req, res) => {
     });
 
     res.json({ booking: updated });
+    notifyBookingCancelled(booking.id, isCustomer ? "customer" : "provider").catch(() => {});
   } catch (err: any) {
     if (err?.message === "NOT_CANCELLABLE") {
       res.status(409).json({ errorCode: "NOT_CANCELLABLE", message: "Cannot cancel booking in its current status" });
@@ -749,6 +760,7 @@ router.post("/bookings/:bookingId/complete", requireAuth, async (req, res) => {
     });
 
     res.json({ booking: updated });
+    notifyBookingCompleted(booking.id).catch(() => {});
   } catch (err: any) {
     if (err?.message === "INVALID_TRANSITION") {
       res.status(409).json({ errorCode: "INVALID_TRANSITION", message: "Cannot complete booking in its current status" });
