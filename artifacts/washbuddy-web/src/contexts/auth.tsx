@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect } from "react";
 import { useGetMe, useLogin, useLogout, useRegister } from "@workspace/api-client-react";
 import type { AuthUser, LoginInput, RegisterInput } from "@workspace/api-client-react";
-import { useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 
 type AuthContextType = {
@@ -16,7 +15,6 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const { data, isLoading: isMeLoading, refetch } = useGetMe({ 
     request: { credentials: 'include' },
@@ -44,7 +42,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await logoutMutation.mutateAsync();
     } catch {}
     queryClient.clear();
-    setLocation("/login");
+    window.location.href = "/login";
   };
 
   const hasRole = (role: string) => {

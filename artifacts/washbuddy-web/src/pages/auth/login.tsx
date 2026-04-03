@@ -23,7 +23,12 @@ export default function Login() {
       });
       setLocation("/"); // AuthContext + App.tsx will route correctly
     } catch (err: any) {
-      setError(err.message || "Invalid credentials. Try again.");
+      const message =
+        err?.response?.data?.message
+        || err?.data?.message
+        || (typeof err?.message === "string" && err.message.length < 200 && !err.message.includes("fetch") ? err.message : null)
+        || "Invalid email or password. Please try again.";
+      setError(message);
       setLoading(false);
     }
   };
@@ -66,11 +71,11 @@ export default function Login() {
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <Label htmlFor="email">Email address</Label>
-              <Input id="email" name="email" type="email" required placeholder="admin@washbuddy.com" />
+              <Input id="email" name="email" type="email" required placeholder="you@example.com" autoComplete="email" />
             </div>
             <div>
               <Label htmlFor="password">Password</Label>
-              <Input id="password" name="password" type="password" required placeholder="••••••••" />
+              <Input id="password" name="password" type="password" required placeholder="••••••••" autoComplete="current-password" />
             </div>
             
             <Button type="submit" className="w-full" size="lg" isLoading={loading}>
