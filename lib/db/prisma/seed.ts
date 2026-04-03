@@ -773,6 +773,149 @@ async function main() {
   console.log(`  ✓ ${totalOperatingWindows} operating windows created.`);
   console.log(`  ✓ ${totalCompatRules} compatibility rules created.\n`);
 
+  // ── Step 4.5: Create seed bookings, reviews, and notifications ─────
+  console.log("Step 4.5: Creating seed bookings, reviews, and notifications...");
+
+  // Fetch some approved locations with services for bookings
+  const seedLocations = await prisma.location.findMany({
+    where: { isVisible: true, provider: { approvalStatus: "APPROVED" } },
+    include: {
+      services: { where: { isVisible: true }, take: 2 },
+      provider: { select: { id: true, name: true } },
+    },
+    take: 8,
+  });
+
+  const bookingStatuses = [
+    "COMPLETED", "COMPLETED", "COMPLETED", "COMPLETED", "SETTLED", "SETTLED",
+    "COMPLETED_PENDING_WINDOW", "PROVIDER_CONFIRMED", "REQUESTED", "IN_SERVICE",
+    "CUSTOMER_CANCELLED", "CHECKED_IN",
+  ];
+
+  const seedBookings = [];
+  for (let bi = 0; bi < Math.min(bookingStatuses.length, seedLocations.length * 2); bi++) {
+    const loc = seedLocations[bi % seedLocations.length];
+    const svc = loc.services[bi % loc.services.length];
+    if (!svc) continue;
+
+    const status = bookingStatuses[bi];
+    const daysAgo = 30 - bi * 2;
+    const scheduledStart = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
+    const scheduledEnd = new Date(scheduledStart.getTime() + svc.durationMins * 60 * 1000);
+    const customerId = bi % 2 === 0 ? driverUser.id : driver1User.id;
+
+    const fee = Math.min(Math.round(svc.basePriceMinor * 0.15), 2500);
+    const booking = await prisma.booking.create({
+      data: {
+        locationId: loc.id,
+        serviceId: svc.id,
+        customerId,
+        vehicleId: vehicles[bi % vehicles.length].id,
+        status: status as any,
+        idempotencyKey: `seed-booking-${bi}-${Date.now()}`,
+        serviceNameSnapshot: svc.name,
+        serviceBasePriceMinor: svc.basePriceMinor,
+        platformFeeMinor: fee,
+        totalPriceMinor: svc.basePriceMinor + fee,
+        currencyCode: svc.currencyCode,
+        locationTimezone: loc.timezone,
+        scheduledStartAtUtc: scheduledStart,
+        scheduledEndAtUtc: scheduledEnd,
+        createdAt: new Date(scheduledStart.getTime() - 2 * 24 * 60 * 60 * 1000),
+      },
+    });
+    await prisma.bookingStatusHistory.create({
+      data: { bookingId: booking.id, fromStatus: null, toStatus: status as any, reason: "Seed data" },
+    });
+    seedBookings.push({ ...booking, location: loc });
+  }
+  console.log(`  ✓ ${seedBookings.length} seed bookings created.`);
+
+  // Reviews — attach to COMPLETED/SETTLED bookings
+  const completedBookings = seedBookings.filter((b) =>
+    ["COMPLETED", "COMPLETED_PENDING_WINDOW", "SETTLED"].includes(b.status),
+  );
+
+  const reviewData = [
+    { rating: 5, comment: "Excellent job on our 45-foot coach. Bay was ready on time, team was professional. Will be back." },
+    { rating: 5, comment: "Best undercarriage wash in the corridor. They really know how to handle school buses." },
+    { rating: 5, comment: "Flawless exterior wash. Our fleet manager specifically requests this location every time." },
+    { rating: 4, comment: "Good wash overall. Slight water spots on the passenger side but the interior was immaculate." },
+    { rating: 4, comment: "Consistent quality every time we come here. Fair pricing for the area." },
+    { rating: 4, comment: "Quick turnaround, friendly staff. Would give 5 stars but the waiting area is cramped." },
+    { rating: 4, comment: "Solid exterior wash. Handled our double-decker without issues. Good communication throughout." },
+    { rating: 4, comment: "Professional service, on-time appointment. Minor streaking on the windshield." },
+    { rating: 3, comment: "Adequate service but had to wait 20 minutes past our appointment. Communication could improve." },
+    { rating: 3, comment: "Wash quality is fine but the facility is dated. Price is fair for what you get." },
+    { rating: 3, comment: "Decent wash but they missed the wheel wells. Had to point it out for a redo." },
+  ];
+
+  const providerReplies: Record<number, { reply: string }> = {
+    0: { reply: "Thank you for the kind words! We take pride in our coach washing service." },
+    8: { reply: "We apologize for the wait. We've added an extra bay to reduce wait times during peak hours." },
+    3: { reply: "Thanks for the feedback! We've addressed the streaking issue with new equipment." },
+  };
+
+  let reviewCount = 0;
+  for (let ri = 0; ri < Math.min(reviewData.length, completedBookings.length); ri++) {
+    const b = completedBookings[ri];
+    const rd = reviewData[ri];
+    const replyInfo = providerReplies[ri];
+    const daysAgo = 25 - ri * 2;
+
+    await prisma.review.create({
+      data: {
+        bookingId: b.id,
+        locationId: b.locationId,
+        authorId: b.customerId,
+        subjectId: b.customerId, // Required field — subject of the review
+        rating: rd.rating,
+        comment: rd.comment,
+        providerReply: replyInfo?.reply || null,
+        providerReplyAt: replyInfo ? new Date(Date.now() - (daysAgo - 1) * 24 * 60 * 60 * 1000) : null,
+        createdAt: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000),
+      },
+    });
+    reviewCount++;
+  }
+  console.log(`  ✓ ${reviewCount} seed reviews created (${Object.keys(providerReplies).length} with provider replies).`);
+
+  // Notifications
+  function daysAgoDate(d: number): Date { return new Date(Date.now() - d * 24 * 60 * 60 * 1000); }
+  function hoursAgoDate(h: number): Date { return new Date(Date.now() - h * 60 * 60 * 1000); }
+
+  const notifBase = { channel: "IN_APP" as const, status: "DELIVERED" as const };
+
+  const seedNotifications = [
+    // Admin (3)
+    { userId: adminUser.id, subject: "New provider registration", body: "Sparkle Wash NJ has submitted a provider application. Review their listing.", actionUrl: "/admin/providers?status=PENDING", readAt: null, ...notifBase, sentAt: daysAgoDate(2), deliveredAt: daysAgoDate(2), createdAt: daysAgoDate(2) },
+    { userId: adminUser.id, subject: "Provider SLA alert", body: "Metro Fleet Wash — Bronx Terminal has missed 3 booking responses this week.", actionUrl: "/admin/providers", readAt: daysAgoDate(5), ...notifBase, sentAt: daysAgoDate(5), deliveredAt: daysAgoDate(5), createdAt: daysAgoDate(5) },
+    { userId: adminUser.id, subject: "Platform milestone", body: "WashBuddy has processed 100 bookings this month. Platform revenue: $1,247.50.", actionUrl: "/admin", readAt: null, ...notifBase, sentAt: daysAgoDate(1), deliveredAt: daysAgoDate(1), createdAt: daysAgoDate(1) },
+
+    // Driver (5)
+    { userId: driverUser.id, subject: "Booking confirmed", body: "Your exterior wash at Lakeshore Bus Care is confirmed for tomorrow at 10:00 AM. Address: 2847 Lakeshore Blvd W, Etobicoke.", actionUrl: "/my-bookings", readAt: daysAgoDate(3), ...notifBase, sentAt: daysAgoDate(3), deliveredAt: daysAgoDate(3), createdAt: daysAgoDate(3) },
+    { userId: driverUser.id, subject: "Wash complete!", body: "Your wash at Metro Fleet Wash is finished. Leave a review to help other drivers.", actionUrl: "/my-bookings", readAt: null, ...notifBase, sentAt: daysAgoDate(1), deliveredAt: daysAgoDate(1), createdAt: daysAgoDate(1) },
+    { userId: driverUser.id, subject: "Booking reminder", body: "Reminder: You have a wash scheduled at Empire State Coach Wash tomorrow at 9:00 AM.", actionUrl: "/my-bookings", readAt: null, ...notifBase, sentAt: hoursAgoDate(12), deliveredAt: hoursAgoDate(12), createdAt: hoursAgoDate(12) },
+    { userId: driverUser.id, subject: "Rate limited by fleet policy", body: "Your booking at QuickClean Bus Spa was blocked. Fleet policy: maximum 1 wash per vehicle per 7 days.", actionUrl: "/search", readAt: null, ...notifBase, sentAt: hoursAgoDate(6), deliveredAt: hoursAgoDate(6), createdAt: hoursAgoDate(6) },
+    { userId: driverUser.id, subject: "Booking declined", body: "Your request at Hudson Valley Bus Wash was declined. Reason: fully booked. Try nearby alternatives.", actionUrl: "/search", readAt: daysAgoDate(2), ...notifBase, sentAt: daysAgoDate(2), deliveredAt: daysAgoDate(2), createdAt: daysAgoDate(2) },
+
+    // Fleet admin (4)
+    { userId: fleetAdminUser.id, subject: "Wash request submitted", body: "Alex Rivera submitted a wash request for vehicle NEB-101 at Metro Fleet Wash — Bronx Terminal.", actionUrl: "/fleet/requests", readAt: null, ...notifBase, sentAt: hoursAgoDate(4), deliveredAt: hoursAgoDate(4), createdAt: hoursAgoDate(4) },
+    { userId: fleetAdminUser.id, subject: "Monthly wash summary", body: "Your fleet completed 12 washes in March. Total spend: $1,847.50. 2 vehicles are overdue.", actionUrl: "/fleet/reports", readAt: daysAgoDate(2), ...notifBase, sentAt: daysAgoDate(2), deliveredAt: daysAgoDate(2), createdAt: daysAgoDate(2) },
+    { userId: fleetAdminUser.id, subject: "Vehicle overdue for wash", body: "Vehicle NEB-103 is 5 days overdue for its scheduled wash. Last washed: March 15.", actionUrl: "/fleet/vehicles", readAt: null, ...notifBase, sentAt: daysAgoDate(1), deliveredAt: daysAgoDate(1), createdAt: daysAgoDate(1) },
+    { userId: fleetAdminUser.id, subject: "Policy violation attempt", body: "Driver Mike Johnson attempted to book at a non-approved provider. Request was blocked by fleet policy.", actionUrl: "/fleet/settings", readAt: null, ...notifBase, sentAt: hoursAgoDate(8), deliveredAt: hoursAgoDate(8), createdAt: hoursAgoDate(8) },
+
+    // Provider owner (4)
+    { userId: providerOwnerUser.id, subject: "New booking request", body: "New exterior wash request from Northeast Bus Lines for tomorrow at 10:00 AM. Respond within 5 minutes.", actionUrl: "/provider", readAt: null, ...notifBase, sentAt: hoursAgoDate(3), deliveredAt: hoursAgoDate(3), createdAt: hoursAgoDate(3) },
+    { userId: providerOwnerUser.id, subject: "Review received", body: "A customer left a 4-star review at your Bronx Terminal location: 'Good wash overall. Slight water spots...'", actionUrl: "/provider/reviews", readAt: null, ...notifBase, sentAt: daysAgoDate(1), deliveredAt: daysAgoDate(1), createdAt: daysAgoDate(1) },
+    { userId: providerOwnerUser.id, subject: "Listing approved", body: "Your WashBuddy listing has been approved! You're now visible to customers in the search results.", actionUrl: "/provider", readAt: daysAgoDate(20), ...notifBase, sentAt: daysAgoDate(20), deliveredAt: daysAgoDate(20), createdAt: daysAgoDate(20) },
+    { userId: providerOwnerUser.id, subject: "Payout processed", body: "Your weekly payout of $1,245.00 has been processed to your bank account ending in ****4521.", actionUrl: "/provider", readAt: daysAgoDate(3), ...notifBase, sentAt: daysAgoDate(3), deliveredAt: daysAgoDate(3), createdAt: daysAgoDate(3) },
+  ];
+
+  await prisma.notification.createMany({ data: seedNotifications });
+  const unreadCount = seedNotifications.filter((n) => !n.readAt).length;
+  console.log(`  ✓ ${seedNotifications.length} seed notifications created (${unreadCount} unread).\n`);
+
   // ── Step 5: Write DemoDataRegistry records ─────────────────────────
   console.log("Step 5: Writing DemoDataRegistry records...");
 
