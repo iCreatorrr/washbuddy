@@ -23,7 +23,8 @@
     "helmet": "^8.1.0",
     "pg": "^8.20.0",
     "pino": "^9",
-    "pino-http": "^10"
+    "pino-http": "^10",
+    "stripe": "^21.0.1"
   },
   "devDependencies": {
     "@types/connect-pg-simple": "^7.0.3",

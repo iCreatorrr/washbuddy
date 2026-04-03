@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { prisma } from "@workspace/db";
 import { requireAuth, requirePlatformAdmin, requireProviderAccess } from "../middlewares/requireAuth";
 import { isPlatformAdmin, type SessionUser } from "../lib/auth";
+import { createConnectedAccount, createAccountOnboardingLink } from "../lib/stripeService";
 
 const router: IRouter = Router();
 
@@ -121,6 +122,42 @@ router.patch("/providers/:providerId", requireAuth, requireProviderAccess(), asy
   } catch (err) {
     req.log.error({ err }, "Failed to update provider");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to update provider" });
+  }
+});
+
+router.post("/providers/:providerId/stripe/onboard", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const provider = await prisma.provider.findUnique({
+      where: { id: req.params.providerId },
+      select: { id: true, name: true, externalPayoutAcctId: true },
+    });
+
+    if (!provider) {
+      res.status(404).json({ errorCode: "NOT_FOUND", message: "Provider not found" });
+      return;
+    }
+
+    let accountId = provider.externalPayoutAcctId;
+
+    if (!accountId) {
+      const account = await createConnectedAccount(provider.name);
+      accountId = account.accountId;
+      await prisma.provider.update({
+        where: { id: provider.id },
+        data: { externalPayoutAcctId: accountId },
+      });
+    }
+
+    const basePath = process.env.BASE_PATH || "";
+    const refreshUrl = `${basePath}/provider/settings`;
+    const returnUrl = `${basePath}/provider/settings?stripe_onboard=complete`;
+
+    const link = await createAccountOnboardingLink(accountId, refreshUrl, returnUrl);
+
+    res.json({ url: link.url });
+  } catch (err) {
+    req.log.error({ err }, "Failed to initiate Stripe onboarding");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to start payment setup" });
   }
 });
 
