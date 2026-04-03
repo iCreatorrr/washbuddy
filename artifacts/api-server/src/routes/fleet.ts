@@ -87,6 +87,9 @@ router.get("/fleet/overview", requireAuth, requireFleetMember, async (req, res) 
 
     const now = new Date();
 
+    // First day of current month at 00:00 UTC
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
     const [
       totalVehicles,
       overdueVehicles,
@@ -96,6 +99,8 @@ router.get("/fleet/overview", requireAuth, requireFleetMember, async (req, res) 
       totalDepots,
       totalDrivers,
       recentBookings,
+      washesThisMonth,
+      spendThisMonthAgg,
     ] = await Promise.all([
       prisma.vehicle.count({ where: { fleetId, isActive: true } }),
       prisma.vehicle.count({ where: { fleetId, isActive: true, nextWashDueAtUtc: { lt: now } } }),
@@ -108,6 +113,21 @@ router.get("/fleet/overview", requireAuth, requireFleetMember, async (req, res) 
         where: {
           vehicle: { fleetId },
           status: { in: ["REQUESTED", "HELD", "PROVIDER_CONFIRMED", "CHECKED_IN", "IN_SERVICE"] },
+        },
+      }),
+      prisma.booking.count({
+        where: {
+          vehicle: { fleetId },
+          scheduledStartAtUtc: { gte: monthStart },
+          status: { notIn: ["CUSTOMER_CANCELLED", "EXPIRED"] },
+        },
+      }),
+      prisma.booking.aggregate({
+        _sum: { totalPriceMinor: true },
+        where: {
+          vehicle: { fleetId },
+          scheduledStartAtUtc: { gte: monthStart },
+          status: { in: ["COMPLETED", "COMPLETED_PENDING_WINDOW", "SETTLED", "IN_SERVICE", "PROVIDER_CONFIRMED", "CHECKED_IN"] },
         },
       }),
     ]);
@@ -133,9 +153,20 @@ router.get("/fleet/overview", requireAuth, requireFleetMember, async (req, res) 
       take: 5,
     });
 
+    const recentBookingsList = await prisma.booking.findMany({
+      where: { vehicle: { fleetId } },
+      include: {
+        vehicle: { select: { id: true, unitNumber: true } },
+        service: { select: { id: true, name: true } },
+        location: { select: { id: true, name: true, provider: { select: { id: true, name: true } } } },
+      },
+      orderBy: { scheduledStartAtUtc: "desc" },
+      take: 10,
+    });
+
     const fleet = await prisma.fleet.findUnique({
       where: { id: fleetId },
-      select: { id: true, name: true, status: true, billingMode: true, defaultTimezone: true },
+      select: { id: true, name: true, status: true, billingMode: true, defaultTimezone: true, currencyCode: true },
     });
 
     res.json({
@@ -149,9 +180,12 @@ router.get("/fleet/overview", requireAuth, requireFleetMember, async (req, res) 
         totalDepots,
         totalDrivers,
         activeBookings: recentBookings,
+        washesThisMonth,
+        spendThisMonth: spendThisMonthAgg._sum.totalPriceMinor || 0,
       },
       overdueVehicles: overdueList,
       pendingRequests: pendingRequestsList,
+      recentBookings: recentBookingsList,
     });
   } catch (err: any) {
     req.log.error({ err }, "Failed to get fleet overview");

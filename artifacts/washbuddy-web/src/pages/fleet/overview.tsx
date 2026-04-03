@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { Card, Badge, Button } from "@/components/ui";
 import { Link } from "wouter";
-import { Truck, AlertTriangle, Clock, ClipboardList, RotateCcw, Building2, Users, Calendar, ChevronRight, ArrowRight, CheckCircle2, Loader2 } from "lucide-react";
+import { Truck, AlertTriangle, Clock, ClipboardList, RotateCcw, Building2, Users, Calendar, ChevronRight, ArrowRight, CheckCircle2, Loader2, Droplets, DollarSign, Search, Settings } from "lucide-react";
+import { formatCurrency, formatDate, getStatusColor, getStatusLabel } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { useAuth } from "@/contexts/auth";
 
@@ -99,10 +100,72 @@ export default function FleetOverview() {
       </motion.div>
 
       <motion.div {...fadeUp} transition={{ duration: 0.3, delay: 0.1 }} className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <KpiCard icon={RotateCcw} label="Active Programs" value={kpis.activePrograms} color="indigo" />
-        <KpiCard icon={Building2} label="Depots" value={kpis.totalDepots} color="slate" />
+        <KpiCard icon={Droplets} label="Washes This Month" value={kpis.washesThisMonth} color="indigo" />
+        <SpendCard label="Spend This Month" value={kpis.spendThisMonth} currencyCode={fleet?.currencyCode || "USD"} />
         <KpiCard icon={Users} label="Drivers" value={kpis.totalDrivers} color="cyan" />
         <KpiCard icon={Calendar} label="Active Bookings" value={kpis.activeBookings} color="emerald" />
+      </motion.div>
+
+      {/* Quick Action Buttons */}
+      {isOperator && (
+        <motion.div {...fadeUp} transition={{ duration: 0.3, delay: 0.12 }} className="flex flex-wrap gap-3">
+          <Link href="/search">
+            <Button className="gap-2"><Search className="h-4 w-4" /> Book a Wash</Button>
+          </Link>
+          <Link href="/fleet/vehicles">
+            <Button variant="outline" className="gap-2"><Truck className="h-4 w-4" /> View All Vehicles</Button>
+          </Link>
+          <Link href="/fleet/settings">
+            <Button variant="outline" className="gap-2"><Settings className="h-4 w-4" /> Fleet Settings</Button>
+          </Link>
+        </motion.div>
+      )}
+
+      {/* Recent Wash Activity */}
+      <motion.div {...fadeUp} transition={{ duration: 0.3, delay: 0.13 }}>
+        <Card className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <Droplets className="h-5 w-5 text-blue-500" />
+              Recent Wash Activity
+            </h2>
+          </div>
+          {!data?.recentBookings?.length ? (
+            <div className="text-center py-8">
+              <p className="text-slate-400 text-sm mb-3">No wash activity yet.</p>
+              <Link href="/search">
+                <Button size="sm" variant="outline" className="gap-1"><Search className="h-3.5 w-3.5" /> Book a Wash</Button>
+              </Link>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="text-left py-2 px-3 text-xs font-bold text-slate-400 uppercase tracking-wider">Vehicle</th>
+                    <th className="text-left py-2 px-3 text-xs font-bold text-slate-400 uppercase tracking-wider">Service</th>
+                    <th className="text-left py-2 px-3 text-xs font-bold text-slate-400 uppercase tracking-wider hidden md:table-cell">Provider / Location</th>
+                    <th className="text-left py-2 px-3 text-xs font-bold text-slate-400 uppercase tracking-wider">Date</th>
+                    <th className="text-left py-2 px-3 text-xs font-bold text-slate-400 uppercase tracking-wider">Status</th>
+                    <th className="text-right py-2 px-3 text-xs font-bold text-slate-400 uppercase tracking-wider">Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.recentBookings.map((b: any) => (
+                    <tr key={b.id} onClick={() => window.location.href = `/bookings/${b.id}`} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors">
+                      <td className="py-2.5 px-3 font-medium text-slate-900">{b.vehicle?.unitNumber || "—"}</td>
+                      <td className="py-2.5 px-3 text-slate-600">{b.serviceNameSnapshot}</td>
+                      <td className="py-2.5 px-3 text-slate-500 hidden md:table-cell">{b.location?.provider?.name} — {b.location?.name}</td>
+                      <td className="py-2.5 px-3 text-slate-500">{formatDate(b.scheduledStartAtUtc, "MMM d")}</td>
+                      <td className="py-2.5 px-3"><Badge className={getStatusColor(b.status)}>{getStatusLabel(b.status)}</Badge></td>
+                      <td className="py-2.5 px-3 text-right font-bold text-slate-900">{formatCurrency(b.totalPriceMinor, b.currencyCode)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
       </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -200,6 +263,22 @@ export default function FleetOverview() {
         </motion.div>
       </div>
     </div>
+  );
+}
+
+function SpendCard({ label, value, currencyCode }: { label: string; value: number; currencyCode: string }) {
+  return (
+    <Card className="p-4 border bg-emerald-50 text-emerald-600 border-emerald-100 hover:shadow-md transition-shadow">
+      <div className="flex items-center gap-3">
+        <div className="h-10 w-10 rounded-xl flex items-center justify-center bg-emerald-100 text-emerald-600">
+          <DollarSign className="h-5 w-5" />
+        </div>
+        <div>
+          <p className="text-2xl font-display font-bold">{formatCurrency(value || 0, currencyCode)}</p>
+          <p className="text-xs text-slate-500 font-medium">{label}</p>
+        </div>
+      </div>
+    </Card>
   );
 }
 
