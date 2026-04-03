@@ -23,7 +23,7 @@ router.get("/locations/available-now", async (req, res) => {
     const daysToQuery = spansMidnight ? [dayOfWeek, tomorrowDayOfWeek] : [dayOfWeek];
 
     const locations = await prisma.location.findMany({
-      where: { isVisible: true, provider: { isActive: true } },
+      where: { isVisible: true, provider: { isActive: true, approvalStatus: "APPROVED" } },
       include: {
         services: {
           where: { isVisible: true },
@@ -121,7 +121,7 @@ router.get("/locations/search", async (req, res) => {
   try {
     const { lat, lng, radiusMiles, categoryCode, subtypeCode, openNow } = req.query;
 
-    const where: Record<string, unknown> = { isVisible: true, provider: { isActive: true } };
+    const where: Record<string, unknown> = { isVisible: true, provider: { isActive: true, approvalStatus: "APPROVED" } };
 
     const locations = await prisma.location.findMany({
       where,

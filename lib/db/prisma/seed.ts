@@ -597,11 +597,15 @@ async function main() {
     // Determine how many locations: 1-3
     const numLocations = i < 15 ? 3 : i < 35 ? 2 : randomBetween(1, 3);
 
+    // First 45 providers are APPROVED, last 5 are PENDING (for testing admin approval)
+    const isApproved = i < 45;
     const provider = await prisma.provider.create({
       data: {
         name: providerName,
-        isActive: true,
+        isActive: isApproved,
         payoutReady: false,
+        approvalStatus: isApproved ? "APPROVED" : "PENDING",
+        approvedAt: isApproved ? new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) : null,
       },
     });
 
@@ -650,7 +654,7 @@ async function main() {
           responseSlaUnder1hMins: 5,
           responseSlaFutureMins: 10,
           bookingBufferMins: 5,
-          isVisible: true,
+          isVisible: isApproved,
         },
       });
 
@@ -709,7 +713,7 @@ async function main() {
             capacityPerSlot,
             leadTimeMins: svcTmpl.name === "Express Wash" ? 30 : 60,
             requiresConfirmation,
-            isVisible: true,
+            isVisible: isApproved,
           },
         });
 
