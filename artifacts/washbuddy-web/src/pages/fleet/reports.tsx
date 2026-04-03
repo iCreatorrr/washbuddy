@@ -1,12 +1,12 @@
-import React from "react";
-import { Card } from "@/components/ui";
-import { BarChart3, AlertTriangle, CheckCircle2, Clock, TrendingUp, Layers, Activity } from "lucide-react";
+import React, { useState } from "react";
+import { Card, Badge, Button } from "@/components/ui";
+import { BarChart3, AlertTriangle, CheckCircle2, Clock, TrendingUp, Layers, Activity, Droplets, Truck, DollarSign, Calendar } from "lucide-react";
 import { motion } from "framer-motion";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency, formatDate, getStatusColor, getStatusLabel } from "@/lib/utils";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
-type Tab = "compliance" | "requests" | "programs";
+type Tab = "wash-activity" | "vehicle-compliance" | "spending" | "compliance" | "requests" | "programs";
 
 function useFetch<T>(url: string) {
   const [data, setData] = React.useState<T | null>(null);
@@ -23,6 +23,26 @@ function useFetch<T>(url: string) {
       .catch((e) => setError(e.message))
       .finally(() => setIsLoading(false));
   }, [url]);
+
+  return { data, isLoading, error };
+}
+
+function useFetchParams<T>(baseUrl: string, params: Record<string, string>) {
+  const [data, setData] = React.useState<T | null>(null);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const qs = new URLSearchParams(params).toString();
+  const fullUrl = qs ? `${baseUrl}?${qs}` : baseUrl;
+
+  React.useEffect(() => {
+    setIsLoading(true);
+    setError(null);
+    fetch(`${API_BASE}${fullUrl}`, { credentials: "include" })
+      .then((r) => { if (!r.ok) throw new Error("Failed to load"); return r.json(); })
+      .then(setData)
+      .catch((e) => setError(e.message))
+      .finally(() => setIsLoading(false));
+  }, [fullUrl]);
 
   return { data, isLoading, error };
 }
@@ -329,6 +349,245 @@ function ProgramsTab() {
   );
 }
 
+// ─── NEW REPORT TABS (Task 2.5) ─────────────────────────────────────────────
+
+function WashActivityTab() {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const [startDate, setStartDate] = useState(monthStart.toISOString().split("T")[0]);
+  const [endDate, setEndDate] = useState(now.toISOString().split("T")[0]);
+  const [statusFilter, setStatusFilter] = useState("");
+
+  const params: Record<string, string> = {};
+  if (startDate) params.startDate = new Date(startDate).toISOString();
+  if (endDate) params.endDate = new Date(endDate + "T23:59:59Z").toISOString();
+  if (statusFilter) params.status = statusFilter;
+
+  const { data, isLoading, error } = useFetchParams<any>("/api/fleet/reports/wash-activity", params);
+
+  if (isLoading) return <LoadingSpinner />;
+  if (error) return <ErrorState message={error} />;
+
+  const bookings = data?.bookings || [];
+
+  return (
+    <div className="space-y-6">
+      <Card className="p-4">
+        <div className="flex flex-wrap gap-3 items-end">
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase block mb-1">From</label>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+              className="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+          </div>
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase block mb-1">To</label>
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+              className="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+          </div>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+            <option value="">All Status</option>
+            <option value="PROVIDER_CONFIRMED">Confirmed</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="SETTLED">Settled</option>
+            <option value="CUSTOMER_CANCELLED">Cancelled</option>
+          </select>
+        </div>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="text-left px-4 py-3 font-bold text-slate-600">Date</th>
+                <th className="text-left px-4 py-3 font-bold text-slate-600">Vehicle</th>
+                <th className="text-left px-4 py-3 font-bold text-slate-600 hidden md:table-cell">Driver</th>
+                <th className="text-left px-4 py-3 font-bold text-slate-600 hidden lg:table-cell">Provider / Location</th>
+                <th className="text-left px-4 py-3 font-bold text-slate-600">Service</th>
+                <th className="text-left px-4 py-3 font-bold text-slate-600">Status</th>
+                <th className="text-right px-4 py-3 font-bold text-slate-600">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bookings.length === 0 ? (
+                <tr><td colSpan={7} className="text-center py-12 text-slate-400">No wash activity in this date range.</td></tr>
+              ) : bookings.map((b: any) => (
+                <tr key={b.id} className="border-b border-slate-100 hover:bg-slate-50">
+                  <td className="px-4 py-3 text-slate-600">{formatDate(b.date, "MMM d, yyyy")}</td>
+                  <td className="px-4 py-3 font-medium text-slate-900">{b.vehicle?.unitNumber || "—"}</td>
+                  <td className="px-4 py-3 text-slate-600 hidden md:table-cell">{b.driver?.firstName} {b.driver?.lastName}</td>
+                  <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">{b.provider} — {b.location}</td>
+                  <td className="px-4 py-3 text-slate-600">{b.service}</td>
+                  <td className="px-4 py-3"><Badge className={getStatusColor(b.status)}>{getStatusLabel(b.status)}</Badge></td>
+                  <td className="px-4 py-3 text-right font-bold text-slate-900">{formatCurrency(b.cost, b.currencyCode)}</td>
+                </tr>
+              ))}
+            </tbody>
+            {bookings.length > 0 && (
+              <tfoot>
+                <tr className="bg-slate-50 border-t-2 border-slate-200">
+                  <td colSpan={6} className="px-4 py-3 font-bold text-slate-700">
+                    Total: {data.totalCount} wash{data.totalCount !== 1 ? "es" : ""}
+                  </td>
+                  <td className="px-4 py-3 text-right font-bold text-lg text-slate-900">
+                    {formatCurrency(data.totalSpendMinor)}
+                  </td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function VehicleComplianceTab() {
+  const { data, isLoading, error } = useFetch<any>("/api/fleet/reports/vehicle-compliance");
+
+  if (isLoading) return <LoadingSpinner />;
+  if (error) return <ErrorState message={error} />;
+
+  const vehicles = data?.vehicles || [];
+  const statusConfig: Record<string, { label: string; color: string }> = {
+    OVERDUE: { label: "Overdue", color: "bg-red-100 text-red-700" },
+    DUE_SOON: { label: "Due Soon", color: "bg-amber-100 text-amber-700" },
+    CURRENT: { label: "Current", color: "bg-emerald-100 text-emerald-700" },
+    UNKNOWN: { label: "Unknown", color: "bg-slate-100 text-slate-500" },
+  };
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-slate-50 border-b border-slate-200">
+              <th className="text-left px-4 py-3 font-bold text-slate-600">Unit #</th>
+              <th className="text-left px-4 py-3 font-bold text-slate-600">Type</th>
+              <th className="text-left px-4 py-3 font-bold text-slate-600 hidden md:table-cell">Depot</th>
+              <th className="text-left px-4 py-3 font-bold text-slate-600">Last Wash</th>
+              <th className="text-left px-4 py-3 font-bold text-slate-600">Next Due</th>
+              <th className="text-left px-4 py-3 font-bold text-slate-600">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {vehicles.length === 0 ? (
+              <tr><td colSpan={6} className="text-center py-12 text-slate-400">No vehicles found.</td></tr>
+            ) : vehicles.map((v: any) => {
+              const sc = statusConfig[v.complianceStatus] || statusConfig.UNKNOWN;
+              const isOverdue = v.complianceStatus === "OVERDUE";
+              return (
+                <tr key={v.id} className={cn("border-b border-slate-100 hover:bg-slate-50", isOverdue && "bg-red-50/50 border-l-4 border-l-red-400")}>
+                  <td className="px-4 py-3 font-bold text-slate-900">{v.unitNumber}</td>
+                  <td className="px-4 py-3 text-slate-600">{v.subtypeCode?.replace(/_/g, " ")}</td>
+                  <td className="px-4 py-3 text-slate-600 hidden md:table-cell">{v.depot?.name || "—"}</td>
+                  <td className="px-4 py-3 text-slate-600">{v.lastWashAtUtc ? new Date(v.lastWashAtUtc).toLocaleDateString() : "Never"}</td>
+                  <td className="px-4 py-3 text-slate-600">{v.nextWashDueAtUtc ? new Date(v.nextWashDueAtUtc).toLocaleDateString() : "—"}</td>
+                  <td className="px-4 py-3"><Badge className={`${sc.color} text-xs`}>{sc.label}</Badge></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function SpendingTab() {
+  const { data, isLoading, error } = useFetchParams<any>("/api/fleet/reports/spending-summary", {});
+
+  if (isLoading) return <LoadingSpinner />;
+  if (error) return <ErrorState message={error} />;
+
+  const byProvider = data?.byProvider || [];
+  const byVehicle = data?.byVehicle || [];
+  const byMonth = data?.byMonth || [];
+  const maxProviderSpend = byProvider[0]?.totalSpendMinor || 1;
+  const maxVehicleSpend = byVehicle[0]?.totalSpendMinor || 1;
+  const maxMonthSpend = Math.max(...byMonth.map((m: any) => m.totalSpendMinor), 1);
+
+  return (
+    <div className="space-y-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* By Provider */}
+        <motion.div {...fadeUp} transition={{ delay: 0 }}>
+          <Card className="p-6">
+            <h3 className="text-lg font-semibold text-slate-900 mb-4">Spend by Provider</h3>
+            {byProvider.length === 0 ? (
+              <p className="text-slate-400 text-sm py-4 text-center">No spending data</p>
+            ) : (
+              <div className="space-y-3">
+                {byProvider.slice(0, 10).map((p: any, i: number) => (
+                  <div key={i} className="space-y-1">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-700 font-medium truncate mr-2">{p.providerName}</span>
+                      <span className="font-bold text-slate-900 shrink-0">{formatCurrency(p.totalSpendMinor)} <span className="text-slate-400 font-normal">({p.bookingCount})</span></span>
+                    </div>
+                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${(p.totalSpendMinor / maxProviderSpend) * 100}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </motion.div>
+
+        {/* By Vehicle */}
+        <motion.div {...fadeUp} transition={{ delay: 0.05 }}>
+          <Card className="p-6">
+            <h3 className="text-lg font-semibold text-slate-900 mb-4">Spend by Vehicle</h3>
+            {byVehicle.length === 0 ? (
+              <p className="text-slate-400 text-sm py-4 text-center">No spending data</p>
+            ) : (
+              <div className="space-y-3">
+                {byVehicle.slice(0, 10).map((v: any, i: number) => (
+                  <div key={i} className="space-y-1">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-700 font-medium">{v.unitNumber} <span className="text-slate-400">({v.subtypeCode?.replace(/_/g, " ")})</span></span>
+                      <span className="font-bold text-slate-900 shrink-0">{formatCurrency(v.totalSpendMinor)} <span className="text-slate-400 font-normal">({v.bookingCount})</span></span>
+                    </div>
+                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full bg-purple-500 transition-all" style={{ width: `${(v.totalSpendMinor / maxVehicleSpend) * 100}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </motion.div>
+      </div>
+
+      {/* Monthly Trend */}
+      <motion.div {...fadeUp} transition={{ delay: 0.1 }}>
+        <Card className="p-6">
+          <h3 className="text-lg font-semibold text-slate-900 mb-4">Monthly Spending Trend</h3>
+          {byMonth.length === 0 ? (
+            <p className="text-slate-400 text-sm py-4 text-center">No spending data</p>
+          ) : (
+            <div className="flex items-end gap-2 h-48">
+              {byMonth.map((m: any, i: number) => {
+                const pct = maxMonthSpend > 0 ? (m.totalSpendMinor / maxMonthSpend) * 100 : 0;
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                    <span className="text-xs font-bold text-slate-900">{formatCurrency(m.totalSpendMinor)}</span>
+                    <div className="w-full bg-slate-100 rounded-t-lg overflow-hidden relative" style={{ height: "140px" }}>
+                      <div className="absolute bottom-0 w-full bg-gradient-to-t from-emerald-500 to-emerald-400 rounded-t-lg transition-all" style={{ height: `${Math.max(pct, 2)}%` }} />
+                    </div>
+                    <span className="text-xs text-slate-500">{m.month.split("-")[1]}/{m.month.split("-")[0].slice(2)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      </motion.div>
+    </div>
+  );
+}
+
 function LoadingSpinner() {
   return (
     <div className="p-12 text-center text-slate-500">
@@ -348,13 +607,16 @@ function ErrorState({ message }: { message: string }) {
 }
 
 const tabs: { key: Tab; label: string; icon: React.ElementType }[] = [
-  { key: "compliance", label: "Compliance", icon: CheckCircle2 },
+  { key: "wash-activity", label: "Wash Activity", icon: Droplets },
+  { key: "vehicle-compliance", label: "Vehicle Compliance", icon: Truck },
+  { key: "spending", label: "Spending", icon: DollarSign },
+  { key: "compliance", label: "Depot Compliance", icon: CheckCircle2 },
   { key: "requests", label: "Requests", icon: Activity },
   { key: "programs", label: "Programs", icon: Layers },
 ];
 
 export default function FleetReports() {
-  const [activeTab, setActiveTab] = React.useState<Tab>("compliance");
+  const [activeTab, setActiveTab] = React.useState<Tab>("wash-activity");
 
   return (
     <div className="space-y-6">
@@ -390,6 +652,9 @@ export default function FleetReports() {
         </div>
       </motion.div>
 
+      {activeTab === "wash-activity" && <WashActivityTab />}
+      {activeTab === "vehicle-compliance" && <VehicleComplianceTab />}
+      {activeTab === "spending" && <SpendingTab />}
       {activeTab === "compliance" && <ComplianceTab />}
       {activeTab === "requests" && <RequestsTab />}
       {activeTab === "programs" && <ProgramsTab />}

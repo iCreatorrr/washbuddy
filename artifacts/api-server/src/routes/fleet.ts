@@ -1898,4 +1898,167 @@ router.get("/fleet/reports/programs", requireAuth, requireFleetMember, requireFl
   }
 });
 
+// ─── NEW REPORT ENDPOINTS (Task 2.5) ────────────────────────────────────────
+
+router.get("/fleet/reports/wash-activity", requireAuth, requireFleetMember, requireFleetNonDriver, async (req, res) => {
+  try {
+    const fleetId = (req as any).fleetId;
+    if (!fleetId) { res.status(403).json({ errorCode: "FORBIDDEN", message: "No fleet" }); return; }
+
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : monthStart;
+    const endDate = req.query.endDate ? new Date(req.query.endDate as string) : now;
+
+    const where: any = {
+      vehicle: { fleetId },
+      scheduledStartAtUtc: { gte: startDate, lte: endDate },
+    };
+    if (req.query.vehicleId) where.vehicleId = req.query.vehicleId;
+    if (req.query.status) where.status = req.query.status;
+
+    const bookings = await prisma.booking.findMany({
+      where,
+      include: {
+        vehicle: { select: { id: true, unitNumber: true, subtypeCode: true } },
+        customer: { select: { id: true, firstName: true, lastName: true } },
+        location: { select: { id: true, name: true, provider: { select: { id: true, name: true } } } },
+        service: { select: { id: true, name: true } },
+      },
+      orderBy: { scheduledStartAtUtc: "desc" },
+      take: 200,
+    });
+
+    const totalSpend = await prisma.booking.aggregate({
+      _sum: { totalPriceMinor: true },
+      _count: true,
+      where,
+    });
+
+    res.json({
+      bookings: bookings.map((b) => ({
+        id: b.id,
+        date: b.scheduledStartAtUtc,
+        vehicle: b.vehicle,
+        driver: b.customer,
+        provider: b.location?.provider?.name,
+        location: b.location?.name,
+        service: b.serviceNameSnapshot,
+        status: b.status,
+        cost: b.totalPriceMinor,
+        currencyCode: b.currencyCode,
+      })),
+      totalCount: totalSpend._count,
+      totalSpendMinor: totalSpend._sum.totalPriceMinor || 0,
+    });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to get wash activity report");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to load report" });
+  }
+});
+
+router.get("/fleet/reports/vehicle-compliance", requireAuth, requireFleetMember, requireFleetNonDriver, async (req, res) => {
+  try {
+    const fleetId = (req as any).fleetId;
+    if (!fleetId) { res.status(403).json({ errorCode: "FORBIDDEN", message: "No fleet" }); return; }
+
+    const now = new Date();
+    const dueSoonThreshold = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+
+    const vehicles = await prisma.vehicle.findMany({
+      where: { fleetId, isActive: true },
+      select: {
+        id: true, unitNumber: true, subtypeCode: true, categoryCode: true,
+        lastWashAtUtc: true, nextWashDueAtUtc: true,
+        depot: { select: { name: true } },
+      },
+      orderBy: { unitNumber: "asc" },
+    });
+
+    const enriched = vehicles.map((v) => {
+      let status = "CURRENT";
+      if (!v.nextWashDueAtUtc) status = "UNKNOWN";
+      else if (v.nextWashDueAtUtc < now) status = "OVERDUE";
+      else if (v.nextWashDueAtUtc <= dueSoonThreshold) status = "DUE_SOON";
+      return { ...v, complianceStatus: status };
+    });
+
+    // Sort: OVERDUE first, then DUE_SOON, then CURRENT/UNKNOWN
+    const order: Record<string, number> = { OVERDUE: 0, DUE_SOON: 1, CURRENT: 2, UNKNOWN: 3 };
+    enriched.sort((a, b) => (order[a.complianceStatus] ?? 9) - (order[b.complianceStatus] ?? 9));
+
+    res.json({ vehicles: enriched });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to get vehicle compliance report");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to load report" });
+  }
+});
+
+router.get("/fleet/reports/spending-summary", requireAuth, requireFleetMember, requireFleetNonDriver, async (req, res) => {
+  try {
+    const fleetId = (req as any).fleetId;
+    if (!fleetId) { res.status(403).json({ errorCode: "FORBIDDEN", message: "No fleet" }); return; }
+
+    const now = new Date();
+    const sixMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1));
+    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : sixMonthsAgo;
+    const endDate = req.query.endDate ? new Date(req.query.endDate as string) : now;
+
+    const completedStatuses = ["COMPLETED", "COMPLETED_PENDING_WINDOW", "SETTLED", "IN_SERVICE", "CHECKED_IN", "PROVIDER_CONFIRMED"];
+
+    const bookings = await prisma.booking.findMany({
+      where: {
+        vehicle: { fleetId },
+        scheduledStartAtUtc: { gte: startDate, lte: endDate },
+        status: { in: completedStatuses as any },
+      },
+      select: {
+        totalPriceMinor: true,
+        scheduledStartAtUtc: true,
+        vehicle: { select: { unitNumber: true, subtypeCode: true } },
+        location: { select: { name: true, provider: { select: { name: true } } } },
+      },
+    });
+
+    // By Provider
+    const providerMap = new Map<string, { providerName: string; locationName: string; totalSpendMinor: number; bookingCount: number }>();
+    for (const b of bookings) {
+      const key = `${b.location?.provider?.name}||${b.location?.name}`;
+      const existing = providerMap.get(key) || { providerName: b.location?.provider?.name || "", locationName: b.location?.name || "", totalSpendMinor: 0, bookingCount: 0 };
+      existing.totalSpendMinor += b.totalPriceMinor;
+      existing.bookingCount += 1;
+      providerMap.set(key, existing);
+    }
+    const byProvider = Array.from(providerMap.values()).sort((a, b) => b.totalSpendMinor - a.totalSpendMinor);
+
+    // By Vehicle
+    const vehicleMap = new Map<string, { unitNumber: string; subtypeCode: string; totalSpendMinor: number; bookingCount: number }>();
+    for (const b of bookings) {
+      const key = b.vehicle?.unitNumber || "Unknown";
+      const existing = vehicleMap.get(key) || { unitNumber: key, subtypeCode: b.vehicle?.subtypeCode || "", totalSpendMinor: 0, bookingCount: 0 };
+      existing.totalSpendMinor += b.totalPriceMinor;
+      existing.bookingCount += 1;
+      vehicleMap.set(key, existing);
+    }
+    const byVehicle = Array.from(vehicleMap.values()).sort((a, b) => b.totalSpendMinor - a.totalSpendMinor);
+
+    // By Month
+    const monthMap = new Map<string, { month: string; totalSpendMinor: number; bookingCount: number }>();
+    for (const b of bookings) {
+      const d = b.scheduledStartAtUtc;
+      const month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+      const existing = monthMap.get(month) || { month, totalSpendMinor: 0, bookingCount: 0 };
+      existing.totalSpendMinor += b.totalPriceMinor;
+      existing.bookingCount += 1;
+      monthMap.set(month, existing);
+    }
+    const byMonth = Array.from(monthMap.values()).sort((a, b) => a.month.localeCompare(b.month));
+
+    res.json({ byProvider, byVehicle, byMonth });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to get spending summary");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to load report" });
+  }
+});
+
 export default router;
