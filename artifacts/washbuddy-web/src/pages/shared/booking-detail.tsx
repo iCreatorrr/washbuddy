@@ -4,10 +4,15 @@ import { useGetBooking, useConfirmBooking, useCheckinBooking, useStartService, u
 import { useAuth } from "@/contexts/auth";
 import { Card, Badge, Button } from "@/components/ui";
 import { formatCurrency, formatDate, getStatusColor, getStatusLabel } from "@/lib/utils";
-import { MapPin, Calendar, Truck, User, CreditCard, ChevronRight, CheckCircle2, Star, ArrowLeft } from "lucide-react";
+import { MapPin, Calendar, Truck, User, CreditCard, ChevronRight, CheckCircle2, Star, ArrowLeft, Shield, AlertTriangle, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
 import { ReviewForm } from "@/components/review-form";
+import { toast, Toaster } from "sonner";
+
+const API_BASE = import.meta.env.VITE_API_URL || "";
+
+const ALL_STATUSES = ["REQUESTED","HELD","PROVIDER_CONFIRMED","PROVIDER_DECLINED","EXPIRED","CUSTOMER_CANCELLED","PROVIDER_CANCELLED","LATE","NO_SHOW","CHECKED_IN","IN_SERVICE","COMPLETED_PENDING_WINDOW","COMPLETED","DISPUTED","REFUNDED","SETTLED"];
 
 export default function BookingDetail() {
   const [, params] = useRoute("/bookings/:id");
@@ -22,6 +27,10 @@ export default function BookingDetail() {
 
   // Mutations
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
+  const [showOverrideDialog, setShowOverrideDialog] = useState(false);
+  const [overrideStatus, setOverrideStatus] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
+  const [adminActionLoading, setAdminActionLoading] = useState(false);
 
   const confirmMut = useConfirmBooking({ request: { credentials: 'include' } });
   const checkinMut = useCheckinBooking({ request: { credentials: 'include' } });
@@ -43,12 +52,46 @@ export default function BookingDetail() {
     }
   };
 
+  const isAdmin = hasRole("PLATFORM_SUPER_ADMIN");
+
+  const handleForceCancel = async () => {
+    if (!confirm("Force cancel this booking? This is an admin override action.")) return;
+    setAdminActionLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/bookings/${bookingId}/force-cancel`, { method: "POST", credentials: "include" });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.message || "Failed"); }
+      toast.success("Booking force-cancelled");
+      queryClient.invalidateQueries({ queryKey: [`/api/bookings/${bookingId}`] });
+    } catch (err: any) { toast.error(err.message); }
+    finally { setAdminActionLoading(false); }
+  };
+
+  const handleOverrideStatus = async () => {
+    if (!overrideStatus || !overrideReason.trim()) return;
+    setAdminActionLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/bookings/${bookingId}/override-status`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: overrideStatus, reason: overrideReason }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.message || "Failed"); }
+      toast.success("Status overridden to " + overrideStatus);
+      setShowOverrideDialog(false);
+      setOverrideStatus("");
+      setOverrideReason("");
+      queryClient.invalidateQueries({ queryKey: [`/api/bookings/${bookingId}`] });
+    } catch (err: any) { toast.error(err.message); }
+    finally { setAdminActionLoading(false); }
+  };
+
   const b = data?.booking;
   if (isLoading) return <div className="p-12 text-center text-slate-500">Loading details...</div>;
   if (!b) return <div className="p-12 text-center text-red-500">Booking not found.</div>;
 
   const isCustomer = user?.id === b.customerId;
   const isProvider = hasRole("PROVIDER_ADMIN") || hasRole("PROVIDER_STAFF");
+  const activeStatuses = ["REQUESTED", "HELD", "PROVIDER_CONFIRMED", "CHECKED_IN", "IN_SERVICE", "LATE"];
   const isCompleted = b.status === "COMPLETED" || b.status === "COMPLETED_PENDING_WINDOW" || b.status === "SETTLED";
   const showReviewForm = isCustomer && isCompleted && !reviewSubmitted;
 
@@ -63,6 +106,7 @@ export default function BookingDetail() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
+      <Toaster position="top-right" richColors />
       <Link href={back.path} className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900 transition-colors">
         <ArrowLeft className="h-4 w-4" /> {back.label}
       </Link>
@@ -103,8 +147,49 @@ export default function BookingDetail() {
               Complete Wash
             </Button>
           )}
+
+          {/* Admin Actions */}
+          {isAdmin && activeStatuses.includes(b.status) && (
+            <Button variant="destructive" onClick={handleForceCancel} isLoading={adminActionLoading} className="gap-1">
+              <Shield className="h-4 w-4" /> Force Cancel
+            </Button>
+          )}
+          {isAdmin && (
+            <Button variant="outline" onClick={() => setShowOverrideDialog(true)} className="gap-1 text-amber-600 border-amber-200 hover:bg-amber-50">
+              <AlertTriangle className="h-4 w-4" /> Override Status
+            </Button>
+          )}
         </div>
       </div>
+
+      {/* Override Status Dialog */}
+      {showOverrideDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowOverrideDialog(false)}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl mx-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-500" /> Override Status</h3>
+              <button onClick={() => setShowOverrideDialog(false)} className="p-1 hover:bg-slate-100 rounded-lg"><X className="h-5 w-5 text-slate-400" /></button>
+            </div>
+            <p className="text-sm text-slate-600 mb-4">Manually set the booking status. This creates an audit record.</p>
+            <div className="space-y-3 mb-4">
+              <select value={overrideStatus} onChange={(e) => setOverrideStatus(e.target.value)}
+                className="w-full h-10 px-3 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                <option value="">Select status...</option>
+                {ALL_STATUSES.filter((s) => s !== b.status).map((s) => (
+                  <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
+                ))}
+              </select>
+              <textarea className="w-full border-2 border-slate-200 rounded-xl p-3 text-sm focus:border-amber-300 focus:outline-none"
+                placeholder="Reason for override (required)..." rows={2} value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} />
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setShowOverrideDialog(false)}>Cancel</Button>
+              <Button className="flex-1 bg-amber-600 hover:bg-amber-700" onClick={handleOverrideStatus}
+                isLoading={adminActionLoading} disabled={!overrideStatus || !overrideReason.trim()}>Override</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showReviewForm && (
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>

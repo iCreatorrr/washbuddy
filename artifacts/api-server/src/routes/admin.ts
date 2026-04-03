@@ -117,6 +117,137 @@ router.get("/admin/dashboard", requireAuth, requirePlatformAdmin, async (req, re
   }
 });
 
+// ─── ADMIN BOOKING MANAGEMENT ───────────────────────────────────────────────
+
+router.get("/admin/bookings", requireAuth, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { status, providerId, startDate, endDate, search, page = "1", limit: limitParam = "50" } = req.query;
+    const pageNum = Math.max(1, parseInt(page as string));
+    const limit = Math.min(100, Math.max(1, parseInt(limitParam as string)));
+    const skip = (pageNum - 1) * limit;
+
+    const where: any = {};
+    if (status) where.status = status as string;
+    if (providerId) where.location = { providerId: providerId as string };
+    if (startDate || endDate) {
+      where.scheduledStartAtUtc = {};
+      if (startDate) where.scheduledStartAtUtc.gte = new Date(startDate as string);
+      if (endDate) where.scheduledStartAtUtc.lte = new Date(endDate as string);
+    }
+    if (search) {
+      const s = search as string;
+      where.OR = [
+        { serviceNameSnapshot: { contains: s, mode: "insensitive" } },
+        { id: { contains: s, mode: "insensitive" } },
+        { customer: { firstName: { contains: s, mode: "insensitive" } } },
+        { customer: { lastName: { contains: s, mode: "insensitive" } } },
+        { location: { name: { contains: s, mode: "insensitive" } } },
+      ];
+    }
+
+    const [bookings, total] = await Promise.all([
+      prisma.booking.findMany({
+        where,
+        include: {
+          location: { select: { id: true, name: true, providerId: true, provider: { select: { id: true, name: true } } } },
+          customer: {
+            select: {
+              id: true, firstName: true, lastName: true, email: true,
+              fleetMemberships: { where: { isActive: true }, include: { fleet: { select: { name: true } } }, take: 1 },
+            },
+          },
+          vehicle: { select: { id: true, unitNumber: true, subtypeCode: true } },
+        },
+        orderBy: { scheduledStartAtUtc: "desc" },
+        skip,
+        take: limit,
+      }),
+      prisma.booking.count({ where }),
+    ]);
+
+    res.json({
+      bookings: bookings.map((b) => ({
+        id: b.id,
+        service: b.serviceNameSnapshot,
+        provider: b.location?.provider?.name || "—",
+        location: b.location?.name || "—",
+        customer: b.customer ? `${b.customer.firstName} ${b.customer.lastName}` : "—",
+        customerEmail: b.customer?.email || "—",
+        fleet: b.customer?.fleetMemberships?.[0]?.fleet?.name || null,
+        vehicle: b.vehicle?.unitNumber || null,
+        date: b.scheduledStartAtUtc,
+        status: b.status,
+        amount: b.totalPriceMinor,
+        currencyCode: b.currencyCode,
+      })),
+      pagination: { page: pageNum, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to list admin bookings");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to load bookings" });
+  }
+});
+
+router.post("/admin/bookings/:bookingId/force-cancel", requireAuth, requirePlatformAdmin, async (req, res) => {
+  try {
+    const user = req.user as any;
+    const activeStatuses = ["REQUESTED", "HELD", "PROVIDER_CONFIRMED", "CHECKED_IN", "IN_SERVICE", "LATE"];
+
+    const booking = await prisma.booking.findFirst({
+      where: { id: req.params.bookingId, status: { in: activeStatuses as any } },
+    });
+    if (!booking) {
+      res.status(409).json({ errorCode: "INVALID_TRANSITION", message: "Booking is not in a cancellable state" });
+      return;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.booking.update({ where: { id: booking.id }, data: { status: "CUSTOMER_CANCELLED", cancellationReasonCode: "ADMIN_FORCE_CANCEL" } });
+      await tx.bookingStatusHistory.create({
+        data: { bookingId: booking.id, fromStatus: booking.status, toStatus: "CUSTOMER_CANCELLED", changedBy: user.id, reason: "Admin force-cancelled" },
+      });
+      await tx.bookingHold.updateMany({ where: { bookingId: booking.id, isReleased: false }, data: { isReleased: true } });
+    });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to force-cancel booking");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to force-cancel" });
+  }
+});
+
+router.post("/admin/bookings/:bookingId/override-status", requireAuth, requirePlatformAdmin, async (req, res) => {
+  try {
+    const user = req.user as any;
+    const { status, reason } = req.body;
+    if (!status || !reason) {
+      res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "status and reason are required" });
+      return;
+    }
+
+    const validStatuses = ["REQUESTED", "HELD", "PROVIDER_CONFIRMED", "PROVIDER_DECLINED", "EXPIRED", "CUSTOMER_CANCELLED", "PROVIDER_CANCELLED", "LATE", "NO_SHOW", "CHECKED_IN", "IN_SERVICE", "COMPLETED_PENDING_WINDOW", "COMPLETED", "DISPUTED", "REFUNDED", "SETTLED"];
+    if (!validStatuses.includes(status)) {
+      res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "Invalid booking status" });
+      return;
+    }
+
+    const booking = await prisma.booking.findUnique({ where: { id: req.params.bookingId } });
+    if (!booking) { res.status(404).json({ errorCode: "NOT_FOUND", message: "Booking not found" }); return; }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.booking.update({ where: { id: booking.id }, data: { status: status as any } });
+      await tx.bookingStatusHistory.create({
+        data: { bookingId: booking.id, fromStatus: booking.status, toStatus: status, changedBy: user.id, reason: `Admin override: ${reason}` },
+      });
+    });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to override booking status");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to override status" });
+  }
+});
+
 // ─── ADMIN PROVIDER MANAGEMENT ──────────────────────────────────────────────
 
 router.get("/admin/providers", requireAuth, requirePlatformAdmin, async (req, res) => {
