@@ -60,10 +60,17 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   const navItems = getNavItems();
 
+  const getRoleAccent = () => {
+    if (hasRole("PLATFORM_SUPER_ADMIN") || hasRole("PLATFORM_SUPPORT_ADMIN") || hasRole("PLATFORM_OPS_ADMIN")) return "border-l-4 border-slate-500";
+    if (hasRole("PROVIDER_ADMIN") || hasRole("PROVIDER_STAFF")) return "border-l-4 border-teal-500";
+    if (hasRole("FLEET_ADMIN") || hasRole("DISPATCHER") || hasRole("MAINTENANCE_MANAGER") || hasRole("READ_ONLY_ANALYST")) return "border-l-4 border-blue-500";
+    return "border-l-4 border-cyan-500";
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex">
       {/* Sidebar Desktop */}
-      <aside className="hidden lg:flex flex-col w-72 bg-slate-900 text-white fixed h-full z-20">
+      <aside className={cn("hidden lg:flex flex-col w-72 bg-slate-900 text-white fixed h-full z-20", getRoleAccent())}>
         <div className="p-6 flex items-center gap-3">
           <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-cyan-500/20">
             <Droplets className="h-6 w-6 text-white" />

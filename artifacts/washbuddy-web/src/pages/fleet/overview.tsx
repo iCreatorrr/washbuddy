@@ -68,9 +68,15 @@ export default function FleetOverview() {
 
   if (isLoading) {
     return (
-      <div className="p-12 text-center text-slate-500">
-        <div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto" />
-        <p className="mt-4">Loading fleet overview...</p>
+      <div className="space-y-8">
+        <div className="h-8 w-64 animate-pulse bg-slate-200 rounded-lg" />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[1,2,3,4].map(i => <div key={i} className="h-20 animate-pulse bg-slate-100 rounded-2xl" />)}
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[1,2,3,4].map(i => <div key={i} className="h-20 animate-pulse bg-slate-100 rounded-2xl" />)}
+        </div>
+        <div className="h-64 animate-pulse bg-slate-100 rounded-2xl" />
       </div>
     );
   }

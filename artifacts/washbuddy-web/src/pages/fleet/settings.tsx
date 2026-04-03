@@ -124,9 +124,12 @@ export default function FleetSettings() {
 
   if (isLoading) {
     return (
-      <div className="py-12 text-center text-slate-500">
-        <div className="animate-spin h-6 w-6 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-2" />
-        Loading settings...
+      <div className="space-y-8">
+        <div className="h-8 w-48 animate-pulse bg-slate-200 rounded-lg" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {[1,2].map(i => <div key={i} className="h-48 animate-pulse bg-slate-100 rounded-2xl" />)}
+        </div>
+        <div className="h-64 animate-pulse bg-slate-100 rounded-2xl" />
       </div>
     );
   }

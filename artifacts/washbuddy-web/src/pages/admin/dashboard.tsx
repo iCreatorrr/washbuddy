@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Card, Badge, ErrorState } from "@/components/ui";
 import { Activity, Users, Calendar, DollarSign, ChevronRight, ArrowRight, AlertTriangle, CheckCircle2, Clock, Shield, CreditCard, BarChart3 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getStatusColor, getStatusLabel, formatCurrency, formatDate } from "@/lib/utils";
 import { formatLocationDisplay } from "@/lib/format-location";
 import { Link } from "wouter";
@@ -31,9 +32,16 @@ export default function AdminDashboard() {
 
   if (error) return <div className="max-w-6xl mx-auto"><ErrorState message="Could not load dashboard." /></div>;
   if (isLoading) return (
-    <div className="p-12 text-center text-slate-500">
-      <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto" />
-      <p className="mt-4">Loading dashboard...</p>
+    <div className="space-y-8 max-w-6xl mx-auto">
+      <div><Skeleton className="h-8 w-64 mb-2" /><Skeleton className="h-5 w-96" /></div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        {[1,2,3,4].map(i => <Skeleton key={i} className="h-24 rounded-2xl" />)}
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <Skeleton className="h-48 rounded-2xl" /><Skeleton className="h-48 rounded-2xl" />
+      </div>
+      <Skeleton className="h-48 rounded-2xl" />
+      <Skeleton className="h-64 rounded-2xl" />
     </div>
   );
 
