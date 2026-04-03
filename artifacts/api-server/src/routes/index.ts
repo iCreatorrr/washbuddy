@@ -10,11 +10,13 @@ import bookingsRouter from "./bookings";
 import reviewsRouter from "./reviews";
 import notificationsRouter from "./notifications";
 import fleetRouter from "./fleet";
+import adminRouter from "./admin";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(authRouter);
+router.use(adminRouter);
 router.use(providersRouter);
 router.use(locationsRouter);
 router.use(servicesRouter);
