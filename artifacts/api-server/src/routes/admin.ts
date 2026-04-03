@@ -46,7 +46,9 @@ router.get("/admin/dashboard", requireAuth, requirePlatformAdmin, async (req, re
         select: { providerId: true },
       }),
       prisma.booking.findMany({
-        include: {
+        select: {
+          id: true, serviceNameSnapshot: true, scheduledStartAtUtc: true,
+          status: true, totalPriceMinor: true, platformFeeMinor: true, currencyCode: true,
           location: { select: { id: true, name: true, provider: { select: { id: true, name: true } } } },
           customer: { select: { id: true, firstName: true, lastName: true } },
           vehicle: { select: { id: true, unitNumber: true } },

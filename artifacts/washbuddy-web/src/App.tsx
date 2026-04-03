@@ -1,38 +1,44 @@
+import { lazy, Suspense, useEffect } from "react";
 import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider, useAuth } from "./contexts/auth";
 import { AppLayout } from "./components/layout";
 import { Toaster } from "sonner";
 
-// Pages
-import Login from "./pages/auth/login";
-import Register from "./pages/auth/register";
-import CustomerSearch from "./pages/customer/search";
-import LocationDetail from "./pages/customer/location-detail";
-import MyBookings from "./pages/customer/my-bookings";
-import MyVehicles from "./pages/customer/my-vehicles";
-import RoutePlanner from "./pages/customer/route-planner";
-import ProviderDashboard from "./pages/provider/dashboard";
-import ProviderSettings from "./pages/provider/settings";
-import ProviderReviews from "./pages/provider/reviews";
-import ProviderOnboarding from "./pages/provider/onboarding";
-import AdminDashboard from "./pages/admin/dashboard";
-import AdminBookings from "./pages/admin/bookings";
-import AdminProviders from "./pages/admin/providers";
-import AdminReviews from "./pages/admin/reviews";
-import FleetOverview from "./pages/fleet/overview";
-import FleetVehicles from "./pages/fleet/vehicles";
-import FleetWashRequests from "./pages/fleet/wash-requests";
-import FleetRecurringPrograms from "./pages/fleet/recurring-programs";
-import FleetProgramDetail from "./pages/fleet/program-detail";
-import FleetProgramForm from "./pages/fleet/program-form";
-import FleetSettings from "./pages/fleet/settings";
-import FleetReports from "./pages/fleet/reports";
-import FleetNewRequest from "./pages/fleet/new-request";
-import FleetRequestDetail from "./pages/fleet/request-detail";
-import BookingDetail from "./pages/shared/booking-detail";
-import NotFound from "./pages/not-found";
-import { useEffect } from "react";
+// Lazy-loaded pages (route-based code splitting)
+const Login = lazy(() => import("./pages/auth/login"));
+const Register = lazy(() => import("./pages/auth/register"));
+const CustomerSearch = lazy(() => import("./pages/customer/search"));
+const LocationDetail = lazy(() => import("./pages/customer/location-detail"));
+const MyBookings = lazy(() => import("./pages/customer/my-bookings"));
+const MyVehicles = lazy(() => import("./pages/customer/my-vehicles"));
+const RoutePlanner = lazy(() => import("./pages/customer/route-planner"));
+const ProviderDashboard = lazy(() => import("./pages/provider/dashboard"));
+const ProviderSettings = lazy(() => import("./pages/provider/settings"));
+const ProviderReviews = lazy(() => import("./pages/provider/reviews"));
+const ProviderOnboarding = lazy(() => import("./pages/provider/onboarding"));
+const AdminDashboard = lazy(() => import("./pages/admin/dashboard"));
+const AdminBookings = lazy(() => import("./pages/admin/bookings"));
+const AdminProviders = lazy(() => import("./pages/admin/providers"));
+const AdminReviews = lazy(() => import("./pages/admin/reviews"));
+const FleetOverview = lazy(() => import("./pages/fleet/overview"));
+const FleetVehicles = lazy(() => import("./pages/fleet/vehicles"));
+const FleetWashRequests = lazy(() => import("./pages/fleet/wash-requests"));
+const FleetRecurringPrograms = lazy(() => import("./pages/fleet/recurring-programs"));
+const FleetProgramDetail = lazy(() => import("./pages/fleet/program-detail"));
+const FleetProgramForm = lazy(() => import("./pages/fleet/program-form"));
+const FleetSettings = lazy(() => import("./pages/fleet/settings"));
+const FleetReports = lazy(() => import("./pages/fleet/reports"));
+const FleetNewRequest = lazy(() => import("./pages/fleet/new-request"));
+const FleetRequestDetail = lazy(() => import("./pages/fleet/request-detail"));
+const BookingDetail = lazy(() => import("./pages/shared/booking-detail"));
+const NotFound = lazy(() => import("./pages/not-found"));
+
+const PageSpinner = () => (
+  <div className="min-h-screen flex items-center justify-center bg-slate-50">
+    <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+  </div>
+);
 
 const queryClient = new QueryClient();
 
@@ -90,8 +96,9 @@ function RootRedirect() {
 
 function Router() {
   const { user } = useAuth();
-  
+
   return (
+    <Suspense fallback={<PageSpinner />}>
     <Switch>
       <Route path="/login">{user ? <RootRedirect /> : <Login />}</Route>
       <Route path="/register">{user ? <RootRedirect /> : <Register />}</Route>
@@ -187,6 +194,7 @@ function Router() {
 
       <Route component={NotFound} />
     </Switch>
+    </Suspense>
   );
 }
 

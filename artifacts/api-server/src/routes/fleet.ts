@@ -156,7 +156,9 @@ router.get("/fleet/overview", requireAuth, requireFleetMember, async (req, res) 
 
     const recentBookingsList = await prisma.booking.findMany({
       where: { vehicle: { fleetId } },
-      include: {
+      select: {
+        id: true, serviceNameSnapshot: true, scheduledStartAtUtc: true,
+        status: true, totalPriceMinor: true, currencyCode: true,
         vehicle: { select: { id: true, unitNumber: true } },
         service: { select: { id: true, name: true } },
         location: { select: { id: true, name: true, provider: { select: { id: true, name: true } } } },
