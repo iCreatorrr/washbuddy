@@ -555,6 +555,63 @@ router.get("/fleet/settings", requireAuth, requireFleetMember, requireFleetAdmin
   }
 });
 
+router.patch("/fleet/settings", requireAuth, requireFleetMember, requireFleetAdmin, async (req, res) => {
+  try {
+    const fleetId = (req as any).fleetId;
+    if (!fleetId) { res.status(403).json({ errorCode: "FORBIDDEN", message: "No fleet" }); return; }
+
+    const { requestPolicyJson } = req.body;
+    if (requestPolicyJson === undefined) {
+      res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "requestPolicyJson is required" });
+      return;
+    }
+
+    const policy = requestPolicyJson as any;
+
+    // Validate approved provider list
+    if (policy.approvedProviderList?.enabled && Array.isArray(policy.approvedProviderList.providerIds)) {
+      const ids = policy.approvedProviderList.providerIds;
+      if (ids.length > 0) {
+        const count = await prisma.provider.count({ where: { id: { in: ids }, isActive: true } });
+        if (count !== ids.length) {
+          res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "One or more provider IDs are invalid" });
+          return;
+        }
+      }
+    }
+
+    // Validate spending limit
+    if (policy.spendingLimit?.enabled) {
+      if (typeof policy.spendingLimit.maxAmountMinor !== "number" || policy.spendingLimit.maxAmountMinor <= 0) {
+        res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "maxAmountMinor must be a positive number" });
+        return;
+      }
+    }
+
+    // Validate wash frequency
+    if (policy.washFrequency?.enabled) {
+      if (typeof policy.washFrequency.maxWashes !== "number" || policy.washFrequency.maxWashes <= 0) {
+        res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "maxWashes must be a positive number" });
+        return;
+      }
+      if (typeof policy.washFrequency.periodDays !== "number" || policy.washFrequency.periodDays <= 0) {
+        res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "periodDays must be a positive number" });
+        return;
+      }
+    }
+
+    const fleet = await prisma.fleet.update({
+      where: { id: fleetId },
+      data: { requestPolicyJson: policy },
+    });
+
+    res.json({ fleet });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to update fleet settings");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to update fleet settings" });
+  }
+});
+
 router.get("/fleet/wash-requests/:id", requireAuth, requireFleetMember, async (req, res) => {
   try {
     const user = req.user as SessionUser;

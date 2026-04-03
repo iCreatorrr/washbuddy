@@ -3,8 +3,9 @@ import { prisma } from "@workspace/db";
 import { requireAuth, requireProviderAccess, requirePlatformAdmin } from "../middlewares/requireAuth";
 import { isPlatformAdmin, isProviderRole, isFleetRole, type SessionUser } from "../lib/auth";
 import { canTransition, isCancellable, isActiveBooking } from "../lib/bookingStateMachine";
-import { calculatePlatformFee } from "../lib/feeCalculator";
+import { calculatePlatformFee, calculateAllInPrice } from "../lib/feeCalculator";
 import { incrementRespondedInSla } from "../lib/slaEnforcer";
+import { isDriver, getFleetId } from "../lib/auth";
 import crypto from "crypto";
 
 const router: IRouter = Router();
@@ -13,7 +14,7 @@ const HOLD_TTL_MS = 10 * 60 * 1000;
 
 router.post("/bookings/hold", requireAuth, async (req, res) => {
   try {
-    const { locationId, serviceId, slotStartUtc } = req.body;
+    const { locationId, serviceId, slotStartUtc, vehicleId } = req.body;
 
     if (!locationId || !serviceId || !slotStartUtc) {
       res.status(400).json({
@@ -27,11 +28,79 @@ router.post("/bookings/hold", requireAuth, async (req, res) => {
 
     const service = await prisma.service.findFirst({
       where: { id: serviceId, locationId, isVisible: true },
+      include: { location: { select: { providerId: true } } },
     });
 
     if (!service) {
       res.status(404).json({ errorCode: "NOT_FOUND", message: "Service not found at this location" });
       return;
+    }
+
+    // ─── Fleet Policy Enforcement (DRIVER role only) ───────────────
+    if (isDriver(user)) {
+      const fleetId = getFleetId(user);
+      if (fleetId) {
+        const fleet = await prisma.fleet.findUnique({
+          where: { id: fleetId },
+          select: { requestPolicyJson: true, currencyCode: true },
+        });
+        const policy = (fleet?.requestPolicyJson as any) || {};
+
+        // Approved Provider List
+        if (policy.approvedProviderList?.enabled) {
+          const approvedIds: string[] = policy.approvedProviderList.providerIds || [];
+          if (approvedIds.length > 0 && !approvedIds.includes(service.location.providerId)) {
+            res.status(403).json({
+              errorCode: "POLICY_VIOLATION",
+              code: "PROVIDER_NOT_APPROVED",
+              message: "Your fleet only allows bookings at approved providers. Contact your fleet manager.",
+            });
+            return;
+          }
+        }
+
+        // Spending Limit
+        if (policy.spendingLimit?.enabled) {
+          const maxAmount = policy.spendingLimit.maxAmountMinor;
+          const allInPrice = calculateAllInPrice(service.basePriceMinor);
+          if (allInPrice > maxAmount) {
+            const maxFmt = (maxAmount / 100).toFixed(2);
+            const priceFmt = (allInPrice / 100).toFixed(2);
+            res.status(403).json({
+              errorCode: "POLICY_VIOLATION",
+              code: "SPENDING_LIMIT_EXCEEDED",
+              message: `This service costs $${priceFmt} which exceeds your fleet's per-wash limit of $${maxFmt}. Contact your fleet manager.`,
+            });
+            return;
+          }
+        }
+
+        // Wash Frequency Limit
+        if (policy.washFrequency?.enabled && vehicleId) {
+          const maxWashes = policy.washFrequency.maxWashes;
+          const periodDays = policy.washFrequency.periodDays;
+          const periodStart = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000);
+
+          const recentWashCount = await prisma.booking.count({
+            where: {
+              vehicleId,
+              scheduledStartAtUtc: { gte: periodStart },
+              status: { notIn: ["CUSTOMER_CANCELLED", "PROVIDER_CANCELLED", "PROVIDER_DECLINED", "EXPIRED"] },
+            },
+          });
+
+          if (recentWashCount >= maxWashes) {
+            const vehicle = await prisma.vehicle.findUnique({ where: { id: vehicleId }, select: { unitNumber: true } });
+            const nextAllowed = new Date(periodStart.getTime() + periodDays * 24 * 60 * 60 * 1000);
+            res.status(403).json({
+              errorCode: "POLICY_VIOLATION",
+              code: "FREQUENCY_LIMIT_EXCEEDED",
+              message: `Vehicle ${vehicle?.unitNumber || vehicleId} has already been washed ${recentWashCount} time(s) in the last ${periodDays} days. Next wash allowed after ${nextAllowed.toLocaleDateString()}.`,
+            });
+            return;
+          }
+        }
+      }
     }
 
     const slotStart = new Date(slotStartUtc);
