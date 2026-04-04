@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useSearchLocations, useListBookings, useGetAvailableNowLocations } from "@workspace/api-client-react";
 import { Card, Input, Button, Badge, ErrorState } from "@/components/ui";
-import { MapPin, Search, Navigation, Map, List, Clock, Filter, X, Zap } from "lucide-react";
+import { MapPin, Search, Navigation, Map, List, Clock, Filter, X, Zap, Star } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { formatCurrency } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -107,6 +107,8 @@ type LocationWithMeta = {
   operatingWindows?: Array<{ dayOfWeek: number; openTime: string; closeTime: string }>;
   isOpenNow?: boolean;
   nextOpenAt?: string | null;
+  averageRating?: number | null;
+  reviewCount?: number;
   distance?: number;
   isOpen: boolean;
 };
@@ -116,6 +118,7 @@ export default function CustomerSearch() {
   const [viewMode, setViewMode] = useState<"list" | "map">("list");
   const [filterOpenNow, setFilterOpenNow] = useState(false);
   const [filterAvailNow, setFilterAvailNow] = useState(false);
+  const [filterTopRated, setFilterTopRated] = useState(false);
   const [userLat, setUserLat] = useState<number | null>(null);
   const [userLng, setUserLng] = useState<number | null>(null);
   const [geoStatus, setGeoStatus] = useState<"pending" | "granted" | "denied">("pending");
@@ -183,10 +186,16 @@ export default function CustomerSearch() {
     if (filterAvailNow) {
       result = result.filter((l) => availNowIds.has(l.id));
     }
+    if (filterTopRated) {
+      result = result.filter((l) => (l.averageRating ?? 0) >= 4.0);
+    }
     return result;
-  }, [enrichedLocations, searchTerm, filterOpenNow, filterAvailNow, availNowIds]);
+  }, [enrichedLocations, searchTerm, filterOpenNow, filterAvailNow, filterTopRated, availNowIds]);
 
-  const sortByDistance = (a: LocationWithMeta, b: LocationWithMeta) => {
+  const sortLocations = (a: LocationWithMeta, b: LocationWithMeta) => {
+    if (filterTopRated) {
+      return (b.averageRating ?? 0) - (a.averageRating ?? 0);
+    }
     if (a.distance != null && b.distance != null) return a.distance - b.distance;
     if (a.distance != null) return -1;
     if (b.distance != null) return 1;
@@ -195,54 +204,81 @@ export default function CustomerSearch() {
 
   const nearbyLocations = useMemo(() => {
     const sorted = [...filtered].filter((l) => !previousLocationIds.has(l.id));
-    sorted.sort(sortByDistance);
+    sorted.sort(sortLocations);
     return sorted;
   }, [filtered, previousLocationIds]);
 
   const previousLocations = useMemo(() => {
     if (previousLocationIds.size === 0) return [];
     const sorted = [...filtered].filter((l) => previousLocationIds.has(l.id));
-    sorted.sort(sortByDistance);
+    sorted.sort(sortLocations);
     return sorted;
   }, [filtered, previousLocationIds]);
 
   const allSorted = useMemo(() => {
     const sorted = [...filtered];
-    sorted.sort(sortByDistance);
+    sorted.sort(sortLocations);
     return sorted;
   }, [filtered]);
+
+  const renderStars = (rating: number | null | undefined) => {
+    const r = rating ?? 0;
+    const full = Math.floor(r);
+    const half = r - full >= 0.5;
+    const empty = 5 - full - (half ? 1 : 0);
+    return (
+      <>
+        {Array.from({ length: full }, (_, i) => <Star key={`f${i}`} className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />)}
+        {half && <Star key="h" className="h-3.5 w-3.5 fill-amber-400/50 text-amber-400" />}
+        {Array.from({ length: empty }, (_, i) => <Star key={`e${i}`} className="h-3.5 w-3.5 text-slate-300" />)}
+      </>
+    );
+  };
 
   const renderLocationCard = (loc: LocationWithMeta, idx: number) => (
     <motion.div key={loc.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.03 }}>
       <Link href={`/location/${loc.id}`} className="block h-full">
         <Card className="h-full flex flex-col group cursor-pointer border-2 hover:border-primary/30">
           <div className="p-6 flex-1">
-            <div className="flex justify-between items-start mb-4">
-              <div className="flex items-center gap-2 flex-wrap">
-                <Badge className="bg-blue-50 text-blue-700 border-blue-200">{loc.provider?.name}</Badge>
-                {loc.isOpen ? (
-                  <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">
-                    <Clock className="h-3 w-3 mr-1" />Open Now
-                  </Badge>
-                ) : (
-                  <Badge className="bg-slate-100 text-slate-500 border-slate-200">
-                    Closed{loc.nextOpenAt ? ` · Opens ${new Date(loc.nextOpenAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}
-                  </Badge>
-                )}
-              </div>
-              <div className="bg-slate-50 p-2 rounded-full text-slate-400 group-hover:bg-primary group-hover:text-white transition-colors">
+            <div className="flex justify-between items-start mb-2">
+              <h3 className="text-xl font-bold text-slate-900">{loc.name}</h3>
+              <div className="bg-slate-50 p-2 rounded-full text-slate-400 group-hover:bg-primary group-hover:text-white transition-colors shrink-0 ml-2">
                 <Navigation className="h-4 w-4" />
               </div>
             </div>
-            <h3 className="text-xl font-bold text-slate-900 mb-2">{loc.name}</h3>
+
+            {/* Star rating */}
+            <div className="flex items-center gap-1.5 mb-2">
+              <div className="flex items-center gap-0.5">{renderStars(loc.averageRating)}</div>
+              {loc.averageRating != null ? (
+                <>
+                  <span className="text-sm font-bold text-slate-700">{loc.averageRating}</span>
+                  <span className="text-xs text-slate-400">({loc.reviewCount ?? 0} review{(loc.reviewCount ?? 0) !== 1 ? "s" : ""})</span>
+                </>
+              ) : (
+                <span className="text-xs text-slate-400">No reviews yet</span>
+              )}
+            </div>
+
+            {/* Open/closed + address */}
+            <div className="flex items-start gap-2 text-sm mb-1">
+              {loc.isOpen ? (
+                <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold text-xs shrink-0 mt-0.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Open Now
+                </span>
+              ) : (
+                <span className="text-xs text-slate-400 font-medium shrink-0 mt-0.5">
+                  Closed{loc.nextOpenAt ? ` · Opens ${new Date(loc.nextOpenAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}
+                </span>
+              )}
+            </div>
             <p className="text-slate-500 flex items-start gap-2 text-sm leading-relaxed">
               <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
               <span>
-                {loc.addressLine1}
-                <br />
-                {loc.city}, {loc.stateCode} {loc.postalCode}
+                {loc.addressLine1}, {loc.city}, {loc.stateCode} {loc.postalCode}
               </span>
             </p>
+
             {loc.distance != null && (
               <p className="mt-2 text-sm font-semibold text-purple-600 flex items-center gap-1.5">
                 <Navigation className="h-3.5 w-3.5" />
@@ -352,6 +388,17 @@ export default function CustomerSearch() {
                 <span className="ml-1 h-3 w-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin inline-block" />
               )}
             </button>
+            <button
+              onClick={() => setFilterTopRated(!filterTopRated)}
+              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium border transition-all ${
+                filterTopRated
+                  ? "bg-amber-50 text-amber-700 border-amber-300 shadow-sm"
+                  : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+              }`}
+            >
+              {filterTopRated ? <X className="h-3.5 w-3.5" /> : <Star className="h-3.5 w-3.5" />}
+              Top Rated
+            </button>
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
@@ -397,7 +444,7 @@ export default function CustomerSearch() {
             <MapPin className="h-12 w-12 text-slate-300 mx-auto mb-4" />
             <h3 className="text-lg font-bold text-slate-900">No locations found</h3>
             <p className="text-slate-500">
-              {filterAvailNow ? "No locations have wash bay availability this hour. Try removing the filter." : filterOpenNow ? "No locations are open right now. Try removing the filter." : "Try adjusting your search terms"}
+              {filterTopRated ? "No locations with 4.0+ rating match your filters." : filterAvailNow ? "No locations have wash bay availability this hour. Try removing the filter." : filterOpenNow ? "No locations are open right now. Try removing the filter." : "Try adjusting your search terms"}
             </p>
           </div>
         ) : viewMode === "map" ? (

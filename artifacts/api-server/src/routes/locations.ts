@@ -154,6 +154,10 @@ router.get("/locations/search", async (req, res) => {
           select: { dayOfWeek: true, openTime: true, closeTime: true },
           orderBy: [{ dayOfWeek: "asc" }, { openTime: "asc" }],
         },
+        reviews: {
+          where: { isHidden: false },
+          select: { rating: true },
+        },
       },
       orderBy: { name: "asc" },
     });
@@ -164,11 +168,18 @@ router.get("/locations/search", async (req, res) => {
       const openStatus = isWithinOperatingHours(now, loc.timezone, loc.operatingWindows);
       const nextOpen = openStatus ? null : getNextOpenAt(now, loc.timezone, loc.operatingWindows);
 
+      const reviewRatings = (loc as any).reviews?.map((r: any) => r.rating) || [];
+      const reviewCount = reviewRatings.length;
+      const averageRating = reviewCount > 0 ? parseFloat((reviewRatings.reduce((s: number, r: number) => s + r, 0) / reviewCount).toFixed(1)) : null;
+
       return {
         ...loc,
         stateCode: loc.regionCode,
         isOpenNow: openStatus,
         nextOpenAt: nextOpen?.toISOString() ?? null,
+        averageRating,
+        reviewCount,
+        reviews: undefined, // Don't send raw review data to client
         services: loc.services.map((s) => ({
           ...s,
           allInPriceMinor: calculateAllInPrice(s.basePriceMinor),
