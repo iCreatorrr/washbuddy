@@ -23,11 +23,14 @@ export default function Login() {
       });
       setLocation("/"); // AuthContext + App.tsx will route correctly
     } catch (err: any) {
-      const message =
-        err?.response?.data?.message
-        || err?.data?.message
-        || (typeof err?.message === "string" && err.message.length < 200 && !err.message.includes("fetch") ? err.message : null)
-        || "Invalid email or password. Please try again.";
+      const raw = err?.message || "";
+      const isNetworkError = raw.includes("404") || raw.includes("Failed to fetch") || raw.includes("NetworkError") || raw.includes("ECONNREFUSED");
+      const apiMessage = err?.response?.data?.message || err?.data?.message;
+      const message = isNetworkError
+        ? "Unable to reach the server. Please check your connection and try again."
+        : apiMessage
+          || (typeof raw === "string" && raw.length < 100 && raw.includes("Invalid") ? raw : null)
+          || "Invalid email or password. Please try again.";
       setError(message);
       setLoading(false);
     }
