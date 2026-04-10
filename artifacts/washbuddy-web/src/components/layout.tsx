@@ -12,6 +12,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
 
+  // Auto-close mobile menu on route change
+  React.useEffect(() => { setIsMobileMenuOpen(false); }, [location]);
+
   if (!user) return <>{children}</>;
 
   const getNavItems = () => {

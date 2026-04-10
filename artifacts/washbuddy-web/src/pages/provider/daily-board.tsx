@@ -4,6 +4,7 @@ import { Calendar, ChevronLeft, ChevronRight, Plus, Filter, LayoutList, Clock, C
 import { motion } from "framer-motion";
 import { useAuth } from "@/contexts/auth";
 import { BookingCard } from "@/components/provider/booking-card";
+import { QuickAddBooking } from "@/components/provider/quick-add-booking";
 import { format, addDays, subDays } from "date-fns";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -22,6 +23,8 @@ export default function DailyBoard() {
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
 
   // Filters (client-side)
   const [filterStatus, setFilterStatus] = useState("all");
@@ -105,13 +108,22 @@ export default function DailyBoard() {
 
   return (
     <div className="space-y-6">
+      {isQuickAddOpen && (
+        <QuickAddBooking
+          providerId={providerId}
+          locationId={selectedLocation}
+          onClose={() => setIsQuickAddOpen(false)}
+          onSuccess={refresh}
+        />
+      )}
+
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-display font-bold text-slate-900">Daily Wash Board</h1>
           <p className="text-slate-500 mt-1">Manage today's washes and track progress.</p>
         </div>
-        <Button className="gap-2"><Plus className="h-4 w-4" /> Add Booking</Button>
+        <Button className="gap-2" onClick={() => setIsQuickAddOpen(true)}><Plus className="h-4 w-4" /> Add Booking</Button>
       </div>
 
       {/* Date + Location bar */}
