@@ -26,6 +26,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     if (hasRole("PROVIDER_ADMIN") || hasRole("PROVIDER_STAFF")) {
       return [
         { label: "Daily Board", icon: Calendar, href: "/provider/daily-board" },
+        { label: "Bay Timeline", icon: LayoutDashboard, href: "/provider/bay-timeline" },
         { label: "Reviews", icon: Star, href: "/provider/reviews" },
         { label: "Locations & Services", icon: Settings, href: "/provider/settings" },
       ];

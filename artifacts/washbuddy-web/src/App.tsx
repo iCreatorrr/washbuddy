@@ -15,6 +15,7 @@ const MyVehicles = lazy(() => import("./pages/customer/my-vehicles"));
 const RoutePlanner = lazy(() => import("./pages/customer/route-planner"));
 const ProviderDashboard = lazy(() => import("./pages/provider/dashboard"));
 const DailyBoard = lazy(() => import("./pages/provider/daily-board"));
+const BayTimeline = lazy(() => import("./pages/provider/bay-timeline"));
 const ProviderSettings = lazy(() => import("./pages/provider/settings"));
 const ProviderReviews = lazy(() => import("./pages/provider/reviews"));
 const ProviderOnboarding = lazy(() => import("./pages/provider/onboarding"));
@@ -131,6 +132,9 @@ function Router() {
       </Route>
       <Route path="/provider/daily-board">
         <RouteGuard allowedRoles={["PROVIDER_ADMIN", "PROVIDER_STAFF"]}><DailyBoard /></RouteGuard>
+      </Route>
+      <Route path="/provider/bay-timeline">
+        <RouteGuard allowedRoles={["PROVIDER_ADMIN", "PROVIDER_STAFF"]}><BayTimeline /></RouteGuard>
       </Route>
       <Route path="/provider">
         <RouteGuard allowedRoles={["PROVIDER_ADMIN", "PROVIDER_STAFF"]}><DailyBoard /></RouteGuard>
