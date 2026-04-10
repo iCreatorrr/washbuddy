@@ -761,6 +761,34 @@ router.post("/bookings/:bookingId/complete", requireAuth, async (req, res) => {
 
     res.json({ booking: updated });
     notifyBookingCompleted(booking.id).catch(() => {});
+
+    // V2: Update vehicle lastWashAtUtc and ClientProfile on completion
+    try {
+      if (booking.vehicleId) {
+        await prisma.vehicle.update({ where: { id: booking.vehicleId }, data: { lastWashAtUtc: new Date() } });
+      }
+      if (booking.customerId && booking.location?.providerId) {
+        const profile = await prisma.clientProfile.findFirst({
+          where: { providerId: booking.location.providerId, userId: booking.customerId },
+        });
+        if (profile) {
+          const newVisitCount = profile.visitCount + 1;
+          const newTags = [...profile.tags];
+          if (newTags.includes("NEW_CLIENT") && newVisitCount >= 2) {
+            newTags.splice(newTags.indexOf("NEW_CLIENT"), 1);
+          }
+          if (!newTags.includes("FREQUENT") && newVisitCount >= 5) {
+            newTags.push("FREQUENT");
+          }
+          await prisma.clientProfile.update({
+            where: { id: profile.id },
+            data: { visitCount: newVisitCount, lastVisitAt: new Date(), lifetimeSpendMinor: { increment: booking.serviceBasePriceMinor }, tags: newTags },
+          });
+        }
+      }
+    } catch (profileErr) {
+      req.log.warn({ err: profileErr }, "Failed to update vehicle/client profile on completion");
+    }
   } catch (err: any) {
     if (err?.message === "INVALID_TRANSITION") {
       res.status(409).json({ errorCode: "INVALID_TRANSITION", message: "Cannot complete booking in its current status" });
