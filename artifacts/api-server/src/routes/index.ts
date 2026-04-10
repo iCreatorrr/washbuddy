@@ -13,6 +13,8 @@ import notificationsRouter from "./notifications";
 import fleetRouter from "./fleet";
 import adminRouter from "./admin";
 import providerBookingsRouter from "./providerBookings";
+import clientProfilesRouter from "./clientProfiles";
+import providerAnalyticsRouter from "./providerAnalytics";
 
 const router: IRouter = Router();
 
@@ -30,5 +32,7 @@ router.use(reviewsRouter);
 router.use(notificationsRouter);
 router.use(fleetRouter);
 router.use(providerBookingsRouter);
+router.use(clientProfilesRouter);
+router.use(providerAnalyticsRouter);
 
 export default router;

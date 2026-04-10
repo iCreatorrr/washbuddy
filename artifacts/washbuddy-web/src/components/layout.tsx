@@ -30,8 +30,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       return [
         { label: "Daily Board", icon: Calendar, href: "/provider/daily-board" },
         { label: "Bay Timeline", icon: LayoutDashboard, href: "/provider/bay-timeline" },
+        { label: "Shift Overview", icon: ClipboardList, href: "/provider/shift-overview" },
+        { label: "Clients", icon: Users, href: "/provider/clients" },
+        { label: "Analytics", icon: BarChart3, href: "/provider/analytics" },
+        { label: "Operators", icon: Star, href: "/provider/operator-performance" },
         { label: "Reviews", icon: Star, href: "/provider/reviews" },
-        { label: "Locations & Services", icon: Settings, href: "/provider/settings" },
+        { label: "Audit Log", icon: ClipboardList, href: "/provider/audit-log" },
+        { label: "Settings", icon: Settings, href: "/provider/settings" },
       ];
     }
     const isOperator = hasRole("FLEET_ADMIN") || hasRole("DISPATCHER") || hasRole("MAINTENANCE_MANAGER") || hasRole("READ_ONLY_ANALYST");

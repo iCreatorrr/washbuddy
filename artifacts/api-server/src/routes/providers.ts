@@ -161,4 +161,130 @@ router.post("/providers/:providerId/stripe/onboard", requireAuth, requireProvide
   }
 });
 
+// ─── Team Management ────────────────────────────────────────────────────────
+
+router.get("/providers/:providerId/team", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const members = await prisma.providerMembership.findMany({
+      where: { providerId: req.params.providerId },
+      include: { user: { select: { id: true, firstName: true, lastName: true, email: true } }, location: { select: { name: true } } },
+      orderBy: { role: "asc" },
+    });
+    res.json({ members: members.map((m) => ({
+      membershipId: m.id, userId: m.userId, userName: `${m.user.firstName} ${m.user.lastName}`,
+      userEmail: m.user.email, role: m.role, locationName: m.location?.name || null, isActive: m.isActive, createdAt: m.createdAt,
+    })) });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to load team" }); }
+});
+
+router.post("/providers/:providerId/team/invite", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const { email, role, locationId } = req.body;
+    if (!email || !role) { res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "Email and role required" }); return; }
+
+    let user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      const { hashPassword } = await import("../lib/auth");
+      user = await prisma.user.create({ data: { email, firstName: "Invited", lastName: "User", passwordHash: await hashPassword(crypto.randomUUID()), isActive: true } });
+    }
+
+    const membership = await prisma.providerMembership.create({
+      data: { providerId: req.params.providerId, userId: user.id, role: role as any, locationId: locationId || null, isActive: true },
+    });
+    res.status(201).json({ membership });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to invite" }); }
+});
+
+router.patch("/providers/:providerId/team/:membershipId", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const { role, locationId, isActive } = req.body;
+    const data: any = {};
+    if (role !== undefined) data.role = role;
+    if (locationId !== undefined) data.locationId = locationId || null;
+    if (isActive !== undefined) data.isActive = isActive;
+    const updated = await prisma.providerMembership.update({ where: { id: req.params.membershipId }, data });
+    res.json({ membership: updated });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to update membership" }); }
+});
+
+// ─── Discounts ──────────────────────────────────────────────────────────────
+
+router.get("/providers/:providerId/discounts", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const discounts = await prisma.providerDiscount.findMany({ where: { providerId: req.params.providerId }, orderBy: { createdAt: "desc" } });
+    res.json({ discounts });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to load discounts" }); }
+});
+
+router.post("/providers/:providerId/discounts", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const discount = await prisma.providerDiscount.create({ data: { providerId: req.params.providerId, ...req.body } });
+    res.status(201).json({ discount });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to create discount" }); }
+});
+
+router.patch("/providers/:providerId/discounts/:discountId", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const updated = await prisma.providerDiscount.update({ where: { id: req.params.discountId }, data: req.body });
+    res.json({ discount: updated });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to update discount" }); }
+});
+
+router.delete("/providers/:providerId/discounts/:discountId", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    await prisma.providerDiscount.update({ where: { id: req.params.discountId }, data: { isActive: false } });
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to delete discount" }); }
+});
+
+// ─── Subscription Packages ──────────────────────────────────────────────────
+
+router.get("/providers/:providerId/subscription-packages", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const packages = await prisma.subscriptionPackage.findMany({
+      where: { providerId: req.params.providerId },
+      include: { _count: { select: { subscriptions: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ packages });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to load packages" }); }
+});
+
+router.post("/providers/:providerId/subscription-packages", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const pkg = await prisma.subscriptionPackage.create({ data: { providerId: req.params.providerId, ...req.body } });
+    res.status(201).json({ package: pkg });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to create package" }); }
+});
+
+router.patch("/providers/:providerId/subscription-packages/:packageId", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const updated = await prisma.subscriptionPackage.update({ where: { id: req.params.packageId }, data: req.body });
+    res.json({ package: updated });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to update package" }); }
+});
+
+// ─── Wash Bays ──────────────────────────────────────────────────────────────
+
+router.get("/providers/:providerId/locations/:locationId/bays", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const bays = await prisma.washBay.findMany({ where: { locationId: req.params.locationId }, orderBy: { displayOrder: "asc" } });
+    res.json({ bays });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to load bays" }); }
+});
+
+router.post("/providers/:providerId/locations/:locationId/bays", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const bay = await prisma.washBay.create({ data: { locationId: req.params.locationId, ...req.body } });
+    res.status(201).json({ bay });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to create bay" }); }
+});
+
+router.patch("/providers/:providerId/locations/:locationId/bays/:bayId", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const updated = await prisma.washBay.update({ where: { id: req.params.bayId }, data: req.body });
+    res.json({ bay: updated });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to update bay" }); }
+});
+
 export default router;
