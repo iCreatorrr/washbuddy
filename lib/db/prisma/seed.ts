@@ -916,6 +916,264 @@ async function main() {
   const unreadCount = seedNotifications.filter((n) => !n.readAt).length;
   console.log(`  ✓ ${seedNotifications.length} seed notifications created (${unreadCount} unread).\n`);
 
+  // ── Step 4.6: V2 seed data — wash bays, clients, subscriptions, discounts ──
+  console.log("Step 4.6: Creating V2 seed data...");
+
+  // Fetch all approved locations for wash bay creation
+  const allApprovedLocations = await prisma.location.findMany({
+    where: { isVisible: true, provider: { approvalStatus: "APPROVED" } },
+    include: { services: { where: { isVisible: true }, select: { id: true, capacityPerSlot: true } } },
+    take: 45,
+  });
+
+  // Wash Bays — 1-4 per location based on capacity
+  let bayCount = 0;
+  for (const loc of allApprovedLocations) {
+    const maxCap = Math.max(...loc.services.map((s) => s.capacityPerSlot), 1);
+    const numBays = Math.min(maxCap, 4);
+    const classes = [["SMALL", "MEDIUM"], ["SMALL", "MEDIUM", "LARGE"], ["MEDIUM", "LARGE", "EXTRA_LARGE"], ["SMALL", "MEDIUM", "LARGE", "EXTRA_LARGE"]];
+    for (let b = 0; b < numBays; b++) {
+      await prisma.washBay.create({
+        data: {
+          locationId: loc.id,
+          name: `Bay ${b + 1}`,
+          maxVehicleLengthIn: b < 2 ? 480 : 720,
+          maxVehicleHeightIn: b < 2 ? 144 : 168,
+          supportedClasses: classes[Math.min(b, classes.length - 1)],
+          isActive: true,
+          displayOrder: b,
+        },
+      });
+      bayCount++;
+    }
+  }
+  console.log(`  ✓ ${bayCount} wash bays created.`);
+
+  // Client Profiles — 15 profiles across 5 providers
+  const profileProviders = allApprovedLocations.slice(0, 5);
+  const clientUsers = [driverUser, driver1User, fleetAdminUser, providerOwnerUser, adminUser];
+  let profileCount = 0;
+
+  // 10 linked to platform users
+  for (let i = 0; i < 10; i++) {
+    const prov = profileProviders[i % 5];
+    const usr = clientUsers[i % clientUsers.length];
+    const tags = i < 2 ? ["VIP"] : i < 5 ? ["FREQUENT"] : i < 6 ? ["SERVICE_RECOVERY"] : ["NEW_CLIENT"];
+    if (i >= 8) tags.push("FLEET_ACCOUNT");
+    await prisma.clientProfile.create({
+      data: {
+        providerId: prov.providerId,
+        userId: usr.id,
+        name: `${usr.firstName} ${usr.lastName}`,
+        email: usr.email,
+        tags,
+        lifetimeSpendMinor: randomBetween(5000, 80000),
+        visitCount: i < 5 ? randomBetween(5, 20) : randomBetween(0, 3),
+        lastVisitAt: new Date(Date.now() - randomBetween(1, 30) * 24 * 60 * 60 * 1000),
+      },
+    });
+    profileCount++;
+  }
+
+  // 5 off-platform clients
+  const offPlatformNames = ["Carlos Mendez", "Sarah Whitfield", "Jim Kowalski", "Tanya Brooks", "Dev Patel"];
+  for (let i = 0; i < 5; i++) {
+    const prov = profileProviders[i % 5];
+    await prisma.clientProfile.create({
+      data: {
+        providerId: prov.providerId,
+        name: offPlatformNames[i],
+        phone: i < 2 ? `+1212555${1100 + i}` : null,
+        email: i < 2 ? offPlatformNames[i].toLowerCase().replace(" ", ".") + "@fleet.com" : null,
+        tags: i === 0 ? ["FREQUENT", "FLEET_ACCOUNT"] : ["NEW_CLIENT"],
+        lifetimeSpendMinor: randomBetween(0, 30000),
+        visitCount: randomBetween(0, 8),
+      },
+    });
+    profileCount++;
+  }
+  console.log(`  ✓ ${profileCount} client profiles created.`);
+
+  // Subscription Packages — 3 at different providers
+  const subProviders = allApprovedLocations.slice(0, 3);
+  const packages = [];
+  const pkgDefs = [
+    { name: "Weekly Exterior Wash", cadence: "WEEKLY", minWashes: 4 },
+    { name: "Biweekly Full Detail", cadence: "BIWEEKLY", minWashes: 3 },
+    { name: "Monthly Fleet Clean", cadence: "MONTHLY", minWashes: 3 },
+  ];
+  for (let i = 0; i < 3; i++) {
+    const loc = subProviders[i];
+    const svc = loc.services[0];
+    const pkg = await prisma.subscriptionPackage.create({
+      data: {
+        providerId: loc.providerId,
+        locationId: loc.id,
+        name: pkgDefs[i].name,
+        description: `Recurring ${pkgDefs[i].name.toLowerCase()} package`,
+        includedServiceIds: svc ? [svc.id] : [],
+        cadence: pkgDefs[i].cadence,
+        pricePerWashMinor: randomBetween(8000, 15000),
+        currencyCode: i === 0 ? "CAD" : "USD",
+        minWashes: pkgDefs[i].minWashes,
+        isActive: true,
+      },
+    });
+    packages.push(pkg);
+  }
+  console.log(`  ✓ ${packages.length} subscription packages created.`);
+
+  // Fleet Subscriptions — 3 active
+  const subDefs = [
+    { pkgIdx: 0, vehIdx: 0, washes: 3, daysAgo: 30, nextDays: 3 },
+    { pkgIdx: 0, vehIdx: 1, washes: 3, daysAgo: 30, nextDays: 3 },
+    { pkgIdx: 1, vehIdx: 2, washes: 1, daysAgo: 14, nextDays: 7 },
+  ];
+  for (const sd of subDefs) {
+    await prisma.fleetSubscription.create({
+      data: {
+        packageId: packages[sd.pkgIdx].id,
+        fleetId: fleet.id,
+        vehicleId: vehicles[sd.vehIdx].id,
+        purchasedByUserId: fleetAdminUser.id,
+        status: "ACTIVE",
+        startDate: new Date(Date.now() - sd.daysAgo * 24 * 60 * 60 * 1000),
+        nextWashDate: new Date(Date.now() + sd.nextDays * 24 * 60 * 60 * 1000),
+        totalWashesCompleted: sd.washes,
+      },
+    });
+  }
+  console.log(`  ✓ ${subDefs.length} fleet subscriptions created.`);
+
+  // Provider Discounts — 4 rules at 2 providers
+  const discountProviders = allApprovedLocations.slice(0, 2);
+  const discountDefs = [
+    { providerId: discountProviders[0].providerId, locationId: discountProviders[0].id, discountType: "OFF_PEAK", name: "Weekday Afternoon Special", percentOff: 10, peakStartTime: "14:00", peakEndTime: "16:00", peakDaysOfWeek: [1,2,3,4,5], isStackable: true },
+    { providerId: discountProviders[0].providerId, locationId: discountProviders[0].id, discountType: "VOLUME", name: "Fleet Volume Discount", percentOff: 5, volumeThreshold: 10, volumePeriodDays: 30, isStackable: true },
+    { providerId: discountProviders[1].providerId, locationId: discountProviders[1].id, discountType: "FIRST_TIME", name: "New Customer Welcome", flatAmountOff: 1500, isStackable: false },
+    { providerId: discountProviders[1].providerId, locationId: discountProviders[1].id, discountType: "OFF_PEAK", name: "Saturday Early Bird", percentOff: 15, peakStartTime: "06:00", peakEndTime: "09:00", peakDaysOfWeek: [6], isStackable: true },
+  ];
+  for (const dd of discountDefs) {
+    await prisma.providerDiscount.create({ data: { ...dd, isActive: true } as any });
+  }
+  console.log(`  ✓ ${discountDefs.length} provider discounts created.`);
+
+  // Off-platform bookings — 5 DIRECT + 2 WALK_IN
+  const offPlatformBookings = [];
+  for (let i = 0; i < 5; i++) {
+    const loc = seedLocations[i % seedLocations.length];
+    const svc = loc.services[0];
+    if (!svc) continue;
+    const daysAgo = randomBetween(1, 14);
+    const status = i < 3 ? "COMPLETED" : i === 3 ? "SETTLED" : "PROVIDER_CONFIRMED";
+    const b = await prisma.booking.create({
+      data: {
+        locationId: loc.id, serviceId: svc.id, customerId: driverUser.id,
+        status: status as any, idempotencyKey: `seed-offplat-${i}-${Date.now()}`,
+        serviceNameSnapshot: svc.name, serviceBasePriceMinor: svc.basePriceMinor,
+        platformFeeMinor: 0, totalPriceMinor: svc.basePriceMinor,
+        currencyCode: svc.currencyCode, locationTimezone: loc.timezone,
+        scheduledStartAtUtc: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000),
+        scheduledEndAtUtc: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000 + svc.durationMins * 60000),
+        bookingSource: "DIRECT", isOffPlatform: true,
+        offPlatformClientName: offPlatformNames[i],
+        offPlatformClientPhone: i < 2 ? `+1212555${1100 + i}` : null,
+        offPlatformClientEmail: i < 2 ? offPlatformNames[i].toLowerCase().replace(" ", ".") + "@fleet.com" : null,
+      },
+    });
+    offPlatformBookings.push(b);
+  }
+
+  // 2 walk-in bookings
+  for (let i = 0; i < 2; i++) {
+    const loc = seedLocations[i % seedLocations.length];
+    const svc = loc.services[0];
+    if (!svc) continue;
+    const status = i === 0 ? "COMPLETED" : "IN_SERVICE";
+    await prisma.booking.create({
+      data: {
+        locationId: loc.id, serviceId: svc.id, customerId: driverUser.id,
+        status: status as any, idempotencyKey: `seed-walkin-${i}-${Date.now()}`,
+        serviceNameSnapshot: svc.name, serviceBasePriceMinor: svc.basePriceMinor,
+        platformFeeMinor: 0, totalPriceMinor: svc.basePriceMinor,
+        currencyCode: svc.currencyCode, locationTimezone: loc.timezone,
+        scheduledStartAtUtc: new Date(Date.now() - randomBetween(1, 5) * 24 * 60 * 60 * 1000),
+        scheduledEndAtUtc: new Date(Date.now() - randomBetween(1, 5) * 24 * 60 * 60 * 1000 + svc.durationMins * 60000),
+        bookingSource: "WALK_IN", isOffPlatform: true,
+        offPlatformClientName: i === 0 ? "Walk-in Customer" : "Fleet Driver (no account)",
+        offPlatformPaymentExternal: i === 0,
+      },
+    });
+  }
+  console.log(`  ✓ ${offPlatformBookings.length + 2} off-platform/walk-in bookings created.`);
+
+  // Booking Photos — 10 photos for 5 completed bookings
+  const photoBookings = completedBookings.slice(0, 5);
+  let photoCount = 0;
+  for (const pb of photoBookings) {
+    for (const photoType of ["BEFORE", "AFTER"]) {
+      const asset = await prisma.fileAsset.create({
+        data: {
+          bucket: "local",
+          objectKey: `photos/placeholder_${photoType.toLowerCase()}_${photoCount + 1}.jpg`,
+          mimeType: "image/jpeg",
+          byteSize: 150000,
+          sha256Hex: `${photoType.toLowerCase()}${String(photoCount).padStart(60, "0")}fade`,
+          purposeCode: "BOOKING_PHOTO",
+          uploadedByUserId: providerOwnerUser.id,
+        },
+      });
+      await prisma.bookingPhoto.create({
+        data: {
+          bookingId: pb.id,
+          uploadedBy: providerOwnerUser.id,
+          photoType,
+          fileAssetId: asset.id,
+        },
+      });
+      photoCount++;
+    }
+  }
+  console.log(`  ✓ ${photoCount} booking photos created.`);
+
+  // Booking Messages — 3 messages on completed bookings
+  const msgTemplates = [
+    { templateId: "WASH_COMPLETE", body: "Your wash is complete. Bus is in Lot A." },
+    { templateId: "RUNNING_LATE", body: "We're running approximately 10 minutes behind schedule. We apologize for the delay." },
+    { templateId: "READY_FOR_PICKUP", body: "Your bus is ready for pickup at the front entrance." },
+  ];
+  for (let i = 0; i < Math.min(3, completedBookings.length); i++) {
+    await prisma.bookingMessage.create({
+      data: {
+        bookingId: completedBookings[i].id,
+        senderId: providerOwnerUser.id,
+        templateId: msgTemplates[i].templateId,
+        body: msgTemplates[i].body,
+      },
+    });
+  }
+  console.log(`  ✓ ${Math.min(3, completedBookings.length)} booking messages created.`);
+
+  // Notification Preferences — 3 demo users × 10 event types
+  const prefUsers = [fleetAdminUser, driverUser, providerOwnerUser];
+  const eventTypes = ["NEW_BOOKING", "CANCELLATION", "REVIEW_RECEIVED", "SLA_WARNING", "BOOKING_REMINDER", "WASH_COMPLETE", "BOOKING_RESCHEDULED", "MESSAGE_RECEIVED", "WASH_HEALTH_ALERT", "SUBSCRIPTION_RENEWAL"];
+  let prefCount = 0;
+  for (const u of prefUsers) {
+    for (const et of eventTypes) {
+      await prisma.notificationPreference.create({
+        data: {
+          userId: u.id,
+          eventType: et,
+          emailEnabled: true,
+          inAppEnabled: true,
+          smsEnabled: false,
+        },
+      });
+      prefCount++;
+    }
+  }
+  console.log(`  ✓ ${prefCount} notification preferences created.\n`);
+
   // ── Step 5: Write DemoDataRegistry records ─────────────────────────
   console.log("Step 5: Writing DemoDataRegistry records...");
 
