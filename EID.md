@@ -1,9 +1,20 @@
 WASHBUDDY — ENGINEERING IMPLEMENTATION DOCUMENT (EID)
-Version: 1.0 Date: April 2, 2026 Status: Ready for Engineering Companion Document: PRD.md (must be read in full before beginning any work) Repository: github.com/iCreatorrr/washbuddy
+Version: 2.0
+Date: April 10, 2026
+Status: Ready for Engineering
+Companion Document: PRD.md v2.0 (must be read in full before beginning any work)
+Repository: github.com/iCreatorrr/washbuddy
 
-PREAMBLE — INSTRUCTIONS FOR AI AGENTS
-Before implementing any task in this document, read PRD.md in full. The PRD is the authoritative source for all business rules, pricing logic, role permissions, feature requirements, and acceptance criteria. This EID tells you HOW and WHERE to implement. The PRD tells you WHAT and WHY.
-This codebase is a TypeScript monorepo managed with pnpm workspaces. The structure is:
+---
+
+# PREAMBLE — INSTRUCTIONS FOR AI AGENTS
+
+Before implementing any task in this document, read PRD.md v2.0 in full. The PRD is the authoritative source for all business rules, pricing logic, role permissions, feature requirements, and acceptance criteria. This EID tells you HOW and WHERE to implement. The PRD tells you WHAT and WHY.
+
+This EID supersedes EID v1.0. All Phase 0 bug fixes from v1.0 are preserved as Phase 0 here. New work begins at Phase 1.
+
+## Codebase Structure
+```
 washbuddy/
 ├── artifacts/
 │   ├── api-server/          # Express REST API (TypeScript)
@@ -11,732 +22,1124 @@ washbuddy/
 │   └── mockup-sandbox/      # Ignore — not production code
 ├── lib/
 │   ├── db/                  # Prisma ORM + PostgreSQL schema
-│   │   └── prisma/schema.prisma  # DATABASE SCHEMA — source of truth for data model
+│   │   └── prisma/schema.prisma  # DATABASE SCHEMA — source of truth
 │   ├── api-spec/            # OpenAPI 3.x specification (openapi.yaml)
 │   ├── api-zod/             # Zod validation schemas (generated from OpenAPI)
-│   └── api-client-react/    # Auto-generated React Query hooks (generated via Orval)
-├── package.json             # Root workspace config
+│   └── api-client-react/    # Auto-generated React Query hooks (via Orval)
+├── package.json
 └── pnpm-workspace.yaml
-Tech stack summary:
-Backend: Express.js, TypeScript, Prisma ORM, PostgreSQL, express-session with pg-backed session store, pino logger
-Frontend: React 18, Vite, wouter (routing), TanStack React Query (data fetching), shadcn/ui (55 Radix-based components), Tailwind CSS, react-hook-form + zod (forms), Leaflet/OpenStreetMap (maps)
-API Contract: OpenAPI 3.x spec → Orval code generation → typed React Query hooks
-Payments: Stripe Connect (models exist, integration partially scaffolded)
-Auth: Session-based, HTTP-only cookies, scrypt password hashing
-Critical conventions to follow:
-All monetary values are integers in minor units (cents). A $125.00 price is stored as 12500.
-All timestamps are UTC with @db.Timestamptz. Display in local timezone using the entity's timezone field.
-All IDs are UUIDs (@db.Uuid).
-Database column names use snake_case mapped from camelCase Prisma fields via @map().
-API responses use camelCase (Prisma's default JS output).
-Frontend API calls use the generated hooks from @workspace/api-client-react. When adding new endpoints, update the OpenAPI spec, regenerate the client, then use the new hooks.
-All new UI components should use existing shadcn/ui primitives from artifacts/washbuddy-web/src/components/ui/.
+```
 
-IMPLEMENTATION PHASES
-Work is organized into 5 phases, executed sequentially. Each phase builds on the previous one. Do not skip phases. Within each phase, tasks are numbered and should be completed in order unless explicitly marked as parallelizable.
+## Tech Stack
+- Backend: Express.js, TypeScript, Prisma ORM, PostgreSQL, express-session (pg-backed), pino logger
+- Frontend: React 18, Vite, wouter (routing), TanStack React Query, shadcn/ui (55+ Radix components), Tailwind CSS, react-hook-form + zod, Leaflet/OpenStreetMap
+- API Contract: OpenAPI 3.x → Orval → typed React Query hooks
+- Payments: Stripe Connect (Express accounts)
+- Auth: Session-based, HTTP-only cookies, scrypt
 
-PHASE 0: DATA INTEGRITY AND FOUNDATION FIXES (Week 1)
-Goal: Fix critical bugs and data quality issues that make the current product unusable. After Phase 0, every existing page should load correctly and display accurate data.
+## Critical Conventions
+- All monetary values: integers in minor units (cents). $125.00 = 12500.
+- All timestamps: UTC with @db.Timestamptz. Display in local timezone using entity's timezone field.
+- All IDs: UUIDs (@db.Uuid).
+- DB columns: snake_case via @map(). API responses: camelCase.
+- Frontend API calls: use generated hooks from @workspace/api-client-react.
+- New endpoints: update OpenAPI spec → regenerate client → use new hooks.
+- UI components: use existing shadcn/ui primitives from artifacts/washbuddy-web/src/components/ui/.
+- New pages: follow existing patterns in artifacts/washbuddy-web/src/pages/.
 
-TASK 0.1 — Fix Provider Duplication
-Problem: 194 provider records exist with only 50 unique names (each duplicated ~4 times). This causes search results to show 3-4 identical cards per location and inflates the admin provider count.
-Root cause: The seed script ran multiple times without deduplication.
-Implementation:
-File: lib/db/prisma/ — create new seed cleanup migration
-Create a script at lib/db/src/cleanDuplicateProviders.ts that:
-Queries all providers grouped by name
-For each group of duplicates, keeps the one with the most complete data (has locations with services)
-For duplicate providers being removed: reassigns any bookings, reviews, or provider memberships pointing to the duplicate to the canonical provider (or deletes if no real data exists)
-Deletes the duplicate provider records
-Logs every deletion and reassignment for audit
-Before running, verify that ALL provider data is seed/demo data (confirmed by product owner). Since all data is seed, the simpler approach is acceptable: delete ALL existing providers, locations, services, operating windows, service compatibility records, and provider memberships, then re-seed with clean data (Task 0.2).
-Use the DemoDataRegistry table to verify records are seed data before deletion.
-Acceptance criteria: After execution, SELECT COUNT(*) FROM providers returns the exact number of unique intended providers (40-50 per Task 0.2), with zero duplicates.
+---
 
-TASK 0.2 — Replace Seed Data with Realistic Launch Corridor Data
-Problem: Existing seed data is geographically scattered across Ontario and US locations with inconsistent quality. Per PRD Section 10.2, seed data must reflect the Toronto–Buffalo–Niagara–NYC launch corridor.
-Implementation:
-File: Create lib/db/src/seedLaunchCorridor.ts
-Generate 45 realistic provider locations distributed as follows:
-12 locations in the Greater Toronto Area (Etobicoke, Scarborough, Mississauga, Brampton, Markham)
-5 locations in the Niagara/Hamilton corridor (St. Catharines, Hamilton, Niagara Falls ON)
-3 locations in Buffalo/Western NY area
-5 locations in upstate NY corridor (Syracuse, Albany, Hartford CT)
-8 locations in NYC metro (Bronx, Brooklyn, Queens, New Jersey — Newark, Jersey City, Elizabeth)
-5 locations in Long Island / Westchester
-4 locations in Connecticut (Stamford, New Haven, Hartford)
-3 locations in broader NJ / Philadelphia corridor
-Each location must have:
-A realistic business name (e.g., "Metro Fleet Wash — Bronx Terminal", "Lakeshore Bus Care — Mississauga", "Empire State Coach Wash — Albany")
-A real-seeming address with valid lat/lng coordinates for that area
-countryCode: "CA" for Canadian locations, "US" for American locations
-currencyCode: "CAD" for CA locations, "USD" for US locations
-Timezone: "America/Toronto" for Ontario, "America/New_York" for US East Coast
-Operating hours via OperatingWindow records: vary across locations. Some 24/7 (24h facilities), some Mon-Sat 6AM-8PM, some Mon-Fri 7AM-6PM, some with lunch breaks. At least 5 locations should be 24/7.
-capacityPerSlot: vary from 1 (small single-bay) to 4 (large commercial facility). Most locations should be 1-2.
-2-4 services per location from this realistic menu:
-Exterior Bus Wash: 20-45 min, $95-$175 USD / $120-$220 CAD
-Full Detail Wash: 60-120 min, $275-$450 USD / $350-$550 CAD
-Interior Clean: 30-60 min, $85-$150 USD / $110-$190 CAD
-Undercarriage Wash: 15-30 min, $60-$95 USD / $75-$120 CAD
-Quick Rinse: 10-15 min, $45-$75 USD / $55-$95 CAD
-Engine Bay Clean: 30-45 min, $120-$200 USD / $150-$250 CAD
-platformFeeMinor on each service: set to 0 for now (fee will be calculated dynamically per Task 1.1)
-requiresConfirmation: mix of true and false. At least 30% of services should be instant-book (false).
-isVisible: true for all
-ServiceCompatibility records for each service: most exterior washes support all bus types up to STANDARD (480" length, 138" height). Some large facilities support DOUBLE_DECKER and ARTICULATED. MINIBUS and SHUTTLE services available at all locations.
-Register all seed records in DemoDataRegistry with seedMode: "launch_corridor" and appropriate seedRegionCode.
-Create 16 fleet organizations with realistic names matching the current fleet names in the system, each with 20-80 vehicles, properly assigned to depots.
-Ensure the demo user accounts are properly linked:
-demo.fleet@washbuddy.com (Patricia Nakamura) must have FLEET_ADMIN role in the "Northeast Bus Lines" fleet, which must have vehicles, drivers, and at least 5 booking records across various statuses
-demo.driver@washbuddy.com (Alex Rivera) must have DRIVER role in the "Northeast Bus Lines" fleet with 3 vehicles assigned
-driver1@example.com (Mike Johnson) must have DRIVER role in the same fleet with 2 vehicles assigned
-owner@cleanbus-nyc.com (James Chen) must be PROVIDER_ADMIN for a provider with 2 NYC-area locations
-admin@washbuddy.com remains PLATFORM_SUPER_ADMIN
-Create 15-20 realistic booking records across various statuses (REQUESTED, PROVIDER_CONFIRMED, CHECKED_IN, IN_SERVICE, COMPLETED_PENDING_WINDOW, COMPLETED, SETTLED, CUSTOMER_CANCELLED) distributed across the last 30 days to populate dashboards and history views.
-Create 10-15 review records with varied ratings (3-5 stars) and realistic comments attached to completed bookings.
-Acceptance criteria: All search, dashboard, and detail pages show realistic, non-duplicated data. Fleet admin login shows a populated fleet dashboard. Provider login shows realistic booking activity. Admin dashboard shows accurate counts.
+# IMPLEMENTATION PHASES OVERVIEW
 
-TASK 0.3 — Fix Search Results Not Loading on Page Load
-Problem: The driver search page (/search) shows blank results until the user clicks the "Search" button. Results should load automatically on page load based on the user's current location.
-File: artifacts/washbuddy-web/src/pages/customer/search.tsx
-Fix: The search query should trigger automatically when the component mounts and geolocation is obtained. Review the TanStack Query hook that fetches locations — ensure enabled is not gated on a search-button click. The query should fire when the component has either: (a) obtained the user's geolocation, or (b) a fallback default location (center of launch corridor, approximately lat 42.5, lng -77.5 for the midpoint between Toronto and NYC).
-If geolocation is denied or unavailable, default to showing all visible locations sorted alphabetically (no distance sort) with a banner suggesting the user enable location services for better results.
-Acceptance criteria: Navigating to /search immediately shows location results without clicking any button. If geolocation is available, results are sorted by distance. If not, results show with a location-enable prompt.
+| Phase | Focus | Scope |
+|-------|-------|-------|
+| 0 | Bug Fixes & Data Foundation | Fix v1 bugs, clean seed data (from EID v1) |
+| 1 | Schema Evolution | New Prisma models, migrations, seed data for new features |
+| 2 | Provider Core Experience | Daily Wash Board, Bay Timeline, booking lifecycle, off-platform bookings |
+| 3 | Provider Admin Dashboard | CRM, reporting, analytics, operator performance, settings |
+| 4 | Cross-Role Features | Messaging, photos, subscriptions, discounts |
+| 5 | Driver & Fleet Enhancements | Find a Wash Now, subscription browsing, wash health, enhanced reports |
+| 6 | Notifications & Polish | Full notification system, notification preferences, UI polish |
+| 7 | Launch Prep | E2E testing, Stripe integration, performance, security |
 
-TASK 0.4 — Fix Fleet Dashboard Routing
-Problem: Logging in as demo.fleet@washbuddy.com (FLEET_ADMIN) redirects to /search instead of /fleet. The fleet pages exist in code (10 pages in artifacts/washbuddy-web/src/pages/fleet/) but are not accessible.
-Root cause investigation: The RootRedirect component in App.tsx checks isFleetOperator(hasRole) and should redirect to /fleet. The RouteGuard for /fleet allows FLEET_ADMIN, DISPATCHER, MAINTENANCE_MANAGER, READ_ONLY_ANALYST, and DRIVER. The issue is likely that the fleet membership data is not properly linked in the database, so hasRole("FLEET_ADMIN") returns false even though the user should have that role.
-File: artifacts/washbuddy-web/src/contexts/auth.tsx — Review the hasRole function implementation. Verify it checks against all role scopes (platform, fleet, provider).
-File: artifacts/api-server/src/routes/auth.ts — Review the /auth/me endpoint response. Verify it returns fleet membership roles with the correct role string.
-File: lib/db/ — Seed data — Verify that demo.fleet@washbuddy.com has a FleetMembership record with role: FLEET_ADMIN and isActive: true linked to a fleet. This is most likely the root cause — the membership record is missing or inactive.
-Fix: Ensure the seed script (Task 0.2) creates the proper FleetMembership record. Then verify the auth flow returns the role correctly. The routing logic in App.tsx appears correct based on code review — the issue is data, not code.
-Acceptance criteria: Logging in as demo.fleet@washbuddy.com redirects to /fleet and shows the Fleet Overview dashboard with real data (vehicles, recent bookings, wash requests).
+Execute phases sequentially. Within each phase, tasks are numbered and should be completed in order unless marked as parallelizable.
 
-TASK 0.5 — Fix Provider Settings Page (Read-Only Issue)
-Problem: The provider settings page (/provider/settings) displays locations and services but provides no ability to edit them. Per PRD Section 4.1, providers must be able to manage their own locations and services.
-File: artifacts/washbuddy-web/src/pages/provider/settings.tsx
-Implementation:
-Add "Edit" buttons next to each location and each service
-Add an "Add Location" button at the top of the page
-Add an "Add Service" button within each location's service list
-Implement edit modals/forms using shadcn/ui Dialog components with react-hook-form
-Location edit form fields: name, address (line 1, line 2, city, region, postal code, country), timezone, operating hours (day-by-day schedule builder), wash bay capacity per service
-Service edit form fields: name, description, duration (minutes), price (in local currency — display as dollars, convert to minor units for API), vehicle compatibility (max length, max height, supported subtypes), booking mode (instant or request-and-confirm), visibility toggle
-Wire forms to the existing API endpoints: PATCH /api/providers/:providerId/locations/:locationId, POST /api/providers/:providerId/locations, PATCH /api/providers/:providerId/locations/:locationId/services/:serviceId, POST /api/providers/:providerId/locations/:locationId/services, PUT /api/providers/:providerId/locations/:locationId/hours
-Also fix: The "Max concurrent washes" field currently displays as empty. This should display the capacityPerSlot value from the service records and be editable.
-Acceptance criteria: Provider admin can add new locations, edit existing location details (including operating hours and capacity), add new services, edit existing service details (including pricing, duration, compatibility, and booking mode), all through the settings UI. Changes persist after page reload.
+---
 
-TASK 0.6 — Fix Notification Bell
-Problem: The notification bell icon shows a count badge (e.g., "5") but clicking it does nothing or shows an empty state.
-File: artifacts/washbuddy-web/src/components/notification-bell.tsx
-Implementation:
-Clicking the bell should open a popover/dropdown panel (use shadcn/ui Popover or Sheet)
-The panel fetches notifications from GET /api/notifications and displays them as a scrollable list
-Each notification shows: subject (bold), body text, relative timestamp ("2 minutes ago", "yesterday"), and an action link
-Unread notifications are visually distinguished (e.g., blue dot or highlighted background)
-"Mark all as read" button at the top of the panel
-Clicking a notification marks it as read and navigates to its actionUrl
-The badge count shows only unread notifications (where readAt is null)
-File: artifacts/api-server/src/routes/notifications.ts — Verify the GET endpoint returns notifications for the authenticated user. Add a PATCH /api/notifications/:id/read endpoint to mark individual notifications as read. Add a POST /api/notifications/mark-all-read endpoint.
-Acceptance criteria: Bell shows accurate unread count. Clicking opens a panel with notification list. Notifications can be marked read individually and in bulk. Clicking a notification navigates to the relevant page.
+# PHASE 0: BUG FIXES AND DATA FOUNDATION (Week 1)
 
-PHASE 1: CORE BOOKING FLOW COMPLETION (Weeks 2-3)
-Goal: Make the end-to-end booking flow work flawlessly for all participants. After Phase 1, a driver can search, book, show up, get washed, and the provider can process the booking through its full lifecycle.
+*Goal: Fix critical bugs from v1 that make the current product unusable. After Phase 0, every existing page loads correctly and displays accurate data.*
 
-TASK 1.1 — Implement Per-Booking Fee Calculation
-Problem: The current fee calculation is per-service (each Service record has a static platformFeeMinor field set at creation time). Per PRD Section 3.1, the fee must be 15% of the combined service total for a vehicle booking, capped at $25 per vehicle booking (not per individual service).
-Current behavior: Fee is stored on each Service record and added at booking creation time: totalPrice = service.basePriceMinor + service.platformFeeMinor.
-Target behavior: Fee is calculated dynamically at booking creation based on the total service value for that vehicle visit. For the current single-service-per-booking model, the calculation is: fee = Math.min(Math.round(service.basePriceMinor * 0.15), 2500) (2500 = $25.00 in cents). The total shown to the customer is: allInPrice = service.basePriceMinor + fee.
-Files to modify:
-artifacts/api-server/src/routes/bookings.ts — In the POST /bookings handler, replace the static fee lookup:
-// REMOVE THIS:
-const totalPrice = service.basePriceMinor + service.platformFeeMinor;
+All tasks from EID v1.0 Phase 0 remain applicable:
 
-// REPLACE WITH:
-const FEE_RATE = 0.15;
-const FEE_CAP_MINOR = 2500; // $25.00 cap per vehicle booking
-const calculatedFee = Math.min(
-  Math.round(service.basePriceMinor * FEE_RATE),
-  FEE_CAP_MINOR
-);
-const totalPrice = service.basePriceMinor + calculatedFee;
-Update the booking creation to use calculatedFee instead of service.platformFeeMinor:
-platformFeeMinor: calculatedFee,
-totalPriceMinor: totalPrice,
-artifacts/api-server/src/lib/feeCalculator.ts — Create a new shared module:
-typescript
-export const PLATFORM_FEE_RATE = 0.15;
-export const PLATFORM_FEE_CAP_MINOR = 2500;
+## TASK 0.1 — Fix Provider Duplication
+Per EID v1 Task 0.1. Delete all seed providers, re-seed clean.
 
-export function calculatePlatformFee(serviceBasePriceMinor: number): number {
+## TASK 0.2 — Replace Seed Data with Realistic Launch Corridor Data
+Per EID v1 Task 0.2 with additions specified in PRD v2 Section 12. In addition to the original 45 locations, seed data must now include:
+- Named wash bays per location (see Phase 1 schema for WashBay model)
+- At least 3 providers with subscription packages
+- At least 2 providers with discount rules
+- At least 5 off-platform booking records
+- At least 2 walk-in booking records
+- Photo records for at least 5 completed bookings
+- Message records for at least 3 bookings
+- Client profile tags on at least 10 client records
+
+**Note:** Some seed data depends on new schema models from Phase 1. Run Phase 0 tasks 0.1-0.6 first to fix existing bugs, then run Phase 1 schema migration, then re-run expanded seed.
+
+## TASK 0.3 — Fix Search Results Not Loading
+Per EID v1 Task 0.3. TanStack Query hook must fire on mount.
+
+## TASK 0.4 — Fix Fleet Dashboard Routing
+Per EID v1 Task 0.4. Ensure FleetMembership records exist in seed data.
+
+## TASK 0.5 — Fix Provider Settings Page
+Per EID v1 Task 0.5. Add edit/add capability for locations and services.
+
+## TASK 0.6 — Fix Notification Bell
+Per EID v1 Task 0.6. Implement popover with notification list, mark-read functionality.
+
+---
+
+# PHASE 1: SCHEMA EVOLUTION (Week 2)
+
+*Goal: Extend the Prisma schema with all new models needed for v2 features. Run migration. Update seed data.*
+
+## TASK 1.1 — Add New Prisma Models
+
+File: `lib/db/prisma/schema.prisma`
+
+Add the following models. Follow existing conventions: UUIDs, snake_case mapping, Timestamptz, proper indexes.
+
+### WashBay (new model)
+```prisma
+model WashBay {
+  id                    String   @id @default(uuid()) @db.Uuid
+  locationId            String   @map("location_id") @db.Uuid
+  name                  String   // e.g., "Bay 1", "Bay A"
+  maxVehicleLengthIn    Int      @map("max_vehicle_length_in")
+  maxVehicleHeightIn    Int      @map("max_vehicle_height_in")
+  supportedClasses      String[] @map("supported_classes") // ["SMALL","MEDIUM","LARGE","EXTRA_LARGE"]
+  isActive              Boolean  @default(true) @map("is_active")
+  displayOrder          Int      @default(0) @map("display_order")
+  outOfServiceSince     DateTime? @map("out_of_service_since") @db.Timestamptz
+  outOfServiceReason    String?   @map("out_of_service_reason")
+  outOfServiceEstReturn DateTime? @map("out_of_service_est_return") @db.Timestamptz
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  location Location  @relation(fields: [locationId], references: [id])
+  bookings Booking[] @relation("booking_bay")
+
+  @@index([locationId, isActive])
+  @@map("wash_bays")
+}
+```
+
+### OffPlatformBooking (new model — extends Booking concept)
+Rather than a separate model, add fields to the existing Booking model:
+```prisma
+// ADD to existing Booking model:
+  bookingSource         String    @default("PLATFORM") @map("booking_source") // PLATFORM, DIRECT, WALK_IN
+  isOffPlatform         Boolean   @default(false) @map("is_off_platform")
+  offPlatformClientName String?   @map("off_platform_client_name")
+  offPlatformClientPhone String?  @map("off_platform_client_phone")
+  offPlatformClientEmail String?  @map("off_platform_client_email")
+  offPlatformPaymentExternal Boolean @default(false) @map("off_platform_payment_external")
+  washBayId             String?   @map("wash_bay_id") @db.Uuid
+  assignedOperatorId    String?   @map("assigned_operator_id") @db.Uuid
+
+// ADD relations:
+  washBay               WashBay?  @relation("booking_bay", fields: [washBayId], references: [id])
+  assignedOperator      User?     @relation("booking_operator", fields: [assignedOperatorId], references: [id])
+```
+
+### BookingPhoto (new model)
+```prisma
+model BookingPhoto {
+  id          String   @id @default(uuid()) @db.Uuid
+  bookingId   String   @map("booking_id") @db.Uuid
+  uploadedBy  String   @map("uploaded_by") @db.Uuid
+  photoType   String   @map("photo_type") // BEFORE, AFTER, PROBLEM_AREA, OTHER
+  fileAssetId String   @map("file_asset_id") @db.Uuid
+  caption     String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  booking   Booking   @relation(fields: [bookingId], references: [id])
+  uploader  User      @relation("photo_uploader", fields: [uploadedBy], references: [id])
+  fileAsset FileAsset @relation(fields: [fileAssetId], references: [id])
+
+  @@index([bookingId])
+  @@map("booking_photos")
+}
+```
+
+### BookingMessage (new model)
+```prisma
+model BookingMessage {
+  id         String   @id @default(uuid()) @db.Uuid
+  bookingId  String   @map("booking_id") @db.Uuid
+  senderId   String   @map("sender_id") @db.Uuid
+  templateId String?  @map("template_id") // which predefined template was used
+  body       String   // final message text (template + edits)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+  sender  User    @relation("message_sender", fields: [senderId], references: [id])
+
+  @@index([bookingId, createdAt])
+  @@map("booking_messages")
+}
+```
+
+### ClientProfile (new model)
+```prisma
+model ClientProfile {
+  id            String   @id @default(uuid()) @db.Uuid
+  providerId    String   @map("provider_id") @db.Uuid
+  userId        String?  @map("user_id") @db.Uuid // null for off-platform-only clients
+  name          String
+  phone         String?
+  email         String?
+  fleetName     String?  @map("fleet_name")
+  tags          String[] @default([]) // VIP, FREQUENT, SERVICE_RECOVERY, NEW_CLIENT, etc.
+  notes         String?
+  lifetimeSpendMinor Int @default(0) @map("lifetime_spend_minor")
+  visitCount    Int      @default(0) @map("visit_count")
+  lastVisitAt   DateTime? @map("last_visit_at") @db.Timestamptz
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  provider Provider @relation(fields: [providerId], references: [id])
+  user     User?    @relation(fields: [userId], references: [id])
+
+  @@unique([providerId, userId])
+  @@index([providerId])
+  @@map("client_profiles")
+}
+```
+
+### WashNote (new model)
+```prisma
+model WashNote {
+  id         String   @id @default(uuid()) @db.Uuid
+  bookingId  String?  @map("booking_id") @db.Uuid // null for shift-level notes
+  locationId String   @map("location_id") @db.Uuid
+  authorId   String   @map("author_id") @db.Uuid
+  noteType   String   @map("note_type") // SHIFT, BOOKING_INSTRUCTION, OPERATOR_NOTE, SUPPLY_REQUEST
+  content    String
+  shiftDate  DateTime? @map("shift_date") @db.Date // for shift-level notes
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  booking  Booking?  @relation(fields: [bookingId], references: [id])
+  location Location  @relation(fields: [locationId], references: [id])
+  author   User      @relation("note_author", fields: [authorId], references: [id])
+
+  @@index([bookingId])
+  @@index([locationId, shiftDate])
+  @@map("wash_notes")
+}
+```
+
+### ProviderDiscount (new model)
+```prisma
+model ProviderDiscount {
+  id              String   @id @default(uuid()) @db.Uuid
+  providerId      String   @map("provider_id") @db.Uuid
+  locationId      String?  @map("location_id") @db.Uuid // null = all locations
+  discountType    String   @map("discount_type") // OFF_PEAK, VOLUME, FIRST_TIME
+  name            String
+  description     String?
+  percentOff      Int?     @map("percent_off") // e.g., 10 for 10%
+  flatAmountOff   Int?     @map("flat_amount_off") // in minor units
+  // OFF_PEAK specific:
+  peakStartTime   String?  @map("peak_start_time") // HH:MM
+  peakEndTime     String?  @map("peak_end_time")   // HH:MM
+  peakDaysOfWeek  Int[]    @default([]) @map("peak_days_of_week") // 0=Sun..6=Sat
+  // VOLUME specific:
+  volumeThreshold Int?     @map("volume_threshold") // min bookings in period
+  volumePeriodDays Int?    @map("volume_period_days") // rolling window
+  // General:
+  isActive        Boolean  @default(true) @map("is_active")
+  isStackable     Boolean  @default(true) @map("is_stackable")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  provider Provider  @relation(fields: [providerId], references: [id])
+  location Location? @relation(fields: [locationId], references: [id])
+
+  @@index([providerId, isActive])
+  @@map("provider_discounts")
+}
+```
+
+### SubscriptionPackage (new model)
+```prisma
+model SubscriptionPackage {
+  id               String   @id @default(uuid()) @db.Uuid
+  providerId       String   @map("provider_id") @db.Uuid
+  locationId       String   @map("location_id") @db.Uuid
+  name             String
+  description      String?
+  serviceIds       String[] @map("service_ids") // services included per wash
+  cadence          String   // WEEKLY, BIWEEKLY, MONTHLY, CUSTOM
+  cadenceIntervalDays Int?  @map("cadence_interval_days") // for CUSTOM
+  pricePerWashMinor Int     @map("price_per_wash_minor") // per vehicle class pricing in separate model
+  currencyCode     String   @map("currency_code") @db.Char(3)
+  minWashes        Int      @default(3) @map("min_washes") // minimum commitment
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  provider      Provider                @relation(fields: [providerId], references: [id])
+  location      Location                @relation(fields: [locationId], references: [id])
+  subscriptions FleetSubscription[]
+
+  @@index([providerId, isActive])
+  @@map("subscription_packages")
+}
+
+model FleetSubscription {
+  id                  String    @id @default(uuid()) @db.Uuid
+  packageId           String    @map("package_id") @db.Uuid
+  fleetId             String    @map("fleet_id") @db.Uuid
+  vehicleId           String    @map("vehicle_id") @db.Uuid
+  status              String    @default("ACTIVE") // ACTIVE, PAUSED, CANCELLED
+  startDate           DateTime  @map("start_date") @db.Date
+  nextWashDate        DateTime? @map("next_wash_date") @db.Date
+  totalWashesCompleted Int      @default(0) @map("total_washes_completed")
+  cancelledAt         DateTime? @map("cancelled_at") @db.Timestamptz
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  package SubscriptionPackage @relation(fields: [packageId], references: [id])
+  fleet   Fleet               @relation(fields: [fleetId], references: [id])
+  vehicle Vehicle             @relation(fields: [vehicleId], references: [id])
+
+  @@index([fleetId, status])
+  @@index([packageId])
+  @@map("fleet_subscriptions")
+}
+```
+
+### NotificationPreference (new model)
+```prisma
+model NotificationPreference {
+  id          String  @id @default(uuid()) @db.Uuid
+  userId      String  @map("user_id") @db.Uuid
+  eventType   String  @map("event_type") // e.g., NEW_BOOKING, CANCELLATION, REVIEW_RECEIVED
+  emailEnabled Boolean @default(true) @map("email_enabled")
+  inAppEnabled Boolean @default(true) @map("in_app_enabled")
+  smsEnabled   Boolean @default(false) @map("sms_enabled")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, eventType])
+  @@map("notification_preferences")
+}
+```
+
+**Also update these existing models with new relations:**
+- `Location`: add `washBays WashBay[]`, `washNotes WashNote[]`, `discounts ProviderDiscount[]`, `subscriptionPackages SubscriptionPackage[]`
+- `Booking`: add `photos BookingPhoto[]`, `messages BookingMessage[]`, `washNotes WashNote[]`, plus the new fields listed above
+- `Provider`: add `clientProfiles ClientProfile[]`, `discounts ProviderDiscount[]`, `subscriptionPackages SubscriptionPackage[]`
+- `User`: add new relation annotations for `bookingPhotos`, `bookingMessages`, `washNotes`, `clientProfiles`, `notificationPreferences`, `assignedBookings`
+- `Fleet`: add `subscriptions FleetSubscription[]`
+- `Vehicle`: add `subscriptions FleetSubscription[]`
+- `FileAsset`: add `bookingPhotos BookingPhoto[]`
+
+## TASK 1.2 — Run Migration
+
+```bash
+cd lib/db
+npx prisma migrate dev --name v2_provider_features
+```
+
+Verify migration succeeds. Check that all new tables are created and all existing data is preserved.
+
+## TASK 1.3 — Update OpenAPI Spec
+
+File: `lib/api-spec/openapi.yaml`
+
+Add schemas and endpoints for all new models. Key new endpoints (organized by route file):
+
+**Provider routes** (`/api/providers/:providerId/...`):
+- `GET/POST /locations/:locationId/bays` — list/create wash bays
+- `PATCH/DELETE /locations/:locationId/bays/:bayId` — update/delete bay
+- `POST /locations/:locationId/bays/:bayId/out-of-service` — mark bay out of service
+- `POST /locations/:locationId/bays/:bayId/restore` — restore bay
+- `GET/POST /discounts` — list/create discount rules
+- `PATCH/DELETE /discounts/:discountId` — update/delete discount
+- `GET/POST /subscription-packages` — list/create packages
+- `PATCH/DELETE /subscription-packages/:packageId` — update/delete package
+- `GET /client-profiles` — list all client profiles for provider
+- `GET/PATCH /client-profiles/:profileId` — get/update profile
+- `POST /client-profiles` — create off-platform client profile
+- `GET /analytics/overview` — dashboard metrics
+- `GET /analytics/revenue` — revenue reports with filters
+- `GET /analytics/operations` — operational metrics
+- `GET /analytics/clients` — client metrics
+- `GET /analytics/operators` — operator performance
+- `GET /audit-log` — audit log with filters
+
+**Booking routes** (`/api/bookings/...`):
+- `POST /off-platform` — create off-platform booking (provider-initiated)
+- `POST /walk-in` — create walk-in booking
+- `POST /:bookingId/photos` — upload booking photo
+- `GET /:bookingId/photos` — get booking photos
+- `POST /:bookingId/messages` — send message
+- `GET /:bookingId/messages` — get messages
+- `PATCH /:bookingId/assign-bay` — assign/reassign bay
+- `PATCH /:bookingId/assign-operator` — assign/reassign operator
+- `PATCH /:bookingId/reschedule` — reschedule (drag-and-drop)
+- `PATCH /:bookingId/adjust-price` — adjust price for service mismatch
+
+**Wash Notes routes:**
+- `GET/POST /api/locations/:locationId/wash-notes` — shift notes
+- `GET/POST /api/bookings/:bookingId/wash-notes` — booking notes
+
+**Subscription routes:**
+- `POST /api/subscriptions/purchase` — fleet purchases subscription
+- `GET /api/fleets/:fleetId/subscriptions` — fleet's active subscriptions
+- `PATCH /api/subscriptions/:subscriptionId/cancel` — cancel subscription
+
+**Notification Preference routes:**
+- `GET/PUT /api/users/me/notification-preferences`
+
+After updating the spec, regenerate the client:
+```bash
+cd lib/api-spec && pnpm run generate
+```
+
+## TASK 1.4 — Update Fee Calculator
+
+File: `artifacts/api-server/src/lib/feeCalculator.ts`
+
+Expand the fee calculator to handle subscription pricing:
+
+```typescript
+export const STANDARD_FEE_RATE = 0.15;
+export const STANDARD_FEE_CAP_MINOR = 2500; // $25.00
+export const SUBSCRIPTION_FEE_CAP_MINOR = 2000; // $20.00
+export const SUBSCRIPTION_MIN_WASHES = 3;
+
+export function calculatePlatformFee(
+  serviceBasePriceMinor: number,
+  options?: {
+    isSubscription?: boolean;
+    discountAmountMinor?: number;
+  }
+): number {
+  const effectivePrice = serviceBasePriceMinor - (options?.discountAmountMinor ?? 0);
+  const cap = options?.isSubscription ? SUBSCRIPTION_FEE_CAP_MINOR : STANDARD_FEE_CAP_MINOR;
   return Math.min(
-    Math.round(serviceBasePriceMinor * PLATFORM_FEE_RATE),
-    PLATFORM_FEE_CAP_MINOR
+    Math.round(effectivePrice * STANDARD_FEE_RATE),
+    cap
   );
 }
 
-export function calculateAllInPrice(serviceBasePriceMinor: number): number {
-  return serviceBasePriceMinor + calculatePlatformFee(serviceBasePriceMinor);
+export function calculateAllInPrice(
+  serviceBasePriceMinor: number,
+  options?: {
+    isSubscription?: boolean;
+    discountAmountMinor?: number;
+  }
+): number {
+  const effectivePrice = serviceBasePriceMinor - (options?.discountAmountMinor ?? 0);
+  return effectivePrice + calculatePlatformFee(serviceBasePriceMinor, options);
 }
-artifacts/api-server/src/routes/locations.ts — In the search and location detail endpoints, compute and return the all-in price for each service so the frontend displays the correct customer-facing price:
-typescript
-services: location.services.map(s => ({
-  ...s,
-  allInPriceMinor: calculateAllInPrice(s.basePriceMinor),
-}))
-artifacts/washbuddy-web/ — All frontend components that display prices to customers (search results, location detail, booking flow) must show allInPriceMinor instead of basePriceMinor. Provider-facing pages continue to show basePriceMinor (the provider's price).
-Future multi-service bookings: When multi-service bookings per vehicle visit are implemented, the fee calculation must sum all service base prices first, then apply 15% to the total, then cap at $25. The calculatePlatformFee function should accept an array of prices: calculatePlatformFee(servicePrices: number[]): number.
-Acceptance criteria: A $125 exterior wash shows as $144 to the customer ($125 + $18.75 fee). A $350 full detail shows as $375 ($350 + $25 capped fee). A $45 quick rinse shows as $52 ($45 + $6.75 fee). Provider dashboard shows $125 / $350 / $45 respectively. No line item breakdown of the fee is shown to the customer.
 
-TASK 1.2 — Implement Operating Hours in Booking Flow
-Problem: Operating hours exist in the schema (OperatingWindow model) but are not populated for seed locations and not enforced in the booking flow. Per PRD Sections 4.2 and 5.1, operating hours are mandatory for all locations and must be enforced.
-Files to modify:
-Seed data (Task 0.2): Ensure all seed locations have OperatingWindow records.
-artifacts/api-server/src/routes/availability.ts — The GET /locations/:locationId/availability endpoint must filter available time slots to only include slots that fall within the location's operating windows. Currently this endpoint likely returns slots based on capacity only. Add operating-window filtering:
-Fetch the location's OperatingWindow records
-For each potential time slot, check if the slot's start and end times fall within an operating window for that day of the week (converting UTC slot times to the location's timezone)
-Exclude slots that fall outside operating hours
-artifacts/api-server/src/routes/locations.ts — The search endpoints should return operating hours for each location and support the "Open Now" filter:
-In GET /locations/search and GET /locations/available-now, add operating window data to the response
-For the "Open Now" filter: check current time (in location's timezone) against the location's operating windows for the current day of week
-Return an isOpenNow boolean and nextOpenAt timestamp for each location
-artifacts/washbuddy-web/src/pages/customer/search.tsx — Display operating hours status (OPEN/CLOSED badge) on each search result card. The "Open Now" filter chip should call the API with the appropriate filter parameter.
-artifacts/washbuddy-web/src/pages/customer/location-detail.tsx — Display the full weekly operating hours schedule on the location detail page.
-Acceptance criteria: Search results show accurate OPEN/CLOSED badges based on real-time operating hours. The "Open Now" filter correctly excludes closed locations. Booking flow only shows time slots within operating hours. Location detail page shows the complete weekly schedule.
-
-TASK 1.3 — Implement Provider Response SLA Enforcement
-Problem: The booking model has providerResponseDeadlineUtc but there is no automated system that expires bookings when the deadline passes or sends notifications to non-responsive providers.
-Per PRD Section 3.3: Providers must respond within 5 minutes for bookings within 24 hours, 10 minutes for bookings 24+ hours out. Expired bookings must notify the customer with alternatives and warn the provider.
-Implementation:
-artifacts/api-server/src/routes/bookings.ts — The response deadline calculation already exists in the booking creation handler using responseSlaUnder1hMins and responseSlaFutureMins from the location. Update these values: the location seed data should set responseSlaUnder1hMins: 5 (for bookings within the next 24 hours — rename or reinterpret this field) and responseSlaFutureMins: 10 (for bookings 24+ hours out).
-Create: artifacts/api-server/src/lib/slaEnforcer.ts — A background job that runs every 60 seconds:
-Query all bookings with status REQUESTED where providerResponseDeadlineUtc < NOW()
-For each expired booking: a. Transition status to EXPIRED b. Release the booking hold c. Create a booking status history record d. Send notification to customer (in-app + email): "Your booking request at [location] expired because the provider didn't respond. Here are nearby alternatives: [list 3 nearest available locations]" e. Send notification to provider (email): "You missed a booking request from [customer] for [service] at [location] on [date]. You lost $[amount] in potential revenue. Repeated failures to respond during your operating hours will impact your platform rating." f. Increment a provider response-miss counter (store in provider metadata or a new analytics table)
-artifacts/api-server/src/index.ts — Start the SLA enforcer as a setInterval background task when the server starts. Use a PostgreSQL advisory lock to ensure only one server instance runs the enforcer if multiple instances exist.
-Acceptance criteria: A booking in REQUESTED status that passes its response deadline automatically transitions to EXPIRED. The customer receives a notification with alternatives. The provider receives a warning email. No manual intervention required.
-
-TASK 1.4 — Build Location Detail and Booking Flow
-Problem: The location detail page (/location/:id) may be incomplete. The end-to-end flow from search → location detail → select service → select time → hold → book must work seamlessly.
-File: artifacts/washbuddy-web/src/pages/customer/location-detail.tsx
-Required elements on this page:
-Location header: provider name, location name, address, OPEN/CLOSED badge, star rating, review count
-Map showing the location pin
-Operating hours (full weekly schedule, current day highlighted)
-Services list: each service shows name, description, duration, all-in price (from allInPriceMinor), and an "Instant Book" or "Request" badge based on requiresConfirmation
-For each service: a "Book Now" button that opens the booking flow
-Reviews section at the bottom (use existing location-reviews.tsx component)
-Booking flow (inline or modal):
-User selects a service → display available time slots for the next 7 days (fetched from GET /api/locations/:locationId/availability?serviceId=X&startDate=Y&endDate=Z)
-User selects a time slot → call POST /api/bookings/hold to create a hold (10-minute TTL)
-Display hold confirmation with countdown timer showing hold expiry
-User selects a vehicle (dropdown of their assigned vehicles, fetched from GET /api/fleet/driver/vehicles or GET /api/vehicles)
-User confirms booking → call POST /api/bookings with holdId, vehicleId, and idempotencyKey
-Display booking confirmation with details: service, location, date/time, vehicle, total price
-If instant book: show "Confirmed!" immediately. If request: show "Request Submitted — waiting for provider confirmation"
-Vehicle compatibility check: Before showing the "Book Now" button, check if the user's assigned vehicle is compatible with the service (compare vehicle dimensions against ServiceCompatibility rules). If incompatible, show the service grayed out with a note: "This service cannot accommodate your vehicle (too large/tall)."
-Acceptance criteria: Full booking flow works from search result click through to confirmed booking. Vehicle compatibility is enforced. Hold countdown is visible. Both instant and request booking modes work correctly.
-
-TASK 1.5 — Build Provider Booking Management
-Problem: The provider dashboard exists but needs to support the full booking lifecycle per PRD Section 4.4.
-File: artifacts/washbuddy-web/src/pages/provider/dashboard.tsx
-Kanban board columns:
-Action Required — Bookings in REQUESTED status. Each card shows: service name, customer name, vehicle info, scheduled date/time, all-in price, response deadline countdown timer, and two buttons: "Confirm" (green) and "Decline" (red with reason selection)
-Upcoming Today — Bookings in PROVIDER_CONFIRMED status scheduled for today. Each card shows: service name, customer name, vehicle info, scheduled time, and a "Check In" button
-In Progress — Bookings in CHECKED_IN or IN_SERVICE status. CHECKED_IN cards show a "Start Service" button. IN_SERVICE cards show a "Complete" button
-Action implementations:
-Confirm: POST /api/bookings/:id/confirm
-Decline: POST /api/bookings/:id/decline with reasonCode (provider selects from: FULLY_BOOKED, EQUIPMENT_DOWN, VEHICLE_INCOMPATIBLE, WEATHER, OTHER)
-Check In: POST /api/bookings/:id/checkin
-Start Service: POST /api/bookings/:id/start-service
-Complete: POST /api/bookings/:id/complete
-Real-time updates: Use polling (TanStack Query's refetchInterval set to 30 seconds) to keep the dashboard current. New booking requests should appear without page refresh. Consider adding a more prominent notification sound or visual flash when a new request arrives in the Action Required column.
-Mobile responsiveness: On mobile viewports, the Kanban board collapses to a single column with tabs for each status group (Action Required, Upcoming, In Progress).
-Acceptance criteria: Provider can process a booking through the complete lifecycle: Confirm → Check In → Start Service → Complete. Decline with reason works. Dashboard updates without full page refresh. Countdown timers show remaining SLA time accurately.
-
-TASK 1.6 — Implement Customer Booking Management
-File: artifacts/washbuddy-web/src/pages/customer/my-bookings.tsx
-Problem: Currently shows "No bookings yet" even when bookings exist. This is likely a data issue that Task 0.2 will fix, but the page also needs feature completion.
-Required features:
-Tab navigation: Upcoming, In Progress, Completed, Cancelled
-Each booking card shows: service name, provider/location name, scheduled date/time, status badge (color-coded), vehicle info, total price paid
-Clicking a booking navigates to /bookings/:id (the shared booking detail page)
-Upcoming bookings show a "Cancel" button (only if booking is in a cancellable status per the state machine: REQUESTED, HELD, PROVIDER_CONFIRMED, LATE)
-Completed bookings show a "Leave Review" button if no review exists yet for that booking
-Empty states with helpful messaging: "No upcoming bookings — Find a Wash" with a link to search
-Acceptance criteria: All booking tabs show correct bookings filtered by status. Cancel works for eligible bookings. Review prompt appears for completed bookings. Navigation to booking detail works.
-
-PHASE 2: FLEET OPERATOR EXPERIENCE (Weeks 3-4)
-Goal: Build the complete fleet operator dashboard so fleet admins can manage their fleet's washing operations.
-
-TASK 2.1 — Fleet Overview Dashboard
-File: artifacts/washbuddy-web/src/pages/fleet/overview.tsx
-API endpoint: GET /api/fleet/overview (already exists in artifacts/api-server/src/routes/fleet.ts)
-Required dashboard elements:
-Summary stats cards: Total Vehicles (active count), Washes This Month (booking count for current month), Total Spend This Month (sum of totalPriceMinor for current month, formatted in fleet currency), Vehicles Due for Wash (count where nextWashDueAtUtc < NOW() or lastWashAtUtc is null/old)
-Recent bookings table: last 10 bookings across all fleet vehicles, showing vehicle unit number, service, provider/location, date, status, price
-Pending wash requests: list of wash requests submitted by drivers awaiting approval
-Quick action buttons: "Book a Wash" (navigates to search with fleet context), "New Wash Request" (navigates to /fleet/requests/new)
-Acceptance criteria: Fleet overview shows accurate aggregate data. Stats are calculated from real booking data. Navigation to sub-pages works.
-
-TASK 2.2 — Fleet Vehicle Management
-File: artifacts/washbuddy-web/src/pages/fleet/vehicles.tsx
-API endpoint: GET /api/fleet/vehicles (exists)
-Required features:
-Vehicle list table: unit number, type/subtype, dimensions (displayed in feet/inches), assigned driver(s), last wash date, next wash due, status (active/inactive)
-Search/filter: by unit number, vehicle type, depot, wash status (overdue, due soon, current)
-"Add Vehicle" button (FLEET_ADMIN only) opening a form with fields per PRD Section 3.6: unit number, category (BUS), subtype (dropdown), length (inches), height (inches), has restroom (checkbox), license plate (optional), depot assignment (optional dropdown)
-Edit vehicle (click row or edit button) — same form, pre-populated
-Assign/unassign drivers to vehicles via FleetDriverAssignment model
-Bulk actions: not required for launch
-API endpoints needed:
-POST /api/fleet/vehicles — create vehicle (wire to existing POST /api/vehicles but ensure fleet context)
-PATCH /api/fleet/vehicles/:id — edit vehicle
-POST /api/fleet/vehicles/:id/assign-driver — create driver assignment
-DELETE /api/fleet/vehicles/:id/assign-driver/:assignmentId — remove driver assignment
-If these endpoints don't exist in the fleet route, add them.
-Acceptance criteria: Fleet admin can view all fleet vehicles, add new vehicles, edit vehicle details, and assign/unassign drivers. Vehicle dimensions are validated (positive integers). Vehicle type dropdown matches the enum in the schema.
-
-TASK 2.3 — Fleet Wash Request Workflow
-Files:
-artifacts/washbuddy-web/src/pages/fleet/wash-requests.tsx (list)
-artifacts/washbuddy-web/src/pages/fleet/new-request.tsx (create)
-artifacts/washbuddy-web/src/pages/fleet/request-detail.tsx (detail/approve)
-This implements the fleet approval workflow per PRD Section 3.5.
-Wash request list page:
-Tab navigation: Pending Approval, Approved, Declined, All
-Each request shows: vehicle unit number, driver name, requested provider/location, requested service, requested date/time, status, submitted date
-FLEET_ADMIN and DISPATCHER can approve or decline from the list or detail view
-New request page (driver-initiated):
-Vehicle selector (driver's assigned vehicles)
-Provider/location search (inline search or link to main search)
-Service selection
-Preferred date/time window
-Notes field
-Submit creates a WashRequest record
-Request detail page:
-Full request details
-Approval actions (FLEET_ADMIN/DISPATCHER): Approve (optionally modify provider/time), Decline (with reason)
-Approval automatically creates a booking at the specified provider (transitions WashRequest status to CONVERTED_TO_BOOKING and creates a Booking)
-Thread/messaging section for communication between driver and fleet manager about the request
-Acceptance criteria: Driver can submit a wash request. Fleet admin sees it in the pending queue. Fleet admin can approve (creating a booking) or decline with a reason. Request status updates correctly through the lifecycle.
-
-TASK 2.4 — Fleet Policy Configuration
-File: artifacts/washbuddy-web/src/pages/fleet/settings.tsx
-Required policy settings (per PRD Section 3.4):
-Approved Provider List:
-Toggle: "Restrict drivers to approved providers only" (on/off)
-When enabled: searchable provider list with checkboxes to select approved providers
-Save updates requestPolicyJson on the fleet record
-Per-Wash Spending Limit:
-Toggle: "Set maximum per-service spending limit" (on/off)
-When enabled: numeric input for maximum amount (in fleet currency)
-Save updates requestPolicyJson
-Wash Frequency Limit:
-Toggle: "Limit wash frequency per vehicle" (on/off)
-When enabled: numeric inputs for "Maximum [X] washes per vehicle every [Y] days"
-Save updates requestPolicyJson
-Policy enforcement in booking flow:
-artifacts/api-server/src/routes/bookings.ts — Before creating a booking hold, check fleet policies:
-Load the booking customer's fleet membership
-Load the fleet's requestPolicyJson
-Check approved provider list: if enabled, verify the provider is in the list
-Check spending limit: if enabled, verify the service price does not exceed the limit
-Check frequency limit: if enabled, count recent bookings for the vehicle within the time window
-If any policy is violated, return a 403 with errorCode: "POLICY_VIOLATION" and a message specifying which policy was violated
-artifacts/washbuddy-web/src/pages/customer/search.tsx — When the logged-in user is a fleet driver with active policies, visually indicate restricted providers (grayed out or hidden) and show a note explaining the fleet restriction.
-Acceptance criteria: Fleet admin can configure all three policy types. Policies are enforced when drivers attempt to book. Policy violation returns a clear, specific error message. Search results reflect policy restrictions for drivers.
-
-TASK 2.5 — Fleet Reports
-File: artifacts/washbuddy-web/src/pages/fleet/reports.tsx
-Required reports:
-Wash Activity Report: Table of all fleet bookings within a date range, with columns: date, vehicle, driver, provider/location, service, status, cost. Filterable by vehicle, driver, provider, status, date range. Sortable by any column. Summary row showing total spend.
-Vehicle Wash Compliance: List of all vehicles showing: unit number, type, last wash date, next wash due, status (overdue/due soon/current). Highlight overdue vehicles in red.
-Spending Summary: Aggregate spend by provider, by vehicle, and by month. Simple bar charts using the existing Chart component from shadcn/ui.
-API endpoint: Create GET /api/fleet/reports with query parameters for report type, date range, and filters. If a reports endpoint doesn't exist in the fleet route, add it.
-Acceptance criteria: All three report views show accurate data. Date range filtering works. Data can be used to understand fleet washing patterns and spending.
-
-PHASE 3: ADMIN DASHBOARD AND PROVIDER ENHANCEMENTS (Weeks 5-6)
-Goal: Complete the admin dashboard for platform management and fill remaining provider gaps.
-
-TASK 3.1 — Admin Dashboard Overhaul
-File: artifacts/washbuddy-web/src/pages/admin/dashboard.tsx
-Problem: Current admin dashboard shows basic stats but is missing key operational data and has stale/duplicate provider counts.
-Required elements:
-Stats row: Total Bookings (all-time), Active Bookings Today, Total Providers (unique, active), Total Revenue (platform fees collected, sum of platformFeeMinor across all SETTLED/COMPLETED bookings)
-Recent bookings panel: Last 20 bookings with status, provider, customer, date, amount. Click to navigate to booking detail.
-Provider status panel: Counts by status — Active, Pending Approval, Suspended, Pending Stripe Connect. Click each count to filter the providers list.
-Alerts panel: Bookings approaching SLA deadline, providers with low response rates, pending provider approvals needing review
-Revenue chart: Platform fees collected over the last 30 days (daily bar chart)
-Acceptance criteria: Dashboard shows accurate, non-duplicated counts. All clickable elements navigate correctly. Stats calculate from actual booking/provider data.
-
-
-TASK 3.2 — Admin Provider Management 
-File: artifacts/washbuddy-web/src/pages/admin/providers.tsx
-Required enhancements:
-Fix the provider count (currently shows 146/194 due to duplicates — resolved by Task 0.1/0.2)
-Provider list table with columns: name, status (ACTIVE / PENDING APPROVAL / SUSPENDED), Stripe status (PAYOUTS ACTIVE / PENDING CONNECT / NOT STARTED), location count, total bookings, average rating, response rate percentage
-Search and filter: by name, by status, by Stripe status
-Click a provider row to open a provider detail view showing: all locations with their services, operating hours, and capacity; provider membership (admin/staff users); booking history; review summary; response rate metrics
-Action buttons: Approve (for pending providers), Suspend, Reactivate, Initiate Stripe Connect onboarding link
-"Contact info" column must display the email of the PROVIDER_ADMIN user associated with the provider (join through ProviderMembership → User). The current "No contact email" display is because the provider record itself has no email field — the email lives on the user record.
-API changes: The GET /api/providers endpoint should include a computed contactEmail field (the email of the provider's PROVIDER_ADMIN member) and aggregate metrics (booking count, average rating, response rate). Add these as optional includes via query parameter to avoid performance impact on other callers.
-Acceptance criteria: Provider list shows accurate data with no duplicates. Contact email displays correctly. All status filters work. Provider detail view shows complete provider information. Approve/suspend actions work.
-
-TASK 3.3 — Admin Booking Management
-File: artifacts/washbuddy-web/src/pages/admin/bookings.tsx
-Required enhancements:
-Booking list with all status filter tabs (already partially implemented)
-Add date range filter (date picker for start and end date)
-Add provider/location filter dropdown
-Add customer/fleet filter search
-Each booking row shows: booking ID (truncated), service name, provider/location, customer name, fleet name, vehicle, scheduled date/time, status badge (color-coded), total amount
-Click a row to navigate to the shared booking detail page (/bookings/:id)
-Admin-specific actions on booking detail: force-cancel (for stuck bookings), override status (with audit trail), refund initiation
-Acceptance criteria: All bookings are visible with accurate data. All filters work correctly. Admin can navigate to any booking detail and take administrative actions.
-
-TASK 3.4 — Provider Registration Flow
-Problem: The current registration page (/register) creates a generic user account with no role selection. Per PRD Section 4.1, providers need a registration path that creates a provider account and guides them through location/service setup.
-File: artifacts/washbuddy-web/src/pages/auth/register.tsx
-Implementation:
-Add an account type selector to the registration form: "I'm looking for wash services" (creates a driver/customer account) vs. "I'm a wash provider" (creates a provider account)
-For customer registration: current flow (First Name, Last Name, Email, Phone, Password) creates a user. After registration, redirect to /search.
-For provider registration: same user fields plus Business Name. After registration: a. Create a Provider record with the business name b. Create a ProviderMembership linking the user to the provider with role PROVIDER_ADMIN c. Redirect to /provider/onboarding — a new multi-step onboarding wizard
-Create: artifacts/washbuddy-web/src/pages/provider/onboarding.tsx
-Multi-step onboarding wizard:
-Step 1: Add your first location (address, timezone, operating hours, capacity)
-Step 2: Add services at that location (name, price, duration, vehicle compatibility, booking mode)
-Step 3: Review summary — "Your listing is pending review. A WashBuddy admin will review and approve your listing within 24 hours."
-Step 4: Stripe Connect prompt — "Set up payments to receive payouts" (link to Stripe Connect onboarding flow, can be skipped and completed later)
-The provider's locations and services should have isVisible: false until admin approval.
-API changes:
-artifacts/api-server/src/routes/auth.ts — Modify the POST /auth/register endpoint to accept an optional accountType field ("customer" or "provider") and businessName (required when accountType is "provider"). When accountType is "provider":
-Create the User record
-Create a Provider record with isActive: false (pending approval)
-Create a ProviderMembership with role PROVIDER_ADMIN
-Return the user with provider context in the auth response
-Acceptance criteria: New providers can register, add their first location with services, and land on a "pending review" state. Admins see the new provider in the pending approval queue. Upon admin approval, the provider's listings become visible in search.
-
-TASK 3.5 — Review System Completion
-Files:
-artifacts/washbuddy-web/src/components/review-form.tsx (exists)
-artifacts/washbuddy-web/src/components/location-reviews.tsx (exists)
-artifacts/washbuddy-web/src/pages/provider/reviews.tsx
-artifacts/washbuddy-web/src/pages/admin/reviews.tsx
-Required work:
-Customer review submission: After a booking reaches COMPLETED status, the customer should see a "Leave a Review" prompt in their booking detail and My Bookings page. The review form (star rating + optional comment) submits to POST /api/reviews (create this endpoint if it doesn't exist). Reviews are tied to a booking and a location.
-Location reviews display: The location detail page should show all non-hidden reviews with star ratings, comments, author name, date, and provider reply (if any). Show average rating and total count at the top.
-Provider review management: The provider reviews page (/provider/reviews) should list all reviews for the provider's locations. Provider admins can submit a reply to any review via PATCH /api/reviews/:id (add providerReply and providerReplyAt fields).
-Admin review moderation: The admin reviews page (/admin/reviews) should list all reviews with ability to filter by flagged/hidden status. Admins can hide a review with a reason. Add a "Show Flagged" toggle that is already present but non-functional.
-API endpoints needed (add to artifacts/api-server/src/routes/reviews.ts):
-POST /api/reviews — create a review (authenticated customer, must have a completed booking at the location)
-GET /api/reviews?locationId=X — get reviews for a location (public)
-GET /api/reviews?providerId=X — get reviews for all provider locations (provider access)
-GET /api/reviews — get all reviews (admin access)
-PATCH /api/reviews/:id — update review (author can edit, provider can add reply, admin can hide)
-Acceptance criteria: Customers can leave reviews after completed bookings. Reviews display on location detail pages. Providers can reply to reviews. Admins can moderate reviews.
-
-PHASE 4: NOTIFICATIONS, EMAIL, AND POLISH (Weeks 7-8)
-Goal: Implement the notification system that keeps the marketplace running, and polish the user experience for launch readiness.
-
-TASK 4.1 — Email Notification Service
-Create: artifacts/api-server/src/lib/emailService.ts
-Implement an email sending service. For launch, use a transactional email provider (recommended: SendGrid, Resend, or AWS SES). The implementation should:
-Define an EmailService interface with a send(to: string, subject: string, htmlBody: string, textBody: string) method
-Implement the interface using the chosen email provider's SDK
-Use environment variables for API keys and sender configuration: EMAIL_PROVIDER, EMAIL_API_KEY, EMAIL_FROM_ADDRESS, EMAIL_FROM_NAME
-Include a development mode that logs emails to console instead of sending (when NODE_ENV !== "production")
-Email templates: Create HTML email templates for each notification type. Templates should be clean, mobile-friendly, and branded with WashBuddy colors/logo. Store templates as functions that accept data parameters and return HTML strings. Required templates:
-bookingRequested (to provider): "New booking request from [customer] for [service] at [location] on [date]. Respond within [X] minutes."
-bookingConfirmed (to customer): "Your wash at [location] is confirmed for [date] at [time]. Address: [address]."
-bookingDeclined (to customer): "Your booking at [location] was declined. [reason]. Here are alternatives: [list]."
-bookingExpired (to customer): "[Provider] didn't respond in time. Here are alternatives: [list]."
-bookingReminder (to customer): "Reminder: Your wash at [location] is scheduled for [time] today."
-bookingCompleted (to customer): "Your wash is complete! Leave a review: [link]."
-bookingCancelled (to both parties): "[Party] cancelled the booking for [service] at [location] on [date]."
-providerMissedSLA (to provider): "You missed a booking request and lost $[amount]. Respond faster to maintain your rating."
-providerApproved (to provider): "Your WashBuddy listing has been approved! You're now visible to customers."
-washRequestSubmitted (to fleet admin): "[Driver] submitted a wash request for [vehicle] at [provider]."
-
-TASK 4.2 — Notification Trigger Integration
-Problem: The createNotification and createBulkNotifications functions exist in artifacts/api-server/src/lib/notifications.ts but are never called from the booking flow.
-Implementation: Add notification triggers at each booking lifecycle transition point. Modify the following files:
-artifacts/api-server/src/routes/bookings.ts — After each successful status transition, call the appropriate notification and email functions:
-POST /bookings (booking created):
-In-app + email notification to provider: new booking request
-In-app notification to customer: booking submitted, awaiting confirmation (for request mode)
-POST /bookings/:id/confirm:
-In-app + email notification to customer: booking confirmed
-POST /bookings/:id/decline:
-In-app + email notification to customer: booking declined with alternatives
-POST /bookings/:id/cancel:
-In-app + email notification to the other party (if customer cancels, notify provider; if provider cancels, notify customer)
-POST /bookings/:id/complete:
-In-app + email notification to customer: service completed, leave a review
-artifacts/api-server/src/lib/slaEnforcer.ts (from Task 1.3):
-Already handles expired booking notifications
-artifacts/api-server/src/routes/fleet.ts — When a wash request is created, notify the fleet admin(s). When a wash request is approved/declined, notify the driver.
-For each notification, set the actionUrl field to the relevant deep link (e.g., /bookings/[id] for booking notifications, /fleet/requests/[id] for wash request notifications).
-Acceptance criteria: Every booking status change triggers appropriate in-app and email notifications to the relevant parties. Notifications appear in the notification bell. Emails are sent (or logged in development mode).
-
-TASK 4.3 — Booking Reminder System
-Create: artifacts/api-server/src/lib/reminderScheduler.ts
-A background job that runs every 15 minutes:
-Query confirmed bookings scheduled within the next 1-2 hours that haven't had a reminder sent
-Send reminder notifications (in-app + email) to the customer
-Mark the booking as reminded (add a reminderSentAt field to the booking model, or track in a separate table)
-For bookings scheduled for the next day: send a reminder at 8 AM in the location's timezone.
-Acceptance criteria: Customers receive reminders before their scheduled wash — 1 hour before for same-day bookings, morning-of for next-day bookings. No duplicate reminders.
-
-TASK 4.4 — UI Polish and Responsiveness
-Cross-cutting task applying to all pages.
-Consistent loading states: Every page that fetches data should show a skeleton loader (use shadcn/ui Skeleton component) during loading, not a blank page or a spinner. The provider dashboard's progressive column loading (where only the first column renders initially) should show skeleton cards in the other columns until data loads.
-Consistent empty states: Every list/table that can be empty should show a helpful empty state with an icon, a message, and a call-to-action. Use the existing Empty component from shadcn/ui. Examples: "No bookings yet — Find a Wash", "No vehicles added — Add your first vehicle", "No reviews yet — reviews will appear after your first completed wash."
-Error states: API errors should show a toast notification (use existing sonner.tsx / toast.tsx) with a human-readable message and a retry option where applicable. Never show raw error codes or stack traces to users.
-Mobile responsiveness audit: Test every page at 375px width (iPhone SE) and 768px width (iPad). Fix any overflow, truncation, or layout issues. Specific known issues:
-Admin dashboard sidebar: already handles mobile via hamburger menu — verify it works
-Provider Kanban: must collapse to single-column tabs on mobile
-Search results: cards should stack vertically on mobile with full-width layout
-Fleet tables: use horizontal scroll on mobile, or collapse to card layout
-Booking forms: all inputs must be full-width on mobile with large touch targets
-Login page improvements:
-Remove the pre-filled email from previous sessions (currently retains admin@washbuddy.com after signing out)
-Clear the password field on sign-out
-Add visible error messaging for failed login attempts (wrong password, user not found)
-Visual role differentiation: Each role's navigation sidebar should have a subtle visual distinction:
-Admin: use a neutral/dark theme accent
-Provider: use a green or teal accent
-Fleet: use a blue accent
-Driver/Customer: use the default primary accent This helps users immediately know which context they're in, especially when switching between accounts during testing.
-Acceptance criteria: No blank loading states. No unhelpful empty states. No raw error messages. All pages functional at 375px and 768px widths. Login/logout flow is clean.
-
-PHASE 5: LAUNCH PREPARATION (Weeks 9-10)
-Goal: Final integration testing, performance optimization, and production deployment readiness.
-
-TASK 5.1 — End-to-End Flow Verification
-Not a code task — this is a testing checklist. Every flow must be verified working:
-Driver flow:
-Log in as driver → lands on search page
-Search shows nearby locations with correct prices (all-in), OPEN/CLOSED badges, and Instant/Request badges
-Click a location → see detail with operating hours, services, reviews
-Select a service → see available time slots (only within operating hours, only slots with capacity)
-Select a time → hold is created (10-min countdown visible)
-Select vehicle → book → booking created
-If instant: status is PROVIDER_CONFIRMED. If request: status is REQUESTED
-My Bookings shows the new booking
-Notification bell shows booking status updates
-After completion, can leave a review
-Fleet operator flow:
-Log in as fleet admin → lands on fleet overview dashboard
-Overview shows stats, recent bookings, pending requests
-Vehicles page shows fleet vehicles with wash status
-Can add a new vehicle
-Can assign a driver to a vehicle
-Can book a wash on behalf of a vehicle
-Settings page shows policy configuration
-Can set approved provider list, spending limit, frequency limit
-Driver login respects fleet policies (blocked from non-approved providers, over-limit services)
-Wash request submitted by driver appears in fleet admin's queue
-Fleet admin can approve → booking created at provider
-Reports show accurate wash activity data
-Provider flow:
-Log in as provider admin → lands on provider dashboard
-Dashboard shows Kanban columns with correct bookings
-New booking request arrives (from driver booking) → appears in Action Required column
-Confirm → moves to Upcoming Today (or next scheduled day)
-Check In → Start Service → Complete → booking finishes
-Decline → customer notified with alternatives
-No response within SLA → booking expires automatically, provider receives warning email
-Settings page allows editing locations, services, hours, capacity
-Reviews page shows customer reviews, can submit reply
-New provider registration → onboarding wizard → pending approval
-Admin flow:
-Log in as admin → lands on admin dashboard with accurate stats
-Provider list shows all providers with correct counts, statuses, contact emails
-Can approve a pending provider
-Booking list shows all bookings with functional filters
-Review moderation works (hide/unhide reviews)
-Cross-border flow:
-A US fleet driver books a wash at a Canadian provider
-Driver sees the price in USD (converted from provider's CAD price)
-Provider sees the price in CAD (their original price)
-Booking record stores both the original currency and the fleet currency amounts
-
-TASK 5.2 — Performance Optimization
-Search query optimization: The location search query should use PostGIS or a distance calculation index. Currently the GET /locations/search endpoint likely performs distance calculation in application code. For 45 seed locations this is fine, but add a database-level distance filter using ST_DWithin or a bounding-box pre-filter for when the provider count grows. At minimum, add a WHERE clause limiting results to locations within the search radius before calculating exact distances.
-API response optimization: Add select clauses to all Prisma queries to avoid fetching unnecessary fields. The current booking list query includes full location, service, customer, and vehicle objects — ensure only the fields needed for display are selected.
-Frontend bundle optimization: Verify that Vite's code splitting is working correctly — each page route should be a separate chunk loaded on demand. The 55 shadcn/ui components should be tree-shaken so only used components are in the bundle.
-Image optimization: Any provider/location images should use lazy loading and appropriate sizing. For seed data, use placeholder images from a CDN rather than local files.
-
-TASK 5.3 — Security Hardening
-Rate limiting: Add rate limiting to authentication endpoints (/auth/login, /auth/register) — maximum 10 attempts per IP per 5 minutes. Use express-rate-limit package.
-Input validation: Ensure all API endpoints validate input using Zod schemas from @workspace/api-zod. The booking creation flow already validates, but audit all other endpoints (provider creation, location creation, service creation, vehicle creation, review submission).
-CSRF protection: The session-based auth is vulnerable to CSRF. Add CSRF token validation for all state-changing requests (POST, PATCH, PUT, DELETE). Use csurf middleware or implement double-submit cookie pattern.
-Environment variables: Audit all hardcoded secrets. The session secret has a development fallback (wash-buddy-dev-secret) which is correct, but ensure SESSION_SECRET is set in production. Ensure DATABASE_URL and Stripe keys are never committed.
-Password requirements: Add password strength validation on registration — minimum 8 characters, at least one uppercase, one lowercase, one number.
-
-TASK 5.4 — Production Deployment Configuration
-Environment configuration: Create a .env.example file documenting all required environment variables:
-  DATABASE_URL=postgresql://...
-   SESSION_SECRET=<random-64-char-string>
-   NODE_ENV=production
-   STRIPE_SECRET_KEY=sk_live_...
-   STRIPE_WEBHOOK_SECRET=whsec_...
-   EMAIL_PROVIDER=sendgrid
-   EMAIL_API_KEY=SG...
-   EMAIL_FROM_ADDRESS=bookings@washbuddy.com
-   EMAIL_FROM_NAME=WashBuddy
-Database migrations: Ensure all schema changes are captured in Prisma migration files. Run prisma migrate deploy in production (not prisma db push).
-Health check endpoint: The GET /api/health endpoint should verify database connectivity and return service status. This is used by monitoring and load balancers.
-Logging: Pino logger is already configured. Ensure all API errors are logged with request context (user ID, endpoint, error details). In production, logs should be structured JSON for log aggregation services.
-
-TASK 5.5 — Stripe Connect Integration
-Note: This task requires Stripe API keys and is dependent on business account setup. Implementation can proceed with test-mode keys.
-Files to create/modify:
-Create: artifacts/api-server/src/lib/stripeService.ts
-Initialize Stripe SDK with the secret key from environment
-Implement provider onboarding: create a Stripe Connect account link for the provider, handle the OAuth return, store the connected account ID on the Provider record (externalPayoutAcctId field)
-Implement payment authorization: when a booking is created, create a PaymentIntent with capture_method: manual and transfer_data pointing to the provider's connected account
-Implement payment capture: when a booking reaches COMPLETED (after dispute window), capture the PaymentIntent
-Implement refunds: for cancelled bookings, void the authorization or create a refund
-Implement webhook handler: POST /api/stripe/webhooks to process Stripe events (payment succeeded, payment failed, payout completed, etc.)
-artifacts/api-server/src/routes/bookings.ts — Integrate Stripe calls at the appropriate lifecycle points (authorization at booking creation, capture at completion, void at cancellation).
-Create: artifacts/api-server/src/routes/stripe.ts — Stripe webhook endpoint and provider onboarding endpoints.
-Cross-border payments: Use Stripe Connect's cross-border transfer capability. When a US fleet books a Canadian provider: the PaymentIntent is in USD (fleet's currency), and the transfer to the connected account is in CAD (provider's currency). Stripe handles the FX conversion automatically when the connected account's default currency differs from the payment currency.
-Acceptance criteria: Providers can complete Stripe Connect onboarding. Payments are authorized at booking time and captured after completion. Provider payouts are processed. Cancellation refunds work correctly. Cross-border USD/CAD payments function.
-
-SCHEMA CHANGES SUMMARY
-The following modifications to lib/db/prisma/schema.prisma are required across the implementation phases. Apply these as Prisma migrations.
-1. Add registration type tracking to User model:
-prisma
-model User {
-  // ... existing fields ...
-  accountType    String?  @map("account_type")  // "customer" | "provider"
+export function calculateDiscounts(
+  serviceBasePriceMinor: number,
+  applicableDiscounts: Array<{
+    percentOff?: number | null;
+    flatAmountOff?: number | null;
+  }>
+): number {
+  let totalDiscount = 0;
+  for (const d of applicableDiscounts) {
+    if (d.percentOff) {
+      totalDiscount += Math.round(serviceBasePriceMinor * (d.percentOff / 100));
+    }
+    if (d.flatAmountOff) {
+      totalDiscount += d.flatAmountOff;
+    }
+  }
+  // Discount cannot exceed base price
+  return Math.min(totalDiscount, serviceBasePriceMinor);
 }
-2. Add operating hours data validation (no schema change needed — OperatingWindow model already exists and is correct)
-3. Add reminder tracking to Booking model:
-prisma
-model Booking {
-  // ... existing fields ...
-  reminderSentAt    DateTime?  @map("reminder_sent_at")  @db.Timestamptz
-}
-4. Add provider response metrics (new model):
-prisma
-model ProviderResponseMetric {
-  id                String   @id @default(uuid()) @db.Uuid
-  providerId        String   @map("provider_id") @db.Uuid
-  locationId        String   @map("location_id") @db.Uuid
-  periodStart       DateTime @map("period_start") @db.Timestamptz
-  periodEnd         DateTime @map("period_end") @db.Timestamptz
-  totalRequests     Int      @default(0) @map("total_requests")
-  respondedInSla    Int      @default(0) @map("responded_in_sla")
-  missedSla         Int      @default(0) @map("missed_sla")
-  avgResponseSecs   Int?     @map("avg_response_secs")
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+```
 
-  provider  Provider @relation(fields: [providerId], references: [id])
-  location  Location @relation(fields: [locationId], references: [id])
+## TASK 1.5 — Expand Seed Data
 
-  @@unique([providerId, locationId, periodStart])
-  @@map("provider_response_metrics")
-}
-Add the corresponding relation fields to Provider and Location models.
-5. Add Provider model fields for approval workflow:
-prisma
-model Provider {
-  // ... existing fields ...
-  approvalStatus    String   @default("PENDING") @map("approval_status")  // PENDING, APPROVED, REJECTED, SUSPENDED
-  approvedAt        DateTime? @map("approved_at") @db.Timestamptz
-  approvedBy        String?   @map("approved_by") @db.Uuid
-  rejectionReason   String?   @map("rejection_reason")
-}
-6. No changes needed for fee calculation — the fee is calculated dynamically at booking time, not stored on the Service model. The existing platformFeeMinor field on Service can be deprecated (set to 0 in seed data) and the dynamically calculated fee continues to be stored on each Booking record.
+File: `lib/db/src/seedLaunchCorridor.ts`
 
-FILE CHANGE INDEX
-Quick reference of every file that needs to be created or modified, organized by location:
-New files to create:
-lib/db/src/cleanDuplicateProviders.ts (Task 0.1)
-lib/db/src/seedLaunchCorridor.ts (Task 0.2)
-artifacts/api-server/src/lib/feeCalculator.ts (Task 1.1)
-artifacts/api-server/src/lib/slaEnforcer.ts (Task 1.3)
-artifacts/api-server/src/lib/emailService.ts (Task 4.1)
-artifacts/api-server/src/lib/reminderScheduler.ts (Task 4.3)
-artifacts/api-server/src/lib/stripeService.ts (Task 5.5)
-artifacts/api-server/src/routes/stripe.ts (Task 5.5)
-artifacts/washbuddy-web/src/pages/provider/onboarding.tsx (Task 3.4)
-.env.example (Task 5.4)
-Existing files to modify:
-lib/db/prisma/schema.prisma (Schema Changes Summary)
-artifacts/api-server/src/routes/bookings.ts (Tasks 1.1, 1.3, 2.4, 4.2)
-artifacts/api-server/src/routes/locations.ts (Tasks 1.1, 1.2)
-artifacts/api-server/src/routes/availability.ts (Task 1.2)
-artifacts/api-server/src/routes/auth.ts (Task 3.4)
-artifacts/api-server/src/routes/reviews.ts (Task 3.5)
-artifacts/api-server/src/routes/notifications.ts (Task 0.6)
-artifacts/api-server/src/routes/fleet.ts (Tasks 2.2, 2.3, 2.5, 4.2)
-artifacts/api-server/src/routes/providers.ts (Task 3.2)
-artifacts/api-server/src/routes/index.ts (add stripe route, Task 5.5)
-artifacts/api-server/src/index.ts (start background jobs, Tasks 1.3, 4.3)
-artifacts/api-server/src/lib/notifications.ts (Task 4.2)
-artifacts/washbuddy-web/src/pages/customer/search.tsx (Tasks 0.3, 1.1, 1.2, 2.4)
-artifacts/washbuddy-web/src/pages/customer/location-detail.tsx (Tasks 1.2, 1.4)
-artifacts/washbuddy-web/src/pages/customer/my-bookings.tsx (Task 1.6)
-artifacts/washbuddy-web/src/pages/customer/my-vehicles.tsx (Task 4.4)
-artifacts/washbuddy-web/src/pages/provider/dashboard.tsx (Task 1.5)
-artifacts/washbuddy-web/src/pages/provider/settings.tsx (Task 0.5)
-artifacts/washbuddy-web/src/pages/provider/reviews.tsx (Task 3.5)
-artifacts/washbuddy-web/src/pages/fleet/overview.tsx (Task 2.1)
-artifacts/washbuddy-web/src/pages/fleet/vehicles.tsx (Task 2.2)
-artifacts/washbuddy-web/src/pages/fleet/wash-requests.tsx (Task 2.3)
-artifacts/washbuddy-web/src/pages/fleet/new-request.tsx (Task 2.3)
-artifacts/washbuddy-web/src/pages/fleet/request-detail.tsx (Task 2.3)
-artifacts/washbuddy-web/src/pages/fleet/settings.tsx (Task 2.4)
-artifacts/washbuddy-web/src/pages/fleet/reports.tsx (Task 2.5)
-artifacts/washbuddy-web/src/pages/admin/dashboard.tsx (Task 3.1)
-artifacts/washbuddy-web/src/pages/admin/providers.tsx (Task 3.2)
-artifacts/washbuddy-web/src/pages/admin/bookings.tsx (Task 3.3)
-artifacts/washbuddy-web/src/pages/admin/reviews.tsx (Task 3.5)
-artifacts/washbuddy-web/src/pages/auth/register.tsx (Task 3.4)
-artifacts/washbuddy-web/src/components/notification-bell.tsx (Task 0.6)
-artifacts/washbuddy-web/src/components/layout.tsx (Task 4.4)
-artifacts/washbuddy-web/src/App.tsx (add provider onboarding route, Task 3.4)
-lib/api-spec/openapi.yaml (update for all new/modified endpoints)
-After modifying openapi.yaml: Regenerate the API client by running the Orval code generator per the configuration in lib/api-spec/orval.config.ts. This updates lib/api-client-react/src/generated/api.ts and api.schemas.ts with new typed hooks for all new endpoints.
+After migration, expand the seed script to include all new entities per PRD Section 12. This task depends on Phase 1 models being migrated.
 
-IMPLEMENTATION PRIORITY MATRIX
-If timeline pressure requires scope reduction, here is the priority ranking:
-MUST HAVE (cannot launch without):
-Task 0.1, 0.2 (data cleanup and realistic seed data)
-Task 0.3 (search loads on page render)
-Task 0.4 (fleet dashboard routing)
-Task 1.1 (correct fee calculation)
-Task 1.2 (operating hours enforcement)
-Task 1.4 (location detail and booking flow)
-Task 1.5 (provider booking management)
-Task 1.6 (customer booking management)
-Task 2.1 (fleet overview)
-Task 4.2 (notification triggers — at minimum in-app)
-Task 4.4 (UI polish — at minimum loading/empty states and mobile responsiveness)
-SHOULD HAVE (significantly degrades experience without):
-Task 0.5 (provider settings editability)
-Task 0.6 (notification bell)
-Task 1.3 (SLA enforcement)
-Task 2.2 (fleet vehicle management)
-Task 2.4 (fleet policy engine)
-Task 3.1 (admin dashboard)
-Task 3.2 (admin provider management)
-Task 3.4 (provider registration flow)
-Task 4.1 (email notifications)
-NICE TO HAVE (can launch beta without):
-Task 2.3 (fleet wash request workflow)
-Task 2.5 (fleet reports)
-Task 3.3 (admin booking management enhancements)
-Task 3.5 (review system)
-Task 4.3 (booking reminders)
-Task 5.2 (performance optimization)
-Task 5.3 (security hardening beyond basics)
-Task 5.5 (Stripe Connect — can use manual payment reconciliation for beta)
+---
 
-End of Engineering Implementation Document
+# PHASE 2: PROVIDER CORE EXPERIENCE (Weeks 3-4)
 
+*Goal: Build the primary operational views that provider operators and admins use every day. After Phase 2, providers can manage their full daily workflow including off-platform bookings.*
+
+## TASK 2.1 — Daily Wash Board (List View)
+
+**Backend:**
+File: `artifacts/api-server/src/routes/bookings.ts`
+Add endpoint: `GET /api/providers/:providerId/locations/:locationId/daily-board`
+Parameters: `date` (ISO date string, defaults to today), `locationId`
+Returns: bookings for the specified date at the specified location, grouped by status (UPCOMING, IN_PROGRESS, COMPLETED), enriched with: vehicle details, customer/fleet info, assigned operator, booking source, client profile tags, wash notes. Sort UPCOMING by scheduledStartAtUtc ascending.
+
+**Frontend:**
+File: Create `artifacts/washbuddy-web/src/pages/provider/daily-board.tsx`
+
+Layout:
+- Top bar: Date picker (defaults to today, can browse forward/back), location selector (for multi-location providers).
+- Filter bar: Status, Operator, Vehicle Class, Service Type, Booking Source. Use shadcn/ui `Select` components.
+- Three collapsible sections: Upcoming, In Progress, Completed.
+- Each booking rendered as a card component per PRD Section 5.1.
+
+Booking card component (`artifacts/washbuddy-web/src/components/provider/booking-card.tsx`):
+- Compact: 72px height collapsed showing: time, vehicle icon+class badge, driver name, services (abbreviated), operator, status badge, source badge.
+- Expanded (on click): full details including notes, special requests, client tags, action buttons.
+- Action buttons at bottom of expanded card: "Check In" (for PROVIDER_CONFIRMED), "Start Wash" (for CHECKED_IN), "Complete" (for IN_SERVICE). Each button triggers a status transition via `PATCH /api/bookings/:id/status`.
+- Source badges: Use `shadcn/ui Badge` with variants — "WashBuddy" (blue/default), "Direct" (gray/secondary), "Walk-in" (orange/destructive variant with custom color).
+- Client tag badges: VIP (gold), Service Recovery (red), New Client (green), Frequent (blue). Use small pill badges.
+- Photo prompt: When marking "Complete," show a non-blocking dialog: "Take an 'after' photo? (recommended)" with Camera and Skip buttons. Camera opens device camera via `<input type="file" accept="image/*" capture="environment">`. On capture, compress client-side using canvas (max 1200px width, 80% JPEG quality), then upload via `POST /api/bookings/:id/photos` with `photoType: "AFTER"`.
+
+**UX requirements:**
+- Cards must be touch-friendly: minimum 44px tap targets for all buttons.
+- Status transitions should use optimistic updates (update UI immediately, roll back on error).
+- The In Progress section should show a live elapsed timer on each card. Use `setInterval` updating every second, displaying "MM:SS elapsed" with color coding: green (<estimated duration), yellow (75-100% of estimated), red (>estimated).
+- Page should auto-refresh every 30 seconds via TanStack Query's `refetchInterval` to catch new bookings.
+
+**Acceptance criteria:** Provider operator can view all of today's bookings in a scannable list, see booking source and client context at a glance, process bookings through status transitions with one tap, and capture after-photos at completion.
+
+## TASK 2.2 — Bay Timeline View
+
+**Backend:**
+File: `artifacts/api-server/src/routes/bookings.ts`
+Add endpoint: `GET /api/providers/:providerId/locations/:locationId/bay-timeline`
+Parameters: `date`, `startHour`, `endHour`
+Returns: All wash bays for the location with their bookings for the specified time range. Each bay includes: id, name, supportedClasses, isActive, outOfServiceSince/Reason/EstReturn. Each booking includes: id, scheduledStart, scheduledEnd, vehicleClass, vehicleUnitNumber, driverFirstName, services, status, bookingSource, assignedOperatorId.
+
+**Frontend:**
+File: Create `artifacts/washbuddy-web/src/pages/provider/bay-timeline.tsx`
+
+Implementation approach: Use a CSS Grid layout. The grid has one column for bay labels and remaining columns for time slots. Each bay is a row.
+
+Layout:
+- Left column (fixed): Bay labels showing bay name + vehicle class icons (S/M/L/XL badges for supported classes).
+- Horizontal axis: Time slots in 15-minute increments. Total width: 96 columns for a 24-hour view, or proportional for shorter views. Use horizontal scrolling with the current time anchored to the center.
+- Current time: Red vertical line spanning all rows. Use `position: absolute` with left offset calculated from current time.
+- Booking blocks: `position: absolute` elements within each bay row. Left offset = (booking start - view start) / total view duration * 100%. Width = booking duration / total view duration * 100%. Color-coded by service type using CSS custom properties.
+- Gap indicators: For each gap >30 minutes between bookings, render a subtle dashed-border area with a "+" button centered. The "+" button opens a quick-add form.
+
+**Drag-and-drop implementation:**
+Use the HTML5 Drag and Drop API (or a lightweight library like `@dnd-kit/core` if already in dependencies, otherwise use native):
+- `draggable="true"` on booking blocks.
+- On dragstart: store booking ID and original position.
+- On dragover bay rows: calculate the time slot the user is hovering over. Show a ghost indicator of where the booking would land.
+- On drop: validate target bay/time (bay supports vehicle class, no overlap, within operating hours). If valid, call `PATCH /api/bookings/:id/reschedule` with `newBayId`, `newStartTime`, `newEndTime`. If the booking is on-platform, the API creates a notification to the driver/fleet with accept/reject. If off-platform, the move is immediate.
+
+**Mobile view:**
+On viewports <768px, collapse to single-bay view:
+- Bay selector dropdown at top.
+- Vertical timeline (top=morning, bottom=evening) showing bookings as blocks stacked vertically.
+- Drag-and-drop replaced with "Reschedule" button in booking detail that opens a time picker.
+
+**Quick-add off-platform booking (clicking "+" in gap):**
+Opens a `shadcn/ui Sheet` (slides in from right) with form:
+- Source selector: "Direct Call" or "Walk-in"
+- Client info: Name (required), Phone (optional), Email (optional). Autocomplete against existing ClientProfile records.
+- Vehicle class selector: Small/Medium/Large/Extra Large
+- Service selector: checkboxes for available services
+- Time: pre-populated from the gap they clicked
+- Bay: pre-populated from the bay row they clicked
+- Notes: optional text area
+- "Process Payment via WashBuddy" toggle (default off for off-platform)
+- Save button creates booking via `POST /api/bookings/off-platform`
+
+**Acceptance criteria:** Provider can see all bays and their bookings on a visual timeline, identify gaps for additional bookings, drag bookings to reschedule them, and add off-platform bookings by clicking gaps. On mobile, the view is usable as a vertical single-bay timeline.
+
+## TASK 2.3 — Off-Platform Booking API
+
+**Backend:**
+File: `artifacts/api-server/src/routes/bookings.ts`
+
+Add `POST /api/bookings/off-platform` endpoint:
+- Auth: requires PROVIDER_ADMIN or PROVIDER_STAFF role for the provider
+- Body: `{ locationId, serviceId, vehicleClass, bayId?, clientName, clientPhone?, clientEmail?, scheduledStartAtUtc, scheduledEndAtUtc, notes?, processPayment: boolean }`
+- Logic:
+  1. Validate the user has provider membership for this location
+  2. Create or update ClientProfile for this client (match by phone or email if provided, otherwise create new)
+  3. Create Booking with: `bookingSource: "DIRECT"` or `"WALK_IN"`, `isOffPlatform: true`, `platformFeeMinor: 0` (unless processPayment is true), `status: "PROVIDER_CONFIRMED"` (skip REQUESTED since provider is creating it)
+  4. If `processPayment: true`, create PaymentIntent via Stripe with standard fee calculation
+  5. Auto-assign bay if `bayId` not provided (find first compatible available bay)
+  6. Create BookingStatusHistory record
+  7. Update ClientProfile: increment visitCount, update lastVisitAt
+  8. Return the created booking
+
+Add `POST /api/bookings/walk-in` endpoint:
+- Same as off-platform but with `bookingSource: "WALK_IN"` and `scheduledStartAtUtc: now()`
+
+**Acceptance criteria:** Providers can create bookings for clients who called or walked in. These bookings appear on the timeline and daily board alongside platform bookings. Off-platform bookings have zero platform fee unless the provider opts to process payment through WashBuddy.
+
+## TASK 2.4 — Booking Status Transitions (Enhanced)
+
+**Backend:**
+File: `artifacts/api-server/src/routes/bookings.ts`
+
+Enhance existing status transition endpoints to support new fields:
+
+`PATCH /api/bookings/:id/status`:
+- When transitioning to IN_SERVICE: start a timer (set `serviceStartedAtUtc` to now)
+- When transitioning to COMPLETED_PENDING_WINDOW: set `serviceCompletedAtUtc` to now, calculate actual duration, update vehicle's `lastWashAtUtc`, update ClientProfile stats
+
+`PATCH /api/bookings/:id/assign-operator`:
+- Body: `{ operatorId }`
+- Validates operator has PROVIDER_STAFF or PROVIDER_ADMIN membership at this location
+- Sets `assignedOperatorId` on booking
+- Creates AuditEvent
+
+`PATCH /api/bookings/:id/assign-bay`:
+- Body: `{ bayId }`
+- Validates bay is at the same location and supports the vehicle class
+- Sets `washBayId` on booking
+- Creates AuditEvent
+
+`PATCH /api/bookings/:id/adjust-price`:
+- Body: `{ newServiceBasePriceMinor, reason }` (for service mismatch scenarios)
+- Recalculates platform fee
+- Creates AuditEvent with before/after values
+- Sends notification to customer about price adjustment
+
+## TASK 2.5 — Waitlist for Walk-Ins
+
+**Backend:**
+File: Create `artifacts/api-server/src/routes/waitlist.ts`
+
+`POST /api/locations/:locationId/waitlist`:
+- Body: `{ clientName, clientPhone?, vehicleClass, serviceIds }`
+- Creates a WashNote with noteType "WAITLIST_ENTRY" and estimated wait time calculated from current in-progress booking durations
+- Returns estimated wait time
+
+`GET /api/locations/:locationId/waitlist`:
+- Returns current waitlist entries sorted by creation time
+
+`POST /api/locations/:locationId/waitlist/:entryId/notify`:
+- Sends SMS (future) or in-app notification to waitlisted client that a bay is available
+
+**Frontend:**
+Add waitlist panel to the Daily Wash Board as a collapsible "Waitlist" section above the three main sections.
+
+---
+
+# PHASE 3: PROVIDER ADMIN DASHBOARD (Weeks 5-6)
+
+*Goal: Build the full Provider Administrator experience — CRM, reporting, analytics, operator performance, settings, and audit log.*
+
+## TASK 3.1 — Client Profiles (CRM)
+
+**Backend:**
+File: Create `artifacts/api-server/src/routes/clientProfiles.ts`
+
+Endpoints per Task 1.3 spec. Key logic:
+- `GET /api/providers/:providerId/client-profiles`: paginated, sortable (by name, visitCount, lifetimeSpend, lastVisitAt), filterable by tags
+- `PATCH /api/providers/:providerId/client-profiles/:id`: update tags, notes. Auto-tag logic: if `visitCount >= 5` in last 90 days, auto-add "FREQUENT". If latest review rating ≤ 3, auto-add "SERVICE_RECOVERY".
+- ClientProfile creation happens automatically on first booking (on-platform or off-platform). For on-platform: populated from User record. For off-platform: populated from the off-platform booking form fields.
+
+**Frontend:**
+File: Create `artifacts/washbuddy-web/src/pages/provider/clients.tsx`
+
+Layout:
+- Search bar at top: search by name, phone, email, fleet name
+- Filter pills: by tag (VIP, Frequent, Service Recovery, New, etc.)
+- Client list: table with columns — Name, Fleet, Visits, Lifetime Spend, Last Visit, Tags, Rating Avg
+- Click a client: opens detail panel (Sheet from right) showing: full profile, visit history (chronological list of bookings at this provider with dates, services, operator, duration, rating), notes thread (chronological), editable tags, add note form.
+
+**Sidebar integration:**
+When viewing a booking (on Daily Wash Board or Bay Timeline), a client summary should appear in a sidebar or expandable section showing: client name, tags (prominently), lifetime spend, visit count, last visit, and any notes. The operator should see this context without navigating away.
+
+Component: `artifacts/washbuddy-web/src/components/provider/client-summary-sidebar.tsx`
+
+## TASK 3.2 — Reporting & Analytics Dashboard
+
+**Backend:**
+File: Create `artifacts/api-server/src/routes/providerAnalytics.ts`
+
+`GET /api/providers/:providerId/analytics/overview`:
+Returns dashboard metrics: overall rating, total washes (by period), revenue, utilization rate, new clients, repeat rate. Parameters: `startDate`, `endDate`, `locationId?`
+
+`GET /api/providers/:providerId/analytics/revenue`:
+Returns: revenue by service type, by vehicle class, by booking source, revenue per bay-hour, revenue trend (daily/weekly data points). Same parameters.
+
+`GET /api/providers/:providerId/analytics/operations`:
+Returns: average wash duration by service/class, peak demand heatmap (24x7 matrix of booking counts), capacity utilization trend, no-show rate, cancellation rate.
+
+`GET /api/providers/:providerId/analytics/clients`:
+Returns: first-time client count/trend, repeat rate, retention rate, average lead time, upsell attach rate.
+
+`GET /api/providers/:providerId/analytics/operators`:
+Returns: per-operator stats (washes, avg duration, on-time %, avg rating, upsell rate).
+
+Implementation: Use Prisma raw SQL queries for aggregations. Calculate metrics from the Booking, Review, and ClientProfile tables. Cache results with a 5-minute TTL for the overview endpoint to avoid expensive recalculations on every request.
+
+**Frontend:**
+File: Create `artifacts/washbuddy-web/src/pages/provider/analytics.tsx`
+
+Use `recharts` (already available in the project as a dependency of shadcn charts) for visualizations.
+
+Layout per PRD Section 5.7:
+- Top: date range selector (Today, This Week, This Month, This Quarter, This Year, Custom) + location filter + export button
+- Metric cards row: Rating (with gauge), Total Washes (with delta), Revenue (with delta), Utilization (with gauge), New Clients, Repeat Rate
+- Tab sections: Revenue, Operations, Clients, Staff
+- Each tab contains the relevant charts described in PRD Section 5.7
+- Export: PDF (use browser print CSS) and CSV (generate and download)
+
+Color palette for charts: WashBuddy Platform bookings = `hsl(221, 83%, 53%)` (blue), Direct = `hsl(220, 9%, 46%)` (gray), Walk-in = `hsl(25, 95%, 53%)` (orange). Consistent across all charts.
+
+## TASK 3.3 — Operator Performance Dashboard
+
+**Backend:**
+Included in analytics endpoints (Task 3.2) — the operators endpoint.
+
+**Frontend:**
+File: Create `artifacts/washbuddy-web/src/pages/provider/operator-performance.tsx`
+
+Admin view: Table of all operators with columns — Name, Washes, Avg Duration, On-Time %, Avg Rating, Upsell Rate. Each cell includes a sparkline trend (last 30 days). Top performer highlighted with subtle gold background. Operators with declining metrics flagged with a small warning icon.
+
+Click an operator: detail view showing full metrics breakdown, individual wash history, and rating distribution chart.
+
+Operator self-view (for PROVIDER_STAFF accessing their own stats): "Personal Scorecard" layout showing their own metrics in a positive, encouraging format. Large numbers for achievements (total washes, rating). Trends shown as "improving" badges when positive.
+
+## TASK 3.4 — Shift Dashboard
+
+**Backend:**
+File: `artifacts/api-server/src/routes/providerAnalytics.ts`
+Add `GET /api/providers/:providerId/locations/:locationId/shift-overview`
+Parameters: `date`, `shiftStart`, `shiftEnd`
+Returns: vehicle count by class, operators on shift, capacity utilization, revenue forecast, booking source breakdown.
+
+**Frontend:**
+File: Create `artifacts/washbuddy-web/src/pages/provider/shift-overview.tsx`
+Layout per PRD Section 5.3. Metric cards at top, booking source chart below.
+
+## TASK 3.5 — Audit Log
+
+**Backend:**
+Audit events are already created via the AuditEvent model. Ensure all new booking operations (off-platform create, status change, reschedule, price adjust, operator assign, bay assign) create AuditEvent records.
+
+Add endpoint: `GET /api/providers/:providerId/audit-log`
+Parameters: `startDate`, `endDate`, `actorId?`, `actionType?`, `entityType?`, page/limit
+Returns: paginated audit events.
+
+**Frontend:**
+File: Create `artifacts/washbuddy-web/src/pages/provider/audit-log.tsx`
+Filterable, paginated table per PRD Section 5.10.
+
+## TASK 3.6 — Settings & User Management
+
+**Frontend:**
+File: Enhance `artifacts/washbuddy-web/src/pages/provider/settings.tsx`
+
+Reorganize into tabbed sections:
+- **Business Info:** Provider name, contact details (read-only for now, editable future)
+- **Locations:** Existing location management (enhanced in Phase 0 Task 0.5) + bay management UI
+- **Services:** Service menu management with price-per-vehicle-class matrix [NEW]
+- **Discounts:** CRUD for discount rules [NEW]
+- **Subscriptions:** CRUD for subscription packages [NEW]
+- **Team:** User management — list of admins and operators, invite new users, assign to locations, deactivate [NEW]
+- **Notifications:** Notification preferences per event type [NEW]
+- **Display:** Light/dark mode toggle, default view preferences [NEW]
+
+Each section uses shadcn/ui `Tabs` component. Forms use react-hook-form + zod validation.
+
+---
+
+# PHASE 4: CROSS-ROLE FEATURES (Weeks 7-8)
+
+*Goal: Build features that span multiple user roles — messaging, photos, subscriptions, discounts.*
+
+## TASK 4.1 — In-Platform Messaging
+
+**Backend:**
+File: `artifacts/api-server/src/routes/bookings.ts`
+
+`POST /api/bookings/:id/messages`:
+- Auth: PROVIDER_ADMIN or PROVIDER_STAFF only (drivers cannot initiate messages in v2)
+- Body: `{ templateId?, body }`
+- Validates: booking is on-platform (`isOffPlatform: false`), booking is in active status (PROVIDER_CONFIRMED through IN_SERVICE or COMPLETED_PENDING_WINDOW)
+- Creates BookingMessage record
+- Creates Notification for the driver (in-app + email)
+- Creates Notification for the fleet admin if the booking is fleet-associated
+
+`GET /api/bookings/:id/messages`:
+- Auth: booking customer, fleet admin of booking's fleet, provider admin/staff of booking's provider
+- Returns: all messages for this booking, sorted chronologically
+
+**Frontend — Provider side:**
+Component: `artifacts/washbuddy-web/src/components/provider/send-message.tsx`
+- Button "Message Driver" on booking detail/card (only visible for on-platform bookings)
+- Opens dialog with: template selector (dropdown of 5 predefined templates per PRD Section 5.8), editable text area (pre-populated with selected template), Send button
+- After sending: show success toast, message appears in booking's message history
+
+**Frontend — Driver side:**
+Component: `artifacts/washbuddy-web/src/components/customer/booking-messages.tsx`
+- On the booking detail page, add a "Messages" section showing chronological list of messages received
+- Each message shows: sender name, timestamp, message body
+- Read-only for drivers in v2 (no reply capability)
+
+**Frontend — Fleet side:**
+On the fleet booking detail view, add the same "Messages" section (read-only) for transparency.
+
+## TASK 4.2 — Photo Documentation
+
+**Backend:**
+File: `artifacts/api-server/src/routes/bookings.ts`
+
+`POST /api/bookings/:id/photos`:
+- Auth: PROVIDER_ADMIN, PROVIDER_STAFF (for BEFORE/AFTER photos), or DRIVER (for PROBLEM_AREA photos at booking time)
+- Body: multipart form with `photoType` (BEFORE, AFTER, PROBLEM_AREA) and image file
+- Store file: save to local filesystem for MVP (future: S3). Create FileAsset record. Create BookingPhoto record.
+- Return: photo URL
+
+`GET /api/bookings/:id/photos`:
+- Auth: booking customer, fleet admin, provider admin/staff, platform admin
+- Returns: all photos for this booking with type, uploader name, caption, timestamp
+
+**Frontend — Provider Operator photo prompt:**
+In the booking card component, when status transitions to IN_SERVICE or COMPLETED_PENDING_WINDOW:
+- Show a non-blocking `shadcn/ui AlertDialog` with title "Take a photo? (recommended)"
+- Two buttons: "Open Camera" and "Skip"
+- "Open Camera" triggers `<input type="file" accept="image/*" capture="environment">` which opens the device camera
+- After capture: show preview with "Use Photo" / "Retake" buttons
+- "Use Photo" compresses image (canvas resize to max 1200px width, toBlob at quality 0.8) and uploads
+- "Skip" dismisses the dialog and proceeds with the status transition
+
+**Frontend — Driver photo attachment at booking time:**
+In the booking flow (step 4 per PRD Section 6.2), add an optional "Attach photos" section with a file input that accepts images. Multiple photos allowed. Each uploaded as PROBLEM_AREA type.
+
+**Frontend — Photo display:**
+On booking detail pages (all roles), display a "Photos" section showing thumbnail grid of all booking photos. Thumbnails expand to full-size on click (use `shadcn/ui Dialog` with the image centered). Each photo labeled with type badge (Before/After/Problem Area) and uploader name.
+
+## TASK 4.3 — Subscription Packages
+
+**Backend:**
+File: Create `artifacts/api-server/src/routes/subscriptions.ts`
+
+Provider-side:
+- `GET /api/providers/:providerId/subscription-packages` — list packages
+- `POST /api/providers/:providerId/subscription-packages` — create package
+- `PATCH /api/providers/:providerId/subscription-packages/:id` — update
+- `DELETE /api/providers/:providerId/subscription-packages/:id` — deactivate
+
+Fleet-side:
+- `GET /api/fleets/:fleetId/available-subscriptions?locationId=` — list available packages at a location
+- `POST /api/fleets/:fleetId/subscriptions` — purchase (creates FleetSubscription, auto-schedules first wash booking with subscription fee tier)
+- `GET /api/fleets/:fleetId/subscriptions` — list active subscriptions
+- `PATCH /api/fleets/:fleetId/subscriptions/:id/cancel` — cancel
+
+Subscription booking creation logic:
+When a FleetSubscription is active, the system auto-creates bookings for each scheduled wash. Use a cron-like scheduled job (or on-demand when checking for next washes) that:
+1. Finds FleetSubscriptions where `nextWashDate <= today + 7 days` and status is ACTIVE
+2. For each, creates a booking at the subscription's location with: `bookingSource: "PLATFORM"`, subscription fee rate ($20 cap), auto-assigned bay, status PROVIDER_CONFIRMED (instant)
+3. Updates `nextWashDate` based on cadence
+4. Sends notification to driver about upcoming scheduled wash
+
+**Frontend — Provider side:**
+In provider settings (Task 3.6), the "Subscriptions" tab shows:
+- List of existing packages with: name, services included, cadence, price, active subscribers count
+- "Create Package" button → form with fields per SubscriptionPackage model
+- Edit/deactivate actions
+
+**Frontend — Fleet side:**
+- On location detail page (driver view): "Subscription Packages Available" section showing packages offered at this location. "Request Subscription" button sends to fleet admin for approval.
+- Fleet admin: `artifacts/washbuddy-web/src/pages/fleet/subscriptions.tsx` [NEW page] showing active subscriptions, available packages to browse, and purchase flow.
+
+## TASK 4.4 — Discount System
+
+**Backend:**
+File: Create `artifacts/api-server/src/routes/discounts.ts`
+
+Provider-side CRUD per Task 1.3 endpoints.
+
+Discount application logic in booking creation:
+When a booking is created, before calculating the platform fee:
+1. Query active ProviderDiscount records for this provider/location
+2. For each applicable discount type:
+   - OFF_PEAK: check if booking time falls within the discount's time window and day-of-week
+   - VOLUME: check if the fleet's booking count at this provider in the rolling window exceeds the threshold
+   - FIRST_TIME: check if this is the client's first booking at this provider (via ClientProfile.visitCount == 0)
+3. If stackable, sum all applicable discounts. If not stackable, apply the largest single discount.
+4. Calculate platform fee on post-discount price.
+5. Store discount details on the booking (add `discountAmountMinor` and `discountDescription` fields to Booking model).
+
+**Frontend — Booking flow:**
+In the booking summary step, if discounts apply, show:
+- Original price (struck through)
+- Discount label (e.g., "10% off-peak discount")
+- Final all-in price
+
+**Frontend — Provider settings:**
+In the "Discounts" tab (Task 3.6), show:
+- List of discount rules with type, name, value, status
+- Create/edit forms per ProviderDiscount model fields
+
+---
+
+# PHASE 5: DRIVER & FLEET ENHANCEMENTS (Weeks 9-10)
+
+*Goal: Enhance the driver and fleet operator experiences with the new features defined in PRD.*
+
+## TASK 5.1 — "Find a Wash Now" Quick Action
+
+**Frontend:**
+File: `artifacts/washbuddy-web/src/pages/customer/search.tsx`
+
+Add a prominent button at the top of the search page: "Find a Wash Now" (use `shadcn/ui Button` with `size="lg"` and a distinctive color — orange or green to stand out).
+
+On click:
+1. Get user's current location via geolocation API
+2. Apply filters: available within next 2 hours, within 15 miles, sorted by soonest available slot
+3. Show results in a focused list view (no map, just cards sorted by availability)
+4. Each card shows: provider name, distance, soonest available time, services available, all-in price for driver's vehicle class, "Book Now" button
+
+This should feel fast and decisive — a driver in a hurry should be able to find and book a wash in under 60 seconds from tapping this button.
+
+## TASK 5.2 — Wash Health Indicators
+
+**Backend:**
+File: `artifacts/api-server/src/routes/vehicles.ts`
+Enhance the vehicle list endpoint to compute wash health status for each vehicle:
+- Green: `lastWashAtUtc` is within recommended frequency (7 days in Nov-Mar, 14 days otherwise for Northeast corridor)
+- Yellow: within 2 days of threshold
+- Red: past threshold
+- Gray: no wash history
+
+Add `GET /api/fleets/:fleetId/vehicles/wash-health-summary`:
+Returns: { green: N, yellow: N, red: N, gray: N } for the fleet overview dashboard.
+
+**Frontend:**
+- Vehicle list page (`fleet/vehicles.tsx`): add a colored circle indicator next to each vehicle showing wash health status
+- Fleet overview page (`fleet/overview.tsx`): add a "Wash Health" summary card showing the counts per status with a simple horizontal bar visualization
+- Alert notifications: when a vehicle transitions from Yellow to Red, create a Notification for the FLEET_ADMIN and MAINTENANCE_MANAGER
+
+## TASK 5.3 — Enhanced Fleet Reports
+
+**Frontend:**
+File: `artifacts/washbuddy-web/src/pages/fleet/reports.tsx`
+
+Add new report tabs (alongside existing):
+- **Spend per Vehicle:** Bar chart showing total wash spend per vehicle, sortable by amount
+- **Wash Frequency:** Per-vehicle line chart showing wash frequency over time
+- **Provider Comparison:** Table showing each provider the fleet uses with: name, total bookings, avg rating, avg duration, avg cost, on-time rate
+- **Subscription Savings:** If fleet has active subscriptions, show: total saved from reduced fee cap ($20 vs $25), projected annual savings
+
+## TASK 5.4 — Fleet Subscription Management
+
+**Frontend:**
+File: Create `artifacts/washbuddy-web/src/pages/fleet/subscriptions.tsx`
+
+Layout:
+- Active Subscriptions: list of current subscriptions with provider, service, vehicle, next wash date, price, savings indicator
+- Browse Packages: search available packages by provider/location
+- Purchase flow: select package → select vehicle(s) → confirm → payment authorized
+
+---
+
+# PHASE 6: NOTIFICATIONS & POLISH (Weeks 11-12)
+
+*Goal: Complete the notification system, implement notification preferences, and polish the entire UI for launch.*
+
+## TASK 6.1 — Notification Preferences
+
+**Backend:**
+File: `artifacts/api-server/src/routes/notifications.ts`
+- `GET /api/users/me/notification-preferences` — returns all preferences (or defaults if not yet set)
+- `PUT /api/users/me/notification-preferences` — batch update preferences
+
+When creating a notification, check the user's preferences before dispatching via each channel.
+
+**Frontend:**
+File: Create `artifacts/washbuddy-web/src/components/settings/notification-preferences.tsx`
+Table/grid showing each event type with toggles for Email, In-App, SMS (disabled for now).
+
+## TASK 6.2 — Full Notification Integration
+
+Audit every feature from Phases 2-5 and ensure notifications are created for all events listed in PRD Section 8.2. Key gaps to fill:
+- Booking rescheduled by provider (accept/reject notification to driver) [NEW]
+- Messages from provider (notification to driver) [Phase 4]
+- Wash health alerts (notification to fleet admin/maintenance manager) [Phase 5]
+- Subscription renewal (notification to fleet admin) [Phase 4]
+
+## TASK 6.3 — UI Polish and Responsiveness
+
+Go through every page and ensure:
+1. **Mobile-first for operators:** The Daily Wash Board, Bay Timeline (single-bay), booking status transitions, photo capture, and messaging all work on a phone. Test at 375px width (iPhone SE).
+2. **Desktop-first for admins:** Analytics, CRM, audit log, settings all have proper wide-screen layouts. Test at 1440px width.
+3. **Consistent visual language:** Source badges, status badges, and health indicators use the exact colors specified in PRD Section 13.3 across every page.
+4. **Loading states:** Replace all spinner-based loading with skeleton screens using shadcn/ui `Skeleton`.
+5. **Empty states:** Every list/table/chart has a meaningful empty state (not just blank space). Example: "No bookings yet today. Walk-in bookings can be added from the Bay Timeline."
+6. **Error states:** Every API call has error handling with user-friendly messages via `shadcn/ui toast`.
+7. **Touch targets:** All interactive elements on mobile views are at least 44px.
+8. **Keyboard navigation:** All forms are navigable via Tab. All dialogs are closeable via Escape.
+
+---
+
+# PHASE 7: LAUNCH PREPARATION (Weeks 13-14)
+
+*Goal: Final integration testing, Stripe Connect, performance optimization, security hardening.*
+
+## TASK 7.1 — End-to-End Flow Verification
+
+Test every complete user journey:
+1. **Driver books a wash:** Search → select location → select vehicle → select service → see all-in price → book → receive confirmation → check in → wash completed → see photos → leave review.
+2. **Provider processes a booking:** Receive notification → confirm → check in vehicle → start wash → capture before photo → complete wash → capture after photo → send message "wash complete."
+3. **Provider enters off-platform booking:** Open bay timeline → click gap → fill quick-add form → booking appears on timeline → mark as complete.
+4. **Provider walks in a client:** Walk-in arrives → operator creates walk-in booking → optionally processes payment → booking tracked in reports.
+5. **Fleet admin manages fleet:** View overview → see wash health (red vehicles) → book wash for overdue vehicle → view reports → see provider comparison → purchase subscription → see fee savings.
+6. **Subscription lifecycle:** Fleet buys subscription → auto-scheduled washes appear → driver gets notification → wash completed → subscription fee ($20 cap) applied correctly.
+7. **Discount application:** Provider creates off-peak discount → driver books during off-peak → discount shown in booking summary → fee calculated on post-discount price.
+8. **Dispute with photos:** Driver disputes wash quality → platform admin sees before/after photos → resolves dispute.
+
+## TASK 7.2 — Stripe Connect Integration
+Per EID v1 Task 5.5. Additionally:
+- Subscription payments: recurring PaymentIntents with subscription fee cap
+- Walk-in payments: on-demand PaymentIntents when provider opts in
+- Discount adjustments: ensure Stripe amounts reflect post-discount prices
+
+## TASK 7.3 — Performance Optimization
+- Bay timeline with 50 bookings must render in under 2 seconds
+- Analytics queries with 30 days of data must return in under 1 second
+- Photo uploads must complete in under 5 seconds on 4G
+- Implement query caching for analytics endpoints (5-minute TTL)
+
+## TASK 7.4 — Security Hardening
+Per EID v1 Task 5.3. Additionally:
+- Messages visible only to authorized parties (sender, recipient, fleet admin, platform admin)
+- Off-platform client data visible only to the provider who created it
+- Photo access restricted to booking participants and platform admins
+- Audit log access restricted to provider admins (for their own provider) and platform admins
+
+## TASK 7.5 — Production Deployment Configuration
+Per EID v1 Task 5.4. Additionally:
+- File storage configuration for photos (local filesystem for beta, S3-ready architecture)
+- Cron job for subscription auto-scheduling
+
+---
+
+# NAVIGATION STRUCTURE
+
+## Provider Admin Navigation (web)
+```
+/provider
+  /provider/daily-board          ← Daily Wash Board (default landing)
+  /provider/bay-timeline         ← Bay Timeline View
+  /provider/shift-overview       ← Shift Dashboard
+  /provider/bookings             ← All bookings (list with filters)
+  /provider/clients              ← Client Profiles (CRM)
+  /provider/analytics            ← Reporting & Analytics
+  /provider/operator-performance ← Operator Performance
+  /provider/reviews              ← Reviews (existing)
+  /provider/audit-log            ← Audit Log
+  /provider/settings             ← Settings (tabbed: Business, Locations, Services, Discounts, Subscriptions, Team, Notifications, Display)
+  /provider/help                 ← Help & Feedback
+  /provider/onboarding           ← Onboarding (existing)
+```
+
+## Provider Operator Navigation (mobile-optimized)
+```
+/operator
+  /operator/my-schedule          ← Today's assigned washes
+  /operator/daily-board          ← Full daily board for their location
+  /operator/bay-timeline         ← Bay timeline (single-bay mobile view)
+  /operator/my-stats             ← Personal performance scorecard
+  /operator/settings             ← Personal notification/display preferences
+  /operator/help                 ← Help & Feedback
+```
+
+## Driver Navigation (mobile, existing enhanced)
+```
+/search                          ← Search + "Find a Wash Now" [enhanced]
+/search/:locationId              ← Location detail + booking flow [enhanced with photos, subscriptions]
+/my-bookings                     ← Booking list [enhanced with messages, photos]
+/my-bookings/:bookingId          ← Booking detail [enhanced with messages, photos, status tracking]
+/my-vehicles                     ← Assigned vehicles
+/route-planner                   ← Route planner (existing)
+```
+
+## Fleet Admin Navigation (desktop, existing enhanced)
+```
+/fleet
+  /fleet/overview                ← Dashboard [enhanced with wash health]
+  /fleet/vehicles                ← Vehicle management [enhanced with wash health indicators]
+  /fleet/wash-requests           ← Wash requests (existing)
+  /fleet/subscriptions           ← Subscription management [NEW]
+  /fleet/recurring-programs      ← Recurring programs (existing)
+  /fleet/reports                 ← Reports [enhanced with new report types]
+  /fleet/settings                ← Settings (existing)
+```
+
+## Admin Navigation (desktop, existing enhanced)
+```
+/admin
+  /admin/dashboard               ← Platform overview [enhanced]
+  /admin/providers               ← Provider management [enhanced with quality monitoring]
+  /admin/bookings                ← Booking management [enhanced with photos, messages]
+  /admin/reviews                 ← Review moderation (existing)
+```
+
+---
+
+# FILE CREATION SUMMARY
+
+New files to create (in approximate order of implementation):
+
+**Backend (artifacts/api-server/src/):**
+- `routes/clientProfiles.ts`
+- `routes/providerAnalytics.ts`
+- `routes/subscriptions.ts`
+- `routes/discounts.ts`
+- `routes/waitlist.ts`
+- `lib/discountCalculator.ts`
+- `lib/subscriptionScheduler.ts`
+- `lib/washHealthCalculator.ts`
+
+**Frontend (artifacts/washbuddy-web/src/pages/):**
+- `provider/daily-board.tsx`
+- `provider/bay-timeline.tsx`
+- `provider/shift-overview.tsx`
+- `provider/clients.tsx`
+- `provider/analytics.tsx`
+- `provider/operator-performance.tsx`
+- `provider/audit-log.tsx`
+- `operator/my-schedule.tsx`
+- `operator/daily-board.tsx`
+- `operator/bay-timeline.tsx`
+- `operator/my-stats.tsx`
+- `operator/settings.tsx`
+- `operator/help.tsx`
+- `fleet/subscriptions.tsx`
+
+**Frontend Components (artifacts/washbuddy-web/src/components/):**
+- `provider/booking-card.tsx`
+- `provider/bay-timeline-view.tsx`
+- `provider/client-summary-sidebar.tsx`
+- `provider/send-message.tsx`
+- `provider/photo-prompt.tsx`
+- `provider/quick-add-booking.tsx`
+- `provider/shift-metric-card.tsx`
+- `customer/booking-messages.tsx`
+- `customer/booking-photos.tsx`
+- `customer/find-wash-now.tsx`
+- `fleet/wash-health-indicator.tsx`
+- `fleet/subscription-card.tsx`
+- `settings/notification-preferences.tsx`
+
+---
+
+End of Engineering Implementation Document v2.0

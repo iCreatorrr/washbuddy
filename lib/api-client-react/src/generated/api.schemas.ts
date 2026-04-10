@@ -335,6 +335,22 @@ export interface Booking {
   scheduledStartAtUtc: string;
   scheduledEndAtUtc: string;
   createdAt?: string;
+  bookingSource?: string;
+  isOffPlatform?: boolean;
+  /** @nullable */
+  offPlatformClientName?: string | null;
+  /** @nullable */
+  offPlatformClientPhone?: string | null;
+  /** @nullable */
+  offPlatformClientEmail?: string | null;
+  offPlatformPaymentExternal?: boolean;
+  /** @nullable */
+  washBayId?: string | null;
+  /** @nullable */
+  assignedOperatorId?: string | null;
+  discountAmountMinor?: number;
+  /** @nullable */
+  discountDescription?: string | null;
   location?: BookingLocation;
   service?: BookingService;
   customer?: BookingCustomer;
@@ -545,6 +561,146 @@ export interface NotificationListResponse {
   hasMore: boolean;
   /** @nullable */
   nextCursor?: string | null;
+}
+
+export interface WashBay {
+  id: string;
+  locationId: string;
+  name: string;
+  maxVehicleLengthIn: number;
+  maxVehicleHeightIn: number;
+  supportedClasses: string[];
+  isActive: boolean;
+  displayOrder?: number;
+  /** @nullable */
+  outOfServiceSince?: string | null;
+  /** @nullable */
+  outOfServiceReason?: string | null;
+  /** @nullable */
+  outOfServiceEstReturn?: string | null;
+}
+
+export interface BookingPhoto {
+  id: string;
+  bookingId: string;
+  uploadedBy: string;
+  photoType: string;
+  fileAssetId: string;
+  /** @nullable */
+  caption?: string | null;
+  createdAt?: string;
+}
+
+export interface BookingMessage {
+  id: string;
+  bookingId: string;
+  senderId: string;
+  /** @nullable */
+  templateId?: string | null;
+  body: string;
+  createdAt?: string;
+}
+
+export interface ClientProfile {
+  id: string;
+  providerId: string;
+  /** @nullable */
+  userId?: string | null;
+  name: string;
+  /** @nullable */
+  phone?: string | null;
+  /** @nullable */
+  email?: string | null;
+  /** @nullable */
+  fleetName?: string | null;
+  tags?: string[];
+  /** @nullable */
+  notes?: string | null;
+  lifetimeSpendMinor: number;
+  currencyCode?: string;
+  visitCount: number;
+  /** @nullable */
+  lastVisitAt?: string | null;
+}
+
+export interface WashNote {
+  id: string;
+  /** @nullable */
+  bookingId?: string | null;
+  locationId: string;
+  authorId: string;
+  noteType: string;
+  content: string;
+  /** @nullable */
+  shiftDate?: string | null;
+  createdAt?: string;
+}
+
+export interface ProviderDiscount {
+  id: string;
+  providerId: string;
+  /** @nullable */
+  locationId?: string | null;
+  discountType: string;
+  name: string;
+  /** @nullable */
+  description?: string | null;
+  /** @nullable */
+  percentOff?: number | null;
+  /** @nullable */
+  flatAmountOff?: number | null;
+  /** @nullable */
+  peakStartTime?: string | null;
+  /** @nullable */
+  peakEndTime?: string | null;
+  peakDaysOfWeek?: number[];
+  /** @nullable */
+  volumeThreshold?: number | null;
+  /** @nullable */
+  volumePeriodDays?: number | null;
+  isActive: boolean;
+  isStackable: boolean;
+}
+
+export interface SubscriptionPackage {
+  id: string;
+  providerId: string;
+  locationId: string;
+  name: string;
+  /** @nullable */
+  description?: string | null;
+  includedServiceIds?: string[];
+  cadence: string;
+  /** @nullable */
+  cadenceIntervalDays?: number | null;
+  pricePerWashMinor: number;
+  currencyCode: string;
+  minWashes: number;
+  isActive: boolean;
+}
+
+export interface FleetSubscription {
+  id: string;
+  packageId: string;
+  fleetId: string;
+  vehicleId: string;
+  purchasedByUserId?: string;
+  status: string;
+  startDate: string;
+  /** @nullable */
+  nextWashDate?: string | null;
+  totalWashesCompleted: number;
+  /** @nullable */
+  cancelledAt?: string | null;
+}
+
+export interface NotificationPreference {
+  id: string;
+  userId: string;
+  eventType: string;
+  emailEnabled: boolean;
+  inAppEnabled: boolean;
+  smsEnabled: boolean;
 }
 
 export type ListProviders200 = {

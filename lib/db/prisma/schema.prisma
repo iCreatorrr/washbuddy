@@ -153,6 +153,14 @@ model User {
   washRequestsAsDriver WashRequest[]           @relation("wash_request_driver")
   washRequestRevisions WashRequestRevision[]   @relation("wash_request_revision_actor")
   washRequestMessages  WashRequestMessage[]    @relation("wash_request_message_author")
+  // V2 relations
+  bookingPhotos           BookingPhoto[]          @relation("photo_uploader")
+  bookingMessages         BookingMessage[]        @relation("message_sender")
+  washNotes               WashNote[]              @relation("note_author")
+  clientProfiles          ClientProfile[]         @relation("client_profiles")
+  notificationPreferences NotificationPreference[]
+  assignedBookings        Booking[]               @relation("booking_operator")
+  purchasedSubscriptions  FleetSubscription[]     @relation("subscription_purchaser")
 
   @@index([isActive])
   @@map("users")
@@ -180,6 +188,7 @@ model Fleet {
   washRequests      WashRequest[]
   recurringPrograms FleetRecurringProgram[]
   policyOverrides   FleetPolicyOverride[]
+  subscriptions     FleetSubscription[]
 
   @@map("fleets")
 }
@@ -467,6 +476,10 @@ model Provider {
   responseMetrics      ProviderResponseMetric[]
   washRequestsDesired  WashRequest[]            @relation("wash_request_desired_provider")
   washRequestsApproved WashRequest[]            @relation("wash_request_approved_provider")
+  // V2 relations
+  clientProfiles       ClientProfile[]
+  discounts            ProviderDiscount[]
+  subscriptionPackages SubscriptionPackage[]
 
   @@index([isActive])
   @@index([approvalStatus])
@@ -546,6 +559,11 @@ model Location {
   responseMetrics      ProviderResponseMetric[]
   washRequestsDesired  WashRequest[]            @relation("wash_request_desired_location")
   washRequestsApproved WashRequest[]            @relation("wash_request_approved_location")
+  // V2 relations
+  washBays             WashBay[]
+  washNotes            WashNote[]
+  discounts            ProviderDiscount[]
+  subscriptionPackages SubscriptionPackage[]
 
   @@index([providerId])
   @@index([isVisible])
@@ -597,6 +615,7 @@ model Vehicle {
   washRequests            WashRequest[]
   vehicleGroupMemberships FleetVehicleGroupMembership[]
   generatedTasks          FleetGeneratedTask[]
+  subscriptions           FleetSubscription[]
 
   @@index([fleetId])
   @@index([ownerUserId])
@@ -704,6 +723,18 @@ model Booking {
   cancellationReasonCode String?   @map("cancellation_reason_code")
   reminderSentAt         DateTime? @map("reminder_sent_at") @db.Timestamptz
 
+  // V2 fields
+  bookingSource              String    @default("PLATFORM") @map("booking_source")       // PLATFORM, DIRECT, WALK_IN
+  isOffPlatform              Boolean   @default(false) @map("is_off_platform")
+  offPlatformClientName      String?   @map("off_platform_client_name")
+  offPlatformClientPhone     String?   @map("off_platform_client_phone")
+  offPlatformClientEmail     String?   @map("off_platform_client_email")
+  offPlatformPaymentExternal Boolean   @default(false) @map("off_platform_payment_external")
+  washBayId                  String?   @map("wash_bay_id") @db.Uuid
+  assignedOperatorId         String?   @map("assigned_operator_id") @db.Uuid
+  discountAmountMinor        Int       @default(0) @map("discount_amount_minor")
+  discountDescription        String?   @map("discount_description")
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -719,12 +750,21 @@ model Booking {
   payoutItems    ProviderPayoutItem[]
   washRequest    WashRequest?            @relation("wash_request_booking")
   generatedTask  FleetGeneratedTask?     @relation("generated_task_booking")
+  // V2 relations
+  washBay          WashBay?         @relation("booking_bay", fields: [washBayId], references: [id])
+  assignedOperator User?            @relation("booking_operator", fields: [assignedOperatorId], references: [id])
+  photos           BookingPhoto[]
+  messages         BookingMessage[]
+  washNotes        WashNote[]
 
   @@index([locationId, scheduledStartAtUtc, scheduledEndAtUtc, status])
   @@index([customerId])
   @@index([status])
   @@index([vehicleId])
   @@index([status, providerResponseDeadlineUtc])
+  @@index([bookingSource])
+  @@index([washBayId])
+  @@index([assignedOperatorId])
   @@map("bookings")
 }
 
@@ -954,6 +994,7 @@ model FileAsset {
 
   uploadedBy      User?             @relation(fields: [uploadedByUserId], references: [id])
   disputeEvidence DisputeEvidence[]
+  bookingPhotos   BookingPhoto[]
 
   @@map("file_assets")
 }
@@ -974,6 +1015,217 @@ model AuditEvent {
 
   @@index([entityType, entityId, createdAt])
   @@map("audit_events")
+}
+
+// ─── DEMO DATA REGISTRY ────────────────────────────────────────────────────
+
+// ─── V2: WASH BAYS ─────────────────────────────────────────────────────────
+
+model WashBay {
+  id                    String    @id @default(uuid()) @db.Uuid
+  locationId            String    @map("location_id") @db.Uuid
+  name                  String
+  maxVehicleLengthIn    Int       @map("max_vehicle_length_in")
+  maxVehicleHeightIn    Int       @map("max_vehicle_height_in")
+  supportedClasses      String[]  @map("supported_classes")
+  isActive              Boolean   @default(true) @map("is_active")
+  displayOrder          Int       @default(0) @map("display_order")
+  outOfServiceSince     DateTime? @map("out_of_service_since") @db.Timestamptz
+  outOfServiceReason    String?   @map("out_of_service_reason")
+  outOfServiceEstReturn DateTime? @map("out_of_service_est_return") @db.Timestamptz
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  location Location  @relation(fields: [locationId], references: [id])
+  bookings Booking[] @relation("booking_bay")
+
+  @@index([locationId, isActive])
+  @@map("wash_bays")
+}
+
+// ─── V2: BOOKING PHOTOS ────────────────────────────────────────────────────
+
+model BookingPhoto {
+  id          String   @id @default(uuid()) @db.Uuid
+  bookingId   String   @map("booking_id") @db.Uuid
+  uploadedBy  String   @map("uploaded_by") @db.Uuid
+  photoType   String   @map("photo_type") // BEFORE, AFTER, PROBLEM_AREA, OTHER
+  fileAssetId String   @map("file_asset_id") @db.Uuid
+  caption     String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  booking   Booking   @relation(fields: [bookingId], references: [id])
+  uploader  User      @relation("photo_uploader", fields: [uploadedBy], references: [id])
+  fileAsset FileAsset @relation(fields: [fileAssetId], references: [id])
+
+  @@index([bookingId])
+  @@map("booking_photos")
+}
+
+// ─── V2: BOOKING MESSAGES ──────────────────────────────────────────────────
+
+model BookingMessage {
+  id         String   @id @default(uuid()) @db.Uuid
+  bookingId  String   @map("booking_id") @db.Uuid
+  senderId   String   @map("sender_id") @db.Uuid
+  templateId String?  @map("template_id") // WASH_COMPLETE, RUNNING_LATE, READY_FOR_PICKUP, NEED_TO_DISCUSS, RESCHEDULED
+  body       String
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+  sender  User    @relation("message_sender", fields: [senderId], references: [id])
+
+  @@index([bookingId, createdAt])
+  @@map("booking_messages")
+}
+
+// ─── V2: CLIENT PROFILES (CRM) ────────────────────────────────────────────
+
+model ClientProfile {
+  id                 String    @id @default(uuid()) @db.Uuid
+  providerId         String    @map("provider_id") @db.Uuid
+  userId             String?   @map("user_id") @db.Uuid
+  name               String
+  phone              String?
+  email              String?
+  fleetName          String?   @map("fleet_name")
+  tags               String[]  @default([])
+  notes              String?
+  lifetimeSpendMinor Int       @default(0) @map("lifetime_spend_minor")
+  currencyCode       String    @default("USD") @map("currency_code") @db.Char(3)
+  visitCount         Int       @default(0) @map("visit_count")
+  lastVisitAt        DateTime? @map("last_visit_at") @db.Timestamptz
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  provider Provider @relation(fields: [providerId], references: [id])
+  user     User?    @relation("client_profiles", fields: [userId], references: [id])
+
+  @@unique([providerId, userId])
+  @@index([providerId])
+  @@index([providerId, tags])
+  @@map("client_profiles")
+}
+
+// ─── V2: WASH NOTES ────────────────────────────────────────────────────────
+
+model WashNote {
+  id         String    @id @default(uuid()) @db.Uuid
+  bookingId  String?   @map("booking_id") @db.Uuid
+  locationId String    @map("location_id") @db.Uuid
+  authorId   String    @map("author_id") @db.Uuid
+  noteType   String    @map("note_type") // SHIFT, BOOKING_INSTRUCTION, OPERATOR_NOTE, SUPPLY_REQUEST, CLIENT_NOTE
+  content    String
+  shiftDate  DateTime? @map("shift_date") @db.Date
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  booking  Booking?  @relation(fields: [bookingId], references: [id])
+  location Location  @relation(fields: [locationId], references: [id])
+  author   User      @relation("note_author", fields: [authorId], references: [id])
+
+  @@index([bookingId])
+  @@index([locationId, shiftDate])
+  @@map("wash_notes")
+}
+
+// ─── V2: PROVIDER DISCOUNTS ────────────────────────────────────────────────
+
+model ProviderDiscount {
+  id              String   @id @default(uuid()) @db.Uuid
+  providerId      String   @map("provider_id") @db.Uuid
+  locationId      String?  @map("location_id") @db.Uuid
+  discountType    String   @map("discount_type") // OFF_PEAK, VOLUME, FIRST_TIME
+  name            String
+  description     String?
+  percentOff      Int?     @map("percent_off")
+  flatAmountOff   Int?     @map("flat_amount_off")
+  peakStartTime   String?  @map("peak_start_time")
+  peakEndTime     String?  @map("peak_end_time")
+  peakDaysOfWeek  Int[]    @default([]) @map("peak_days_of_week")
+  volumeThreshold Int?     @map("volume_threshold")
+  volumePeriodDays Int?    @map("volume_period_days")
+  isActive        Boolean  @default(true) @map("is_active")
+  isStackable     Boolean  @default(true) @map("is_stackable")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  provider Provider  @relation(fields: [providerId], references: [id])
+  location Location? @relation(fields: [locationId], references: [id])
+
+  @@index([providerId, isActive])
+  @@map("provider_discounts")
+}
+
+// ─── V2: SUBSCRIPTION PACKAGES ─────────────────────────────────────────────
+
+model SubscriptionPackage {
+  id                   String   @id @default(uuid()) @db.Uuid
+  providerId           String   @map("provider_id") @db.Uuid
+  locationId           String   @map("location_id") @db.Uuid
+  name                 String
+  description          String?
+  includedServiceIds   String[] @map("included_service_ids")
+  cadence              String   // WEEKLY, BIWEEKLY, MONTHLY, CUSTOM
+  cadenceIntervalDays  Int?     @map("cadence_interval_days")
+  pricePerWashMinor    Int      @map("price_per_wash_minor")
+  currencyCode         String   @map("currency_code") @db.Char(3)
+  minWashes            Int      @default(3) @map("min_washes")
+  isActive             Boolean  @default(true) @map("is_active")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  provider      Provider            @relation(fields: [providerId], references: [id])
+  location      Location            @relation(fields: [locationId], references: [id])
+  subscriptions FleetSubscription[]
+
+  @@index([providerId, isActive])
+  @@index([locationId, isActive])
+  @@map("subscription_packages")
+}
+
+// ─── V2: FLEET SUBSCRIPTIONS ───────────────────────────────────────────────
+
+model FleetSubscription {
+  id                   String    @id @default(uuid()) @db.Uuid
+  packageId            String    @map("package_id") @db.Uuid
+  fleetId              String    @map("fleet_id") @db.Uuid
+  vehicleId            String    @map("vehicle_id") @db.Uuid
+  purchasedByUserId    String    @map("purchased_by_user_id") @db.Uuid
+  status               String    @default("ACTIVE") // ACTIVE, PAUSED, CANCELLED
+  startDate            DateTime  @map("start_date") @db.Date
+  nextWashDate         DateTime? @map("next_wash_date") @db.Date
+  totalWashesCompleted Int       @default(0) @map("total_washes_completed")
+  cancelledAt          DateTime? @map("cancelled_at") @db.Timestamptz
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  package     SubscriptionPackage @relation(fields: [packageId], references: [id])
+  fleet       Fleet               @relation(fields: [fleetId], references: [id])
+  vehicle     Vehicle             @relation(fields: [vehicleId], references: [id])
+  purchasedBy User                @relation("subscription_purchaser", fields: [purchasedByUserId], references: [id])
+
+  @@index([fleetId, status])
+  @@index([packageId])
+  @@index([vehicleId])
+  @@map("fleet_subscriptions")
+}
+
+// ─── V2: NOTIFICATION PREFERENCES ──────────────────────────────────────────
+
+model NotificationPreference {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  eventType    String   @map("event_type") // NEW_BOOKING, CANCELLATION, REVIEW_RECEIVED, SLA_WARNING, BOOKING_REMINDER, WASH_COMPLETE, BOOKING_RESCHEDULED, MESSAGE_RECEIVED, WASH_HEALTH_ALERT, SUBSCRIPTION_RENEWAL
+  emailEnabled Boolean  @default(true) @map("email_enabled")
+  inAppEnabled Boolean  @default(true) @map("in_app_enabled")
+  smsEnabled   Boolean  @default(false) @map("sms_enabled")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, eventType])
+  @@map("notification_preferences")
 }
 
 // ─── DEMO DATA REGISTRY ────────────────────────────────────────────────────

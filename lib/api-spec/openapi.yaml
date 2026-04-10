@@ -1613,6 +1613,26 @@ components:
           type: string
         createdAt:
           type: string
+        bookingSource:
+          type: string
+        isOffPlatform:
+          type: boolean
+        offPlatformClientName:
+          type: ["string", "null"]
+        offPlatformClientPhone:
+          type: ["string", "null"]
+        offPlatformClientEmail:
+          type: ["string", "null"]
+        offPlatformPaymentExternal:
+          type: boolean
+        washBayId:
+          type: ["string", "null"]
+        assignedOperatorId:
+          type: ["string", "null"]
+        discountAmountMinor:
+          type: integer
+        discountDescription:
+          type: ["string", "null"]
         location:
           type: object
           properties:
@@ -1973,4 +1993,235 @@ components:
         nextCursor:
           type: ["string", "null"]
       required: [notifications, hasMore]
+
+    # ─── V2 Model Schemas ─────────────────────────────────────────
+
+    WashBay:
+      type: object
+      properties:
+        id:
+          type: string
+        locationId:
+          type: string
+        name:
+          type: string
+        maxVehicleLengthIn:
+          type: integer
+        maxVehicleHeightIn:
+          type: integer
+        supportedClasses:
+          type: array
+          items:
+            type: string
+        isActive:
+          type: boolean
+        displayOrder:
+          type: integer
+        outOfServiceSince:
+          type: ["string", "null"]
+        outOfServiceReason:
+          type: ["string", "null"]
+        outOfServiceEstReturn:
+          type: ["string", "null"]
+      required: [id, locationId, name, maxVehicleLengthIn, maxVehicleHeightIn, supportedClasses, isActive]
+
+    BookingPhoto:
+      type: object
+      properties:
+        id:
+          type: string
+        bookingId:
+          type: string
+        uploadedBy:
+          type: string
+        photoType:
+          type: string
+        fileAssetId:
+          type: string
+        caption:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required: [id, bookingId, uploadedBy, photoType, fileAssetId]
+
+    BookingMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        bookingId:
+          type: string
+        senderId:
+          type: string
+        templateId:
+          type: ["string", "null"]
+        body:
+          type: string
+        createdAt:
+          type: string
+      required: [id, bookingId, senderId, body]
+
+    ClientProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        providerId:
+          type: string
+        userId:
+          type: ["string", "null"]
+        name:
+          type: string
+        phone:
+          type: ["string", "null"]
+        email:
+          type: ["string", "null"]
+        fleetName:
+          type: ["string", "null"]
+        tags:
+          type: array
+          items:
+            type: string
+        notes:
+          type: ["string", "null"]
+        lifetimeSpendMinor:
+          type: integer
+        currencyCode:
+          type: string
+        visitCount:
+          type: integer
+        lastVisitAt:
+          type: ["string", "null"]
+      required: [id, providerId, name, lifetimeSpendMinor, visitCount]
+
+    WashNote:
+      type: object
+      properties:
+        id:
+          type: string
+        bookingId:
+          type: ["string", "null"]
+        locationId:
+          type: string
+        authorId:
+          type: string
+        noteType:
+          type: string
+        content:
+          type: string
+        shiftDate:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+      required: [id, locationId, authorId, noteType, content]
+
+    ProviderDiscount:
+      type: object
+      properties:
+        id:
+          type: string
+        providerId:
+          type: string
+        locationId:
+          type: ["string", "null"]
+        discountType:
+          type: string
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        percentOff:
+          type: ["integer", "null"]
+        flatAmountOff:
+          type: ["integer", "null"]
+        peakStartTime:
+          type: ["string", "null"]
+        peakEndTime:
+          type: ["string", "null"]
+        peakDaysOfWeek:
+          type: array
+          items:
+            type: integer
+        volumeThreshold:
+          type: ["integer", "null"]
+        volumePeriodDays:
+          type: ["integer", "null"]
+        isActive:
+          type: boolean
+        isStackable:
+          type: boolean
+      required: [id, providerId, discountType, name, isActive, isStackable]
+
+    SubscriptionPackage:
+      type: object
+      properties:
+        id:
+          type: string
+        providerId:
+          type: string
+        locationId:
+          type: string
+        name:
+          type: string
+        description:
+          type: ["string", "null"]
+        includedServiceIds:
+          type: array
+          items:
+            type: string
+        cadence:
+          type: string
+        cadenceIntervalDays:
+          type: ["integer", "null"]
+        pricePerWashMinor:
+          type: integer
+        currencyCode:
+          type: string
+        minWashes:
+          type: integer
+        isActive:
+          type: boolean
+      required: [id, providerId, locationId, name, cadence, pricePerWashMinor, currencyCode, minWashes, isActive]
+
+    FleetSubscription:
+      type: object
+      properties:
+        id:
+          type: string
+        packageId:
+          type: string
+        fleetId:
+          type: string
+        vehicleId:
+          type: string
+        purchasedByUserId:
+          type: string
+        status:
+          type: string
+        startDate:
+          type: string
+        nextWashDate:
+          type: ["string", "null"]
+        totalWashesCompleted:
+          type: integer
+        cancelledAt:
+          type: ["string", "null"]
+      required: [id, packageId, fleetId, vehicleId, status, startDate, totalWashesCompleted]
+
+    NotificationPreference:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        eventType:
+          type: string
+        emailEnabled:
+          type: boolean
+        inAppEnabled:
+          type: boolean
+        smsEnabled:
+          type: boolean
+      required: [id, userId, eventType, emailEnabled, inAppEnabled, smsEnabled]
 

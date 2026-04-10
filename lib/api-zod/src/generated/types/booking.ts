@@ -24,6 +24,22 @@ export interface Booking {
   scheduledStartAtUtc: string;
   scheduledEndAtUtc: string;
   createdAt?: string;
+  bookingSource?: string;
+  isOffPlatform?: boolean;
+  /** @nullable */
+  offPlatformClientName?: string | null;
+  /** @nullable */
+  offPlatformClientPhone?: string | null;
+  /** @nullable */
+  offPlatformClientEmail?: string | null;
+  offPlatformPaymentExternal?: boolean;
+  /** @nullable */
+  washBayId?: string | null;
+  /** @nullable */
+  assignedOperatorId?: string | null;
+  discountAmountMinor?: number;
+  /** @nullable */
+  discountDescription?: string | null;
   location?: BookingLocation;
   service?: BookingService;
   customer?: BookingCustomer;
