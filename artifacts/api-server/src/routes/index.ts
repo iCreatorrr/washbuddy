@@ -15,6 +15,7 @@ import adminRouter from "./admin";
 import providerBookingsRouter from "./providerBookings";
 import clientProfilesRouter from "./clientProfiles";
 import providerAnalyticsRouter from "./providerAnalytics";
+import subscriptionsRouter from "./subscriptions";
 
 const router: IRouter = Router();
 
@@ -34,5 +35,6 @@ router.use(fleetRouter);
 router.use(providerBookingsRouter);
 router.use(clientProfilesRouter);
 router.use(providerAnalyticsRouter);
+router.use(subscriptionsRouter);
 
 export default router;

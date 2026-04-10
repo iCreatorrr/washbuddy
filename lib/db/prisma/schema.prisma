@@ -734,6 +734,7 @@ model Booking {
   assignedOperatorId         String?   @map("assigned_operator_id") @db.Uuid
   discountAmountMinor        Int       @default(0) @map("discount_amount_minor")
   discountDescription        String?   @map("discount_description")
+  additionalServiceIds       String[]  @default([]) @map("additional_service_ids")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz

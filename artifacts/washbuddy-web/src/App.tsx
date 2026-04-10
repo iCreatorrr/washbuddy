@@ -36,6 +36,7 @@ const FleetProgramDetail = lazy(() => import("./pages/fleet/program-detail"));
 const FleetProgramForm = lazy(() => import("./pages/fleet/program-form"));
 const FleetSettings = lazy(() => import("./pages/fleet/settings"));
 const FleetReports = lazy(() => import("./pages/fleet/reports"));
+const FleetSubscriptions = lazy(() => import("./pages/fleet/subscriptions"));
 const FleetNewRequest = lazy(() => import("./pages/fleet/new-request"));
 const FleetRequestDetail = lazy(() => import("./pages/fleet/request-detail"));
 const BookingDetail = lazy(() => import("./pages/shared/booking-detail"));
@@ -201,6 +202,9 @@ function Router() {
       </Route>
       <Route path="/fleet/programs">
         <RouteGuard allowedRoles={["FLEET_ADMIN", "DISPATCHER", "MAINTENANCE_MANAGER", "READ_ONLY_ANALYST"]}><FleetRecurringPrograms /></RouteGuard>
+      </Route>
+      <Route path="/fleet/subscriptions">
+        <RouteGuard allowedRoles={["FLEET_ADMIN"]}><FleetSubscriptions /></RouteGuard>
       </Route>
       <Route path="/fleet/reports">
         <RouteGuard allowedRoles={["FLEET_ADMIN", "DISPATCHER", "MAINTENANCE_MANAGER", "READ_ONLY_ANALYST"]}><FleetReports /></RouteGuard>
