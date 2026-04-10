@@ -68,8 +68,9 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
 
   const selectedService = services.find((s) => s.id === serviceId);
   const basePrice = selectedService?.basePriceMinor || 0;
-  const fee = processPayment ? calcFee(basePrice) : 0;
-  const total = basePrice + fee;
+  // Off-platform/walk-in bookings NEVER incur platform fee
+  const fee = 0;
+  const total = basePrice;
 
   const handleSubmit = async () => {
     if (!clientName.trim() || !serviceId) { toast.error("Client name and service are required"); return; }
@@ -173,9 +174,10 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
           {/* Price display */}
           <div className="p-3 bg-slate-900 text-white rounded-xl">
             <div className="flex justify-between text-sm"><span>Service</span><span>{formatCurrency(basePrice)}</span></div>
-            {processPayment && <div className="flex justify-between text-sm text-slate-300"><span>Platform fee (15%)</span><span>{formatCurrency(fee)}</span></div>}
             <div className="flex justify-between font-bold mt-1 pt-1 border-t border-slate-700"><span>Total</span><span>{formatCurrency(total)}</span></div>
-            {!processPayment && <p className="text-xs text-slate-400 mt-1">Payment collected externally</p>}
+            {processPayment
+              ? <p className="text-xs text-slate-400 mt-1">Payment processed through WashBuddy. No platform fee for off-platform bookings.</p>
+              : <p className="text-xs text-slate-400 mt-1">Payment collected externally</p>}
           </div>
 
           <Button className="w-full h-12" onClick={handleSubmit} isLoading={saving}>Create Booking</Button>

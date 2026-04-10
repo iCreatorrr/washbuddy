@@ -37,7 +37,7 @@ function LocationServices({ providerId, locationId }: { providerId: string; loca
           {svc.description && <p className="text-sm text-slate-500 mb-3">{svc.description}</p>}
           <div className="flex items-center gap-4 text-sm text-slate-600">
             <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" /> {svc.durationMins} min</span>
-            <span className="flex items-center gap-1"><DollarSign className="h-3.5 w-3.5" /> {formatCurrency(svc.basePriceMinor)}</span>
+            <span className="text-sm font-medium">{formatCurrency(svc.basePriceMinor)}</span>
           </div>
         </div>
       ))}

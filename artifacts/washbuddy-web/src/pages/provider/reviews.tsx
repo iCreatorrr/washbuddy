@@ -42,12 +42,13 @@ export default function ProviderReviews() {
       </div>
 
       {needsReply > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-3">
+        <button onClick={() => { const el = document.querySelector("[data-needs-reply]"); el?.scrollIntoView({ behavior: "smooth" }); }}
+          className="w-full bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-3 cursor-pointer hover:bg-amber-100 transition-colors text-left">
           <Reply className="h-5 w-5 text-amber-600" />
           <p className="text-sm text-amber-800 font-medium">
-            You have <span className="font-bold">{needsReply}</span> review{needsReply !== 1 ? "s" : ""} awaiting a response.
+            You have <span className="font-bold">{needsReply}</span> review{needsReply !== 1 ? "s" : ""} awaiting a response. Click to view.
           </p>
-        </div>
+        </button>
       )}
 
       {isError ? (

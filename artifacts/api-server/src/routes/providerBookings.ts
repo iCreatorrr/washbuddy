@@ -269,8 +269,9 @@ router.post("/providers/:providerId/bookings/off-platform", requireAuth, require
       });
     }
 
-    const fee = processPayment ? calculatePlatformFee(service.basePriceMinor) : 0;
-    const total = processPayment ? service.basePriceMinor + fee : service.basePriceMinor;
+    // Off-platform/walk-in bookings NEVER incur platform fee (updated business rule)
+    const fee = 0;
+    const total = service.basePriceMinor;
 
     const booking = await prisma.booking.create({
       data: {

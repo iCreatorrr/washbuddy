@@ -569,8 +569,13 @@ async function main() {
     }
   }
 
-  // Shuffle the pool
-  locationPool.sort(() => Math.random() - 0.5);
+  // Reserve NYC-area locations for the demo provider (index 0 = CleanBus NYC / MetroClean)
+  const nycPool = locationPool.filter((l) => l.template.areaTag === "NYC");
+  const otherPool = locationPool.filter((l) => l.template.areaTag !== "NYC");
+  otherPool.sort(() => Math.random() - 0.5);
+  // Put NYC locations first so provider 0 gets them
+  locationPool.length = 0;
+  locationPool.push(...nycPool, ...otherPool);
 
   let locationIdx = 0;
   let totalLocations = 0;
