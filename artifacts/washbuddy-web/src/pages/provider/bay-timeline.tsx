@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Card, Badge, Button } from "@/components/ui";
-import { Calendar, ChevronLeft, ChevronRight, Clock, Plus, Wrench } from "lucide-react";
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, Plus, Wrench } from "lucide-react";
 import { useAuth } from "@/contexts/auth";
-import { format, addDays, subDays } from "date-fns";
+import { useLocation } from "wouter";
+import { format, addDays, subDays, parseISO } from "date-fns";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -33,6 +36,7 @@ const SOURCE_BORDER: Record<string, string> = { PLATFORM: "border-l-blue-500", D
 export default function BayTimeline() {
   const { user } = useAuth();
   const providerId = getProviderId(user);
+  const [, navigate] = useLocation();
 
   const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [selectedLocation, setSelectedLocation] = useState("");
@@ -117,9 +121,20 @@ export default function BayTimeline() {
       <Card className="p-4">
         <div className="flex flex-wrap gap-3 items-center">
           <div className="flex items-center gap-1">
-            <Button variant="outline" size="icon" onClick={() => setSelectedDate(format(subDays(new Date(selectedDate), 1), "yyyy-MM-dd"))}><ChevronLeft className="h-4 w-4" /></Button>
-            <Button variant="outline" className="gap-2 min-w-[160px]"><Calendar className="h-4 w-4" />{format(new Date(selectedDate + "T12:00:00"), "EEE, MMM d")}</Button>
-            <Button variant="outline" size="icon" onClick={() => setSelectedDate(format(addDays(new Date(selectedDate), 1), "yyyy-MM-dd"))}><ChevronRight className="h-4 w-4" /></Button>
+            <Button variant="outline" size="icon" onClick={() => setSelectedDate(format(subDays(parseISO(selectedDate), 1), "yyyy-MM-dd"))}><ChevronLeft className="h-4 w-4" /></Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="gap-2 min-w-[160px]"><CalendarIcon className="h-4 w-4" />{format(parseISO(selectedDate), "EEE, MMM d")}</Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={parseISO(selectedDate)}
+                  onSelect={(day: Date | undefined) => { if (day) setSelectedDate(format(day, "yyyy-MM-dd")); }}
+                />
+              </PopoverContent>
+            </Popover>
+            <Button variant="outline" size="icon" onClick={() => setSelectedDate(format(addDays(parseISO(selectedDate), 1), "yyyy-MM-dd"))}><ChevronRight className="h-4 w-4" /></Button>
           </div>
           <select value={selectedLocation} onChange={(e) => setSelectedLocation(e.target.value)}
             className="h-10 px-3 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
@@ -177,8 +192,10 @@ export default function BayTimeline() {
                     const color = getServiceColor(b.serviceNameSnapshot);
                     const srcBorder = SOURCE_BORDER[b.bookingSource] || SOURCE_BORDER.PLATFORM;
                     return (
-                      <div key={b.id} className={`absolute top-[10%] h-[80%] rounded border ${color} border-l-[3px] ${srcBorder} px-1 overflow-hidden cursor-pointer hover:shadow-md transition-shadow z-[5]`}
-                        style={{ left: pos.left, width: pos.width }} title={`${b.serviceNameSnapshot} - ${b.driverFirstName || b.offPlatformClientName || "Unknown"}`}>
+                      <div key={b.id} className={`absolute top-[10%] h-[80%] rounded border ${color} border-l-[3px] ${srcBorder} px-1 overflow-hidden cursor-pointer hover:shadow-md hover:z-20 transition-shadow z-[5]`}
+                        style={{ left: pos.left, width: pos.width }}
+                        title={`${b.serviceNameSnapshot} - ${b.driverFirstName || b.offPlatformClientName || "Unknown"}`}
+                        onClick={() => navigate(`/bookings/${b.id}`)}>
                         <p className="text-[10px] font-bold truncate">{b.vehicleUnitNumber || b.fleetPlaceholderClass || ""}</p>
                         <p className="text-[9px] truncate">{b.driverFirstName || b.offPlatformClientName || ""}</p>
                       </div>
