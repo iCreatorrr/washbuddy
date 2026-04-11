@@ -287,4 +287,39 @@ router.patch("/providers/:providerId/locations/:locationId/bays/:bayId", require
   } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to update bay" }); }
 });
 
+// ─── Add-Ons ────────────────────────────────────────────────────────────────
+
+router.get("/providers/:providerId/locations/:locationId/add-ons", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const addOns = await prisma.providerAddOn.findMany({
+      where: { locationId: req.params.locationId, providerId: req.params.providerId },
+      orderBy: [{ category: "asc" }, { displayOrder: "asc" }],
+    });
+    res.json({ addOns });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to load add-ons" }); }
+});
+
+router.post("/providers/:providerId/locations/:locationId/add-ons", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const addOn = await prisma.providerAddOn.create({
+      data: { providerId: req.params.providerId, locationId: req.params.locationId, ...req.body },
+    });
+    res.status(201).json({ addOn });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to create add-on" }); }
+});
+
+router.patch("/providers/:providerId/locations/:locationId/add-ons/:addOnId", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const updated = await prisma.providerAddOn.update({ where: { id: req.params.addOnId }, data: req.body });
+    res.json({ addOn: updated });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to update add-on" }); }
+});
+
+router.delete("/providers/:providerId/locations/:locationId/add-ons/:addOnId", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    await prisma.providerAddOn.update({ where: { id: req.params.addOnId }, data: { isActive: false } });
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to delete add-on" }); }
+});
+
 export default router;

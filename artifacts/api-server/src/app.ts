@@ -1,6 +1,7 @@
 import express, { type Express } from "express";
 import helmet from "helmet";
 import cors from "cors";
+import path from "path";
 import cookieParser from "cookie-parser";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
@@ -83,6 +84,9 @@ export async function createApp(): Promise<Express> {
   );
 
   app.use(authMiddleware);
+
+  // Serve uploaded photos
+  app.use("/api/uploads", express.static(path.join(process.cwd(), "uploads")));
 
   app.use("/api", router);
 

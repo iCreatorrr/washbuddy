@@ -16,6 +16,7 @@ import providerBookingsRouter from "./providerBookings";
 import clientProfilesRouter from "./clientProfiles";
 import providerAnalyticsRouter from "./providerAnalytics";
 import subscriptionsRouter from "./subscriptions";
+import bookingPhotosRouter from "./bookingPhotos";
 
 const router: IRouter = Router();
 
@@ -36,5 +37,6 @@ router.use(providerBookingsRouter);
 router.use(clientProfilesRouter);
 router.use(providerAnalyticsRouter);
 router.use(subscriptionsRouter);
+router.use(bookingPhotosRouter);
 
 export default router;
