@@ -569,13 +569,26 @@ async function main() {
     }
   }
 
-  // Reserve NYC-area locations for the demo provider (index 0 = CleanBus NYC / MetroClean)
+  // Reserve NYC-area locations for the demo provider (index 0 = MetroClean Bus Wash)
+  // Pick one address per UNIQUE city so provider 0 doesn't get 3x "— Bronx"
   const nycPool = locationPool.filter((l) => l.template.areaTag === "NYC");
   const otherPool = locationPool.filter((l) => l.template.areaTag !== "NYC");
   otherPool.sort(() => Math.random() - 0.5);
-  // Put NYC locations first so provider 0 gets them
+  // Deduplicate NYC pool: take first address per city to ensure distinct location names
+  const seenCities = new Set<string>();
+  const nycDeduped: typeof nycPool = [];
+  const nycRemainder: typeof nycPool = [];
+  for (const entry of nycPool) {
+    if (!seenCities.has(entry.template.city)) {
+      seenCities.add(entry.template.city);
+      nycDeduped.push(entry);
+    } else {
+      nycRemainder.push(entry);
+    }
+  }
+  // Put deduplicated NYC first (one per city), then remaining NYC, then other
   locationPool.length = 0;
-  locationPool.push(...nycPool, ...otherPool);
+  locationPool.push(...nycDeduped, ...nycRemainder, ...otherPool);
 
   let locationIdx = 0;
   let totalLocations = 0;

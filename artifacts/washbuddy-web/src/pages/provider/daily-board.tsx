@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { Card, Badge, Button } from "@/components/ui";
-import { Calendar, ChevronLeft, ChevronRight, Plus, Filter, LayoutList, Clock, CheckCircle2, Truck } from "lucide-react";
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Filter, LayoutList, Clock, CheckCircle2, Truck } from "lucide-react";
 import { motion } from "framer-motion";
 import { useAuth } from "@/contexts/auth";
 import { BookingCard } from "@/components/provider/booking-card";
 import { QuickAddBooking } from "@/components/provider/quick-add-booking";
-import { format, addDays, subDays } from "date-fns";
+import { format, addDays, subDays, parseISO } from "date-fns";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -130,14 +132,25 @@ export default function DailyBoard() {
       <Card className="p-4">
         <div className="flex flex-wrap gap-3 items-center">
           <div className="flex items-center gap-1">
-            <Button variant="outline" size="icon" onClick={() => setSelectedDate(format(subDays(new Date(selectedDate), 1), "yyyy-MM-dd"))}>
+            <Button variant="outline" size="icon" onClick={() => setSelectedDate(format(subDays(parseISO(selectedDate), 1), "yyyy-MM-dd"))}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <Button variant="outline" className="gap-2 min-w-[160px]">
-              <Calendar className="h-4 w-4" />
-              {format(new Date(selectedDate + "T12:00:00"), "EEE, MMM d, yyyy")}
-            </Button>
-            <Button variant="outline" size="icon" onClick={() => setSelectedDate(format(addDays(new Date(selectedDate), 1), "yyyy-MM-dd"))}>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="gap-2 min-w-[160px]">
+                  <CalendarIcon className="h-4 w-4" />
+                  {format(parseISO(selectedDate), "EEE, MMM d, yyyy")}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={parseISO(selectedDate)}
+                  onSelect={(day: Date | undefined) => { if (day) setSelectedDate(format(day, "yyyy-MM-dd")); }}
+                />
+              </PopoverContent>
+            </Popover>
+            <Button variant="outline" size="icon" onClick={() => setSelectedDate(format(addDays(parseISO(selectedDate), 1), "yyyy-MM-dd"))}>
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
