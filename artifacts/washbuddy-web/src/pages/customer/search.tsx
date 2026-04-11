@@ -338,6 +338,10 @@ export default function CustomerSearch() {
               Search
             </Button>
           </div>
+          <Button size="lg" className="w-full sm:w-auto mt-4 bg-orange-500 hover:bg-orange-600 text-white gap-2 h-12"
+            onClick={() => { setFilterOpenNow(true); setFilterTopRated(false); }}>
+            <Zap className="h-5 w-5" /> Find a Wash Now
+          </Button>
         </div>
       </div>
 

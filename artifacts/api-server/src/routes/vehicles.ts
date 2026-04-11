@@ -168,4 +168,34 @@ router.patch("/vehicles/:vehicleId", requireAuth, async (req, res) => {
   }
 });
 
+// Wash health computation
+function computeWashHealth(lastWashAt: Date | null, now: Date): "GREEN" | "YELLOW" | "RED" | "GRAY" {
+  if (!lastWashAt) return "GRAY";
+  const daysSince = Math.floor((now.getTime() - lastWashAt.getTime()) / 86400000);
+  const month = now.getMonth();
+  const isWinter = month >= 10 || month <= 2;
+  const threshold = isWinter ? 7 : 14;
+  if (daysSince >= threshold) return "RED";
+  if (daysSince >= threshold - 2) return "YELLOW";
+  return "GREEN";
+}
+
+router.get("/fleets/:fleetId/vehicles/wash-health-summary", requireAuth, async (req, res) => {
+  try {
+    const vehicles = await prisma.vehicle.findMany({
+      where: { fleetId: req.params.fleetId, isActive: true },
+      select: { lastWashAtUtc: true },
+    });
+    const now = new Date();
+    const summary = { green: 0, yellow: 0, red: 0, gray: 0 };
+    for (const v of vehicles) {
+      const health = computeWashHealth(v.lastWashAtUtc, now);
+      summary[health.toLowerCase() as keyof typeof summary]++;
+    }
+    res.json(summary);
+  } catch (err: any) {
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed" });
+  }
+});
+
 export default router;
