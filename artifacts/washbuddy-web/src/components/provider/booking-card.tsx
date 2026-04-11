@@ -3,6 +3,7 @@ import { Card, Badge, Button } from "@/components/ui";
 import { Bus, Star, AlertTriangle, Sparkles, ChevronDown, MessageSquare, Camera, StickyNote } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { toast } from "sonner";
+import { PhotoPrompt } from "./photo-prompt";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -51,6 +52,7 @@ function ElapsedTimer({ startedAt, durationMins }: { startedAt: string; duration
 export function BookingCard({ booking, onStatusChange }: { booking: any; onStatusChange: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [showPhotoPrompt, setShowPhotoPrompt] = useState<"BEFORE" | "AFTER" | null>(null);
 
   const b = booking;
   const vc = VEHICLE_CLASS_MAP[b.vehicle?.subtypeCode || b.fleetPlaceholderClass || "STANDARD"] || VEHICLE_CLASS_MAP.STANDARD;
@@ -114,15 +116,25 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
             {b.messageCount > 0 && <span className="flex items-center gap-1"><MessageSquare className="h-3 w-3" />{b.messageCount} messages</span>}
           </div>
 
+          {showPhotoPrompt && (
+            <PhotoPrompt bookingId={b.id} photoType={showPhotoPrompt}
+              onComplete={async () => {
+                const wasType = showPhotoPrompt;
+                setShowPhotoPrompt(null);
+                if (wasType === "BEFORE") await handleTransition("IN_SERVICE");
+                else onStatusChange(); // AFTER — status already changed
+              }} />
+          )}
+
           <div className="flex flex-wrap gap-2 pt-2">
             {b.status === "PROVIDER_CONFIRMED" && (
               <Button size="sm" onClick={() => handleTransition("CHECKED_IN")} isLoading={actionLoading} className="bg-blue-600 hover:bg-blue-700 text-white">Check In</Button>
             )}
             {b.status === "CHECKED_IN" && (
-              <Button size="sm" onClick={() => handleTransition("IN_SERVICE")} isLoading={actionLoading} className="bg-green-600 hover:bg-green-700 text-white">Start Wash</Button>
+              <Button size="sm" onClick={() => setShowPhotoPrompt("BEFORE")} isLoading={actionLoading} className="bg-green-600 hover:bg-green-700 text-white">Start Wash</Button>
             )}
             {b.status === "IN_SERVICE" && (
-              <Button size="sm" onClick={() => handleTransition("COMPLETED_PENDING_WINDOW")} isLoading={actionLoading} className="bg-emerald-700 hover:bg-emerald-800 text-white">Complete Wash</Button>
+              <Button size="sm" onClick={async () => { await handleTransition("COMPLETED_PENDING_WINDOW"); setShowPhotoPrompt("AFTER"); }} isLoading={actionLoading} className="bg-emerald-700 hover:bg-emerald-800 text-white">Complete Wash</Button>
             )}
             {!b.isOffPlatform && (
               <Button size="sm" variant="outline" className="gap-1"><MessageSquare className="h-3.5 w-3.5" />Message Driver</Button>
