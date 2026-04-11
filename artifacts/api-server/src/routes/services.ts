@@ -118,10 +118,23 @@ router.patch("/providers/:providerId/locations/:locationId/services/:serviceId",
     const service = await prisma.service.update({
       where: { id: req.params.serviceId },
       data,
-      include: { compatibilityRules: true },
+      include: { compatibilityRules: true, pricing: true },
     });
 
-    res.json({ service });
+    // Upsert ServicePricing records if provided
+    const { pricing } = req.body;
+    if (Array.isArray(pricing)) {
+      for (const p of pricing) {
+        await prisma.servicePricing.upsert({
+          where: { serviceId_vehicleClass: { serviceId: service.id, vehicleClass: p.vehicleClass } },
+          create: { serviceId: service.id, vehicleClass: p.vehicleClass, priceMinor: p.priceMinor, durationMins: p.durationMins, isAvailable: p.isAvailable ?? true },
+          update: { priceMinor: p.priceMinor, durationMins: p.durationMins, isAvailable: p.isAvailable ?? true },
+        });
+      }
+    }
+
+    const updated = await prisma.service.findUnique({ where: { id: service.id }, include: { compatibilityRules: true, pricing: true } });
+    res.json({ service: updated });
   } catch (err) {
     req.log.error({ err }, "Failed to update service");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to update service" });

@@ -26,7 +26,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         { label: "Reviews", icon: Shield, href: "/admin/reviews" },
       ];
     }
-    if (hasRole("PROVIDER_ADMIN") || hasRole("PROVIDER_STAFF")) {
+    if (hasRole("PROVIDER_STAFF") && !hasRole("PROVIDER_ADMIN")) {
+      // Operator-only navigation (simplified)
+      return [
+        { label: "Daily Board", icon: Calendar, href: "/provider/daily-board" },
+        { label: "Bay Timeline", icon: LayoutDashboard, href: "/provider/bay-timeline" },
+        { label: "My Stats", icon: Star, href: "/operator/my-stats" },
+        { label: "Help", icon: Settings, href: "/operator/help" },
+      ];
+    }
+    if (hasRole("PROVIDER_ADMIN")) {
       return [
         { label: "Daily Board", icon: Calendar, href: "/provider/daily-board" },
         { label: "Bay Timeline", icon: LayoutDashboard, href: "/provider/bay-timeline" },

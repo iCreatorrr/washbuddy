@@ -315,6 +315,54 @@ router.patch("/providers/:providerId/locations/:locationId/add-ons/:addOnId", re
   } catch (err: any) { res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to update add-on" }); }
 });
 
+router.post("/providers/:providerId/locations/:locationId/add-ons/init-from-template", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const { providerId, locationId } = req.params;
+    const loc = await prisma.location.findUnique({ where: { id: locationId }, select: { countryCode: true } });
+    const currency = loc?.countryCode === "CA" ? "CAD" : "USD";
+
+    const template = [
+      { category: "RESTROOM_SUPPLIES", name: "Toilet Paper", iconName: "ScrollText", priceMinor: 350, quantityMode: "COUNTABLE" },
+      { category: "RESTROOM_SUPPLIES", name: "Paper Towels", iconName: "Newspaper", priceMinor: 300, quantityMode: "COUNTABLE" },
+      { category: "RESTROOM_SUPPLIES", name: "Hand Soap Refill", iconName: "Droplets", priceMinor: 400, quantityMode: "FLAT" },
+      { category: "RESTROOM_SUPPLIES", name: "Hand Sanitizer", iconName: "Sparkles", priceMinor: 350, quantityMode: "FLAT" },
+      { category: "RESTROOM_SUPPLIES", name: "Air Freshener", iconName: "Wind", priceMinor: 500, quantityMode: "FLAT" },
+      { category: "RESTROOM_SUPPLIES", name: "Trash Bags", iconName: "Trash2", priceMinor: 200, quantityMode: "COUNTABLE" },
+      { category: "RESTROOM_SUPPLIES", name: "Disinfectant Wipes", iconName: "Eraser", priceMinor: 450, quantityMode: "COUNTABLE" },
+      { category: "DRIVER_AMENITIES", name: "Coffee", iconName: "Coffee", priceMinor: 300, quantityMode: "COUNTABLE" },
+      { category: "DRIVER_AMENITIES", name: "Bottled Water", iconName: "GlassWater", priceMinor: 250, quantityMode: "COUNTABLE" },
+      { category: "DRIVER_AMENITIES", name: "Snack Pack", iconName: "Cookie", priceMinor: 400, quantityMode: "COUNTABLE" },
+      { category: "DRIVER_AMENITIES", name: "Hot Meal", iconName: "UtensilsCrossed", priceMinor: 1200, quantityMode: "COUNTABLE" },
+      { category: "DRIVER_AMENITIES", name: "Driver Lounge Access", iconName: "Sofa", priceMinor: 1000, quantityMode: "FLAT" },
+      { category: "DRIVER_AMENITIES", name: "Shower Access", iconName: "ShowerHead", priceMinor: 1500, quantityMode: "FLAT" },
+      { category: "VEHICLE_SUPPLIES", name: "Windshield Washer Fluid", iconName: "Droplet", priceMinor: 800, quantityMode: "FLAT" },
+      { category: "VEHICLE_SUPPLIES", name: "DEF Top-Up", iconName: "Fuel", priceMinor: 1200, quantityMode: "FLAT" },
+      { category: "VEHICLE_SUPPLIES", name: "Tire Pressure Check", iconName: "Gauge", priceMinor: 500, quantityMode: "FLAT" },
+      { category: "VEHICLE_SUPPLIES", name: "Coolant Top-Up", iconName: "Thermometer", priceMinor: 1500, quantityMode: "FLAT" },
+      { category: "SPECIALTY_TREATMENTS", name: "Protective Wax Coating", iconName: "Shield", priceMinor: 3500, quantityMode: "FLAT" },
+      { category: "SPECIALTY_TREATMENTS", name: "Anti-Salt Undercoating", iconName: "Snowflake", priceMinor: 4500, quantityMode: "FLAT" },
+      { category: "SPECIALTY_TREATMENTS", name: "Odor Elimination", iconName: "Leaf", priceMinor: 2500, quantityMode: "FLAT" },
+      { category: "SPECIALTY_TREATMENTS", name: "Window Rain Repellent", iconName: "CloudRain", priceMinor: 2000, quantityMode: "FLAT" },
+      { category: "SPECIALTY_TREATMENTS", name: "Fabric Stain Treatment", iconName: "Paintbrush", priceMinor: 3000, quantityMode: "FLAT" },
+    ];
+
+    let created = 0;
+    for (let i = 0; i < template.length; i++) {
+      const t = template[i];
+      const exists = await prisma.providerAddOn.findFirst({ where: { locationId, name: t.name } });
+      if (!exists) {
+        await prisma.providerAddOn.create({
+          data: { providerId, locationId, ...t, currencyCode: currency, isActive: false, isFromTemplate: true, displayOrder: i },
+        });
+        created++;
+      }
+    }
+    res.json({ created, total: template.length });
+  } catch (err: any) {
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to initialize template" });
+  }
+});
+
 router.delete("/providers/:providerId/locations/:locationId/add-ons/:addOnId", requireAuth, requireProviderAccess(), async (req, res) => {
   try {
     await prisma.providerAddOn.update({ where: { id: req.params.addOnId }, data: { isActive: false } });

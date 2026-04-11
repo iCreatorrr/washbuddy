@@ -104,4 +104,46 @@ router.post("/notifications/read-all", requireAuth, async (req, res) => {
   }
 });
 
+// ─── Notification Preferences ───────────────────────────────────────────────
+
+const DEFAULT_EVENT_TYPES = [
+  "NEW_BOOKING", "CANCELLATION", "REVIEW_RECEIVED", "SLA_WARNING", "BOOKING_REMINDER",
+  "WASH_COMPLETE", "BOOKING_RESCHEDULED", "MESSAGE_RECEIVED", "WASH_HEALTH_ALERT", "SUBSCRIPTION_RENEWAL",
+];
+
+router.get("/users/me/notification-preferences", requireAuth, async (req, res) => {
+  try {
+    const user = req.user as SessionUser;
+    const prefs = await prisma.notificationPreference.findMany({ where: { userId: user.id } });
+    const prefMap = new Map(prefs.map((p) => [p.eventType, p]));
+
+    const result = DEFAULT_EVENT_TYPES.map((et) => {
+      const p = prefMap.get(et);
+      return { eventType: et, emailEnabled: p?.emailEnabled ?? true, inAppEnabled: p?.inAppEnabled ?? true, smsEnabled: p?.smsEnabled ?? false };
+    });
+    res.json({ preferences: result });
+  } catch (err: any) {
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to load preferences" });
+  }
+});
+
+router.put("/users/me/notification-preferences", requireAuth, async (req, res) => {
+  try {
+    const user = req.user as SessionUser;
+    const { preferences } = req.body;
+    if (!Array.isArray(preferences)) { res.status(400).json({ errorCode: "VALIDATION_ERROR" }); return; }
+
+    for (const p of preferences) {
+      await prisma.notificationPreference.upsert({
+        where: { userId_eventType: { userId: user.id, eventType: p.eventType } },
+        create: { userId: user.id, eventType: p.eventType, emailEnabled: p.emailEnabled, inAppEnabled: p.inAppEnabled, smsEnabled: p.smsEnabled ?? false },
+        update: { emailEnabled: p.emailEnabled, inAppEnabled: p.inAppEnabled, smsEnabled: p.smsEnabled ?? false },
+      });
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to save preferences" });
+  }
+});
+
 export default router;

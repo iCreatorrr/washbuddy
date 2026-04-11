@@ -24,6 +24,8 @@ const ProviderAnalytics = lazy(() => import("./pages/provider/analytics"));
 const OperatorPerformance = lazy(() => import("./pages/provider/operator-performance"));
 const ShiftOverview = lazy(() => import("./pages/provider/shift-overview"));
 const AuditLog = lazy(() => import("./pages/provider/audit-log"));
+const OperatorMyStats = lazy(() => import("./pages/operator/my-stats"));
+const OperatorHelp = lazy(() => import("./pages/operator/help"));
 const AdminDashboard = lazy(() => import("./pages/admin/dashboard"));
 const AdminBookings = lazy(() => import("./pages/admin/bookings"));
 const AdminProviders = lazy(() => import("./pages/admin/providers"));
@@ -156,6 +158,12 @@ function Router() {
       </Route>
       <Route path="/provider/audit-log">
         <RouteGuard allowedRoles={["PROVIDER_ADMIN"]}><AuditLog /></RouteGuard>
+      </Route>
+      <Route path="/operator/my-stats">
+        <RouteGuard allowedRoles={["PROVIDER_STAFF"]}><OperatorMyStats /></RouteGuard>
+      </Route>
+      <Route path="/operator/help">
+        <RouteGuard allowedRoles={["PROVIDER_STAFF"]}><OperatorHelp /></RouteGuard>
       </Route>
       <Route path="/provider">
         <RouteGuard allowedRoles={["PROVIDER_ADMIN", "PROVIDER_STAFF"]}><DailyBoard /></RouteGuard>
