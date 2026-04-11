@@ -10,6 +10,7 @@ router.get("/providers/:providerId/locations/:locationId/services", requireAuth,
       where: { locationId: req.params.locationId, location: { providerId: req.params.providerId } },
       include: {
         compatibilityRules: true,
+        pricing: true,
       },
       orderBy: { name: "asc" },
     });

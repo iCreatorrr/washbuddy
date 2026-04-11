@@ -204,7 +204,8 @@ router.get("/providers/:providerId/locations", requireAuth, requireProviderAcces
     const locations = await prisma.location.findMany({
       where: { providerId: req.params.providerId },
       include: {
-        _count: { select: { services: true, operatingWindows: true, bookings: true } },
+        _count: { select: { services: true, washBays: true } },
+        operatingWindows: { orderBy: [{ dayOfWeek: "asc" }, { openTime: "asc" }] },
       },
       orderBy: { name: "asc" },
     });

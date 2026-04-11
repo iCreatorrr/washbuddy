@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Card, Badge, Button } from "@/components/ui";
+import { Card, Badge, Button, Label } from "@/components/ui";
 import { Repeat, Package, Truck, Calendar, DollarSign, X } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/auth";
 import { formatCurrency } from "@/lib/utils";
 import { toast } from "sonner";
@@ -16,16 +17,22 @@ export default function FleetSubscriptions() {
   const fleetId = getFleetId(user);
   const [subs, setSubs] = useState<any[]>([]);
   const [packages, setPackages] = useState<any[]>([]);
+  const [vehicles, setVehicles] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [subscribePkg, setSubscribePkg] = useState<any>(null);
+  const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([]);
+  const [subscribing, setSubscribing] = useState(false);
 
   useEffect(() => {
     if (!fleetId) return;
     Promise.all([
       fetch(`${API_BASE}/api/fleets/${fleetId}/subscriptions`, { credentials: "include" }).then((r) => r.json()),
       fetch(`${API_BASE}/api/fleets/${fleetId}/available-subscriptions`, { credentials: "include" }).then((r) => r.json()),
-    ]).then(([subData, pkgData]) => {
+      fetch(`${API_BASE}/api/fleets/${fleetId}/vehicles`, { credentials: "include" }).then((r) => r.json()),
+    ]).then(([subData, pkgData, vehData]) => {
       setSubs(subData.subscriptions || []);
       setPackages(pkgData.packages || []);
+      setVehicles(vehData.vehicles || []);
     }).catch(() => {}).finally(() => setIsLoading(false));
   }, [fleetId]);
 
@@ -36,6 +43,40 @@ export default function FleetSubscriptions() {
       toast.success("Subscription cancelled");
       setSubs((prev) => prev.map((s) => s.id === subId ? { ...s, status: "CANCELLED" } : s));
     } catch { toast.error("Failed to cancel"); }
+  };
+
+  const handleSubscribe = async () => {
+    if (selectedVehicleIds.length === 0) { toast.error("Select at least one vehicle"); return; }
+    setSubscribing(true);
+    try {
+      // Create a subscription for each selected vehicle
+      for (const vehicleId of selectedVehicleIds) {
+        const r = await fetch(`${API_BASE}/api/fleets/${fleetId}/subscriptions`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            packageId: subscribePkg.id,
+            vehicleId,
+            startDate: new Date().toISOString(),
+          }),
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          toast.error(err.message || `Failed to subscribe vehicle`);
+        }
+      }
+      toast.success(`Subscribed ${selectedVehicleIds.length} vehicle${selectedVehicleIds.length > 1 ? "s" : ""}`);
+      setSubscribePkg(null);
+      setSelectedVehicleIds([]);
+      // Refresh
+      const subData = await fetch(`${API_BASE}/api/fleets/${fleetId}/subscriptions`, { credentials: "include" }).then((r) => r.json());
+      setSubs(subData.subscriptions || []);
+    } catch {
+      toast.error("Failed to subscribe");
+    } finally {
+      setSubscribing(false);
+    }
   };
 
   const activeSubs = subs.filter((s) => s.status === "ACTIVE");
@@ -99,12 +140,58 @@ export default function FleetSubscriptions() {
                   <p>Price: {formatCurrency(p.pricePerWashMinor, p.currencyCode)} per wash</p>
                   <p>Min commitment: {p.minWashes} washes</p>
                 </div>
-                <Button size="sm" className="w-full">Subscribe</Button>
+                <Button size="sm" className="w-full" onClick={() => { setSubscribePkg(p); setSelectedVehicleIds([]); }}>Subscribe</Button>
               </Card>
             ))}
           </div>
         )}
       </div>
+
+      {/* Subscribe Dialog */}
+      <Dialog open={!!subscribePkg} onOpenChange={(o) => !o && setSubscribePkg(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Subscribe to {subscribePkg?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              {subscribePkg?.provider?.name} — {formatCurrency(subscribePkg?.pricePerWashMinor || 0)} per wash, {subscribePkg?.cadence?.toLowerCase()}
+            </p>
+            <div>
+              <Label>Select Vehicles</Label>
+              <div className="space-y-1.5 mt-1 max-h-48 overflow-y-auto border border-slate-200 rounded-xl p-2">
+                {vehicles.length === 0 ? (
+                  <p className="text-sm text-slate-400 py-2 text-center">No vehicles available</p>
+                ) : vehicles.map((v: any) => (
+                  <label key={v.id} className="flex items-center gap-2 cursor-pointer text-sm py-1.5 px-2 rounded-lg hover:bg-slate-50">
+                    <input
+                      type="checkbox"
+                      checked={selectedVehicleIds.includes(v.id)}
+                      onChange={(e) =>
+                        setSelectedVehicleIds((prev) =>
+                          e.target.checked ? [...prev, v.id] : prev.filter((id) => id !== v.id)
+                        )
+                      }
+                    />
+                    <Truck className="h-4 w-4 text-slate-400" />
+                    <span className="font-medium">{v.unitNumber}</span>
+                    <span className="text-slate-400">{v.subtypeCode?.replace(/_/g, " ")}</span>
+                  </label>
+                ))}
+              </div>
+              {selectedVehicleIds.length > 0 && (
+                <p className="text-xs text-slate-500 mt-1">{selectedVehicleIds.length} vehicle{selectedVehicleIds.length > 1 ? "s" : ""} selected</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSubscribePkg(null)}>Cancel</Button>
+            <Button onClick={handleSubscribe} disabled={subscribing || selectedVehicleIds.length === 0}>
+              {subscribing ? "Subscribing..." : `Subscribe ${selectedVehicleIds.length} Vehicle${selectedVehicleIds.length !== 1 ? "s" : ""}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -2065,4 +2065,107 @@ router.get("/fleet/reports/spending-summary", requireAuth, requireFleetMember, r
   }
 });
 
+// ─── Enhanced Fleet Analytics (Phase 7) ────────────────────────────────────
+
+router.get("/fleet/reports/provider-comparison", requireAuth, requireFleetMember, requireFleetNonDriver, async (req, res) => {
+  try {
+    const fleetId = (req as any).fleetId;
+    if (!fleetId) { res.status(403).json({ errorCode: "FORBIDDEN", message: "No fleet" }); return; }
+
+    const completedStatuses = ["COMPLETED", "COMPLETED_PENDING_WINDOW", "SETTLED"];
+
+    const bookings = await prisma.booking.findMany({
+      where: { vehicle: { fleetId }, status: { in: completedStatuses as any } },
+      select: {
+        totalPriceMinor: true,
+        status: true,
+        location: { select: { name: true, providerId: true, provider: { select: { name: true } } } },
+      },
+    });
+
+    // Group by provider
+    const providerMap = new Map<string, { providerName: string; totalBookings: number; totalSpendMinor: number }>();
+    for (const b of bookings) {
+      const provId = b.location?.providerId || "unknown";
+      const existing = providerMap.get(provId) || { providerName: b.location?.provider?.name || "Unknown", totalBookings: 0, totalSpendMinor: 0 };
+      existing.totalBookings += 1;
+      existing.totalSpendMinor += b.totalPriceMinor;
+      providerMap.set(provId, existing);
+    }
+
+    // Get average ratings per provider from reviews
+    const providerIds = Array.from(providerMap.keys());
+    const reviews = await prisma.review.findMany({
+      where: { booking: { vehicle: { fleetId } }, location: { providerId: { in: providerIds } } },
+      select: { rating: true, location: { select: { providerId: true } } },
+    });
+
+    const ratingMap = new Map<string, { sum: number; count: number }>();
+    for (const r of reviews) {
+      const provId = r.location?.providerId || "";
+      const existing = ratingMap.get(provId) || { sum: 0, count: 0 };
+      existing.sum += r.rating;
+      existing.count += 1;
+      ratingMap.set(provId, existing);
+    }
+
+    const providers = Array.from(providerMap.entries()).map(([provId, data]) => {
+      const ratings = ratingMap.get(provId);
+      return {
+        providerName: data.providerName,
+        totalBookings: data.totalBookings,
+        avgCostMinor: data.totalBookings > 0 ? Math.round(data.totalSpendMinor / data.totalBookings) : 0,
+        avgRating: ratings && ratings.count > 0 ? Number((ratings.sum / ratings.count).toFixed(1)) : null,
+      };
+    }).sort((a, b) => b.totalBookings - a.totalBookings);
+
+    res.json({ providers });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to get provider comparison");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to load report" });
+  }
+});
+
+router.get("/fleet/reports/subscription-savings", requireAuth, requireFleetMember, requireFleetNonDriver, async (req, res) => {
+  try {
+    const fleetId = (req as any).fleetId;
+    if (!fleetId) { res.status(403).json({ errorCode: "FORBIDDEN", message: "No fleet" }); return; }
+
+    const subscriptions = await prisma.fleetSubscription.findMany({
+      where: { fleetId, status: "ACTIVE" },
+      select: { id: true, package: { select: { pricePerWashMinor: true } } },
+    });
+
+    if (subscriptions.length === 0) {
+      res.json({ hasSubscriptions: false, totalSavedMinor: 0, subBookingCount: 0 });
+      return;
+    }
+
+    // Count completed bookings linked to subscribed services
+    // Subscription cap is $20 vs standard $25 — savings = $5 per booking
+    const SUBSCRIPTION_CAP = 2000;
+    const STANDARD_CAP = 2500;
+    const savingsPerBooking = STANDARD_CAP - SUBSCRIPTION_CAP;
+
+    const subIds = subscriptions.map((s) => s.id);
+    const bookingCount = await prisma.booking.count({
+      where: {
+        vehicle: { fleetId },
+        status: { in: ["COMPLETED", "COMPLETED_PENDING_WINDOW", "SETTLED"] as any },
+        subscriptionId: { in: subIds },
+      },
+    });
+
+    res.json({
+      hasSubscriptions: true,
+      totalSavedMinor: bookingCount * savingsPerBooking,
+      subBookingCount: bookingCount,
+      activeSubscriptions: subscriptions.length,
+    });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to get subscription savings");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to load report" });
+  }
+});
+
 export default router;

@@ -1,9 +1,10 @@
 import React, { useState } from "react";
 import { Card, Badge, Button } from "@/components/ui";
-import { BarChart3, AlertTriangle, CheckCircle2, Clock, TrendingUp, Layers, Activity, Droplets, Truck, DollarSign, Calendar } from "lucide-react";
+import { BarChart3, AlertTriangle, CheckCircle2, Clock, TrendingUp, Layers, Activity, Droplets, Truck, DollarSign, Calendar, ArrowUpDown, Star } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn, formatCurrency, formatDate, getStatusColor, getStatusLabel } from "@/lib/utils";
 import { formatLocationDisplay } from "@/lib/format-location";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -498,68 +499,114 @@ function VehicleComplianceTab() {
 
 function SpendingTab() {
   const { data, isLoading, error } = useFetchParams<any>("/api/fleet/reports/spending-summary", {});
+  const { data: compData } = useFetch<any>("/api/fleet/reports/provider-comparison");
+  const { data: savingsData } = useFetch<any>("/api/fleet/reports/subscription-savings");
+  const [sortField, setSortField] = useState<string>("totalBookings");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   if (isLoading) return <LoadingSpinner />;
   if (error) return <ErrorState message={error} />;
 
-  const byProvider = data?.byProvider || [];
   const byVehicle = data?.byVehicle || [];
   const byMonth = data?.byMonth || [];
-  const maxProviderSpend = byProvider[0]?.totalSpendMinor || 1;
-  const maxVehicleSpend = byVehicle[0]?.totalSpendMinor || 1;
   const maxMonthSpend = Math.max(...byMonth.map((m: any) => m.totalSpendMinor), 1);
+
+  const providers = compData?.providers || [];
+  const sortedProviders = [...providers].sort((a: any, b: any) => {
+    const aVal = a[sortField] ?? 0;
+    const bVal = b[sortField] ?? 0;
+    return sortDir === "desc" ? bVal - aVal : aVal - bVal;
+  });
+
+  const handleSort = (field: string) => {
+    if (sortField === field) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    else { setSortField(field); setSortDir("desc"); }
+  };
 
   return (
     <div className="space-y-8">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* By Provider */}
-        <motion.div {...fadeUp} transition={{ delay: 0 }}>
-          <Card className="p-6">
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">Spend by Provider</h3>
-            {byProvider.length === 0 ? (
-              <p className="text-slate-400 text-sm py-4 text-center">No spending data</p>
-            ) : (
-              <div className="space-y-3">
-                {byProvider.slice(0, 10).map((p: any, i: number) => (
-                  <div key={i} className="space-y-1">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-700 font-medium truncate mr-2">{p.providerName}</span>
-                      <span className="font-bold text-slate-900 shrink-0">{formatCurrency(p.totalSpendMinor)} <span className="text-slate-400 font-normal">({p.bookingCount})</span></span>
-                    </div>
-                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${(p.totalSpendMinor / maxProviderSpend) * 100}%` }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
+      {/* Subscription Savings */}
+      {savingsData?.hasSubscriptions && (
+        <motion.div {...fadeUp}>
+          <Card className="p-6 bg-gradient-to-br from-emerald-50 to-green-50 border-emerald-200">
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">Subscription Savings</h3>
+            <div className="text-3xl font-bold text-green-600">{formatCurrency(savingsData.totalSavedMinor)}</div>
+            <p className="text-sm text-slate-600 mt-1">
+              saved through subscription pricing ({savingsData.subBookingCount} wash{savingsData.subBookingCount !== 1 ? "es" : ""} at reduced rate)
+            </p>
+            {savingsData.activeSubscriptions > 0 && (
+              <p className="text-xs text-slate-500 mt-1">{savingsData.activeSubscriptions} active subscription{savingsData.activeSubscriptions !== 1 ? "s" : ""}</p>
             )}
           </Card>
         </motion.div>
+      )}
 
-        {/* By Vehicle */}
-        <motion.div {...fadeUp} transition={{ delay: 0.05 }}>
-          <Card className="p-6">
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">Spend by Vehicle</h3>
-            {byVehicle.length === 0 ? (
-              <p className="text-slate-400 text-sm py-4 text-center">No spending data</p>
-            ) : (
-              <div className="space-y-3">
-                {byVehicle.slice(0, 10).map((v: any, i: number) => (
-                  <div key={i} className="space-y-1">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-700 font-medium">{v.unitNumber} <span className="text-slate-400">({v.subtypeCode?.replace(/_/g, " ")})</span></span>
-                      <span className="font-bold text-slate-900 shrink-0">{formatCurrency(v.totalSpendMinor)} <span className="text-slate-400 font-normal">({v.bookingCount})</span></span>
-                    </div>
-                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full bg-purple-500 transition-all" style={{ width: `${(v.totalSpendMinor / maxVehicleSpend) * 100}%` }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </motion.div>
-      </div>
+      {/* Spend per Vehicle — recharts bar chart */}
+      <motion.div {...fadeUp} transition={{ delay: 0 }}>
+        <Card className="p-6">
+          <h3 className="text-lg font-semibold text-slate-900 mb-4">Spend per Vehicle</h3>
+          {byVehicle.length === 0 ? (
+            <p className="text-slate-400 text-sm py-4 text-center">No spending data</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={Math.max(byVehicle.length * 40, 200)}>
+              <BarChart data={byVehicle.slice(0, 15)} layout="vertical" margin={{ left: 80, right: 20, top: 5, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis type="number" tickFormatter={(v: number) => `$${(v / 100).toFixed(0)}`} />
+                <YAxis type="category" dataKey="unitNumber" width={70} tick={{ fontSize: 12 }} />
+                <Tooltip formatter={(v: number) => `$${(v / 100).toFixed(2)}`} labelFormatter={(l: string) => `Unit: ${l}`} />
+                <Bar dataKey="totalSpendMinor" fill="#3b82f6" radius={[0, 4, 4, 0]} name="Total Spend" />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Card>
+      </motion.div>
+
+      {/* Provider Comparison Table */}
+      <motion.div {...fadeUp} transition={{ delay: 0.05 }}>
+        <Card className="p-6">
+          <h3 className="text-lg font-semibold text-slate-900 mb-4">Provider Comparison</h3>
+          {sortedProviders.length === 0 ? (
+            <p className="text-slate-400 text-sm py-4 text-center">No provider data</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    <th className="text-left px-4 py-3 font-bold text-slate-600">Provider</th>
+                    <th className="text-left px-4 py-3 font-bold text-slate-600 cursor-pointer select-none" onClick={() => handleSort("totalBookings")}>
+                      <span className="flex items-center gap-1">Bookings <ArrowUpDown className="h-3 w-3" /></span>
+                    </th>
+                    <th className="text-left px-4 py-3 font-bold text-slate-600 cursor-pointer select-none" onClick={() => handleSort("avgRating")}>
+                      <span className="flex items-center gap-1">Rating <ArrowUpDown className="h-3 w-3" /></span>
+                    </th>
+                    <th className="text-left px-4 py-3 font-bold text-slate-600 cursor-pointer select-none" onClick={() => handleSort("avgCostMinor")}>
+                      <span className="flex items-center gap-1">Avg Cost <ArrowUpDown className="h-3 w-3" /></span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedProviders.map((p: any, i: number) => (
+                    <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                      <td className="px-4 py-3 font-medium text-slate-900">{p.providerName}</td>
+                      <td className="px-4 py-3 text-slate-700">{p.totalBookings}</td>
+                      <td className="px-4 py-3">
+                        {p.avgRating ? (
+                          <span className="flex items-center gap-1 text-amber-600 font-medium">
+                            {p.avgRating.toFixed(1)} <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">N/A</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 font-medium text-slate-900">{formatCurrency(p.avgCostMinor)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      </motion.div>
 
       {/* Monthly Trend */}
       <motion.div {...fadeUp} transition={{ delay: 0.1 }}>
