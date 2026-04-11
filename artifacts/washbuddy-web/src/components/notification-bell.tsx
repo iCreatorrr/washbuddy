@@ -1,36 +1,58 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Bell, Check, CheckCheck, ExternalLink } from "lucide-react";
-import { useGetUnreadNotificationCount, useListNotifications, useMarkNotificationRead, useMarkAllNotificationsRead } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { useLocation } from "wouter";
 import { formatDistanceToNow } from "date-fns";
+
+const API_BASE = import.meta.env.VITE_API_URL || "";
+
+interface Notification {
+  id: string;
+  subject: string | null;
+  body: string;
+  actionUrl: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
 
 export function NotificationBell({ popoverDirection = "down" }: { popoverDirection?: "up" | "down" }) {
   const [isOpen, setIsOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const [, navigate] = useLocation();
-  const queryClient = useQueryClient();
 
-  const { data: countData } = useGetUnreadNotificationCount({
-    request: { credentials: "include" },
-    query: { refetchInterval: 30000 },
-  });
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const { data: listData, isLoading } = useListNotifications(
-    { limit: 10 },
-    {
-      request: { credentials: "include" },
-      query: { enabled: isOpen },
-    }
-  );
+  // Poll unread count every 30s
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      const r = await fetch(`${API_BASE}/api/notifications/unread-count`, { credentials: "include" });
+      if (r.ok) {
+        const d = await r.json();
+        setUnreadCount(d.count || 0);
+      }
+    } catch {}
+  }, []);
 
-  const markRead = useMarkNotificationRead({ request: { credentials: "include" } });
-  const markAllRead = useMarkAllNotificationsRead({ request: { credentials: "include" } });
+  useEffect(() => {
+    fetchUnreadCount();
+    const interval = setInterval(fetchUnreadCount, 30000);
+    return () => clearInterval(interval);
+  }, [fetchUnreadCount]);
 
-  const unreadCount = countData?.count || 0;
-  const notifications = listData?.notifications || [];
+  // Load notifications when popover opens
+  useEffect(() => {
+    if (!isOpen) return;
+    setIsLoading(true);
+    fetch(`${API_BASE}/api/notifications?limit=10`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((d) => setNotifications(d.notifications || []))
+      .catch(() => {})
+      .finally(() => setIsLoading(false));
+  }, [isOpen]);
 
+  // Click outside to close
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
@@ -41,23 +63,37 @@ export function NotificationBell({ popoverDirection = "down" }: { popoverDirecti
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleMarkRead = async (id: string, actionUrl?: string | null) => {
+  const handleNotificationClick = async (n: Notification) => {
+    // Mark as read
     try {
-      await markRead.mutateAsync({ notificationId: id });
-      queryClient.invalidateQueries({ queryKey: ["/api/notifications/unread-count"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
+      await fetch(`${API_BASE}/api/notifications/${n.id}/read`, {
+        method: "POST",
+        credentials: "include",
+      });
+      // Update local state
+      setNotifications((prev) =>
+        prev.map((x) => (x.id === n.id ? { ...x, readAt: new Date().toISOString() } : x))
+      );
+      setUnreadCount((c) => Math.max(0, c - 1));
     } catch {}
-    if (actionUrl) {
+
+    // Navigate and close
+    if (n.actionUrl) {
       setIsOpen(false);
-      navigate(actionUrl);
+      navigate(n.actionUrl);
     }
   };
 
   const handleMarkAllRead = async () => {
     try {
-      await markAllRead.mutateAsync({});
-      queryClient.invalidateQueries({ queryKey: ["/api/notifications/unread-count"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
+      await fetch(`${API_BASE}/api/notifications/read-all`, {
+        method: "POST",
+        credentials: "include",
+      });
+      setNotifications((prev) =>
+        prev.map((n) => ({ ...n, readAt: n.readAt || new Date().toISOString() }))
+      );
+      setUnreadCount(0);
     } catch {}
   };
 
@@ -105,7 +141,7 @@ export function NotificationBell({ popoverDirection = "down" }: { popoverDirecti
               notifications.map((n) => (
                 <button
                   key={n.id}
-                  onClick={() => handleMarkRead(n.id, n.actionUrl)}
+                  onClick={() => handleNotificationClick(n)}
                   className={cn(
                     "w-full text-left px-4 py-3 border-b border-slate-50 hover:bg-slate-50 transition-colors",
                     !n.readAt && "bg-blue-50/50"
