@@ -1177,7 +1177,68 @@ async function main() {
       prefCount++;
     }
   }
-  console.log(`  ✓ ${prefCount} notification preferences created.\n`);
+  console.log(`  ✓ ${prefCount} notification preferences created.`);
+
+  // ── Step 4.7: V2 FINAL — ServicePricing + ProviderAddOns ──────────
+  console.log("Step 4.7: Creating service pricing and add-ons...");
+
+  // ServicePricing — 4 records per service (one per vehicle class)
+  const allServices = await prisma.service.findMany({ where: { isVisible: true }, select: { id: true, basePriceMinor: true, durationMins: true }, take: 200 });
+  const classMultipliers = [
+    { vehicleClass: "SMALL", priceMult: 0.7, durMult: 0.7 },
+    { vehicleClass: "MEDIUM", priceMult: 1.0, durMult: 1.0 },
+    { vehicleClass: "LARGE", priceMult: 1.3, durMult: 1.2 },
+    { vehicleClass: "EXTRA_LARGE", priceMult: 1.6, durMult: 1.4 },
+  ];
+  let pricingCount = 0;
+  for (const svc of allServices) {
+    for (const cm of classMultipliers) {
+      await prisma.servicePricing.create({
+        data: {
+          serviceId: svc.id,
+          vehicleClass: cm.vehicleClass,
+          priceMinor: Math.round(svc.basePriceMinor * cm.priceMult / 100) * 100,
+          durationMins: Math.round(svc.durationMins * cm.durMult),
+          isAvailable: true,
+        },
+      });
+      pricingCount++;
+    }
+  }
+  console.log(`  ✓ ${pricingCount} service pricing records created.`);
+
+  // ProviderAddOns — seed for 10 locations
+  const addOnLocations = allApprovedLocations.slice(0, 10);
+  const addOnTemplates = [
+    { category: "RESTROOM_SUPPLIES", name: "Toilet Paper", iconName: "ScrollText", priceMinor: 350, quantityMode: "COUNTABLE" },
+    { category: "RESTROOM_SUPPLIES", name: "Hand Soap Refill", iconName: "Droplets", priceMinor: 400, quantityMode: "FLAT" },
+    { category: "RESTROOM_SUPPLIES", name: "Air Freshener", iconName: "Wind", priceMinor: 500, quantityMode: "FLAT" },
+    { category: "DRIVER_AMENITIES", name: "Coffee", iconName: "Coffee", priceMinor: 300, quantityMode: "COUNTABLE" },
+    { category: "DRIVER_AMENITIES", name: "Bottled Water", iconName: "GlassWater", priceMinor: 250, quantityMode: "COUNTABLE" },
+    { category: "DRIVER_AMENITIES", name: "Snack Pack", iconName: "Cookie", priceMinor: 400, quantityMode: "COUNTABLE" },
+    { category: "VEHICLE_SUPPLIES", name: "Windshield Washer Fluid", iconName: "Droplet", priceMinor: 800, quantityMode: "FLAT" },
+    { category: "VEHICLE_SUPPLIES", name: "Tire Pressure Check", iconName: "Gauge", priceMinor: 500, quantityMode: "FLAT" },
+    { category: "SPECIALTY_TREATMENTS", name: "Protective Wax Coating", iconName: "Shield", priceMinor: 3500, quantityMode: "FLAT" },
+    { category: "SPECIALTY_TREATMENTS", name: "Anti-Salt Undercoating", iconName: "Snowflake", priceMinor: 4500, quantityMode: "FLAT" },
+  ];
+  let addOnCount = 0;
+  for (let li = 0; li < addOnLocations.length; li++) {
+    const loc = addOnLocations[li];
+    const numItems = li < 3 ? 8 : li < 6 ? 6 : 4; // larger locations get more items
+    for (let ai = 0; ai < Math.min(numItems, addOnTemplates.length); ai++) {
+      const t = addOnTemplates[ai];
+      await prisma.providerAddOn.create({
+        data: {
+          providerId: loc.providerId, locationId: loc.id,
+          category: t.category, name: t.name, iconName: t.iconName,
+          priceMinor: t.priceMinor, currencyCode: loc.countryCode === "CA" ? "CAD" : "USD",
+          quantityMode: t.quantityMode, isActive: true, isFromTemplate: true, displayOrder: ai,
+        },
+      });
+      addOnCount++;
+    }
+  }
+  console.log(`  ✓ ${addOnCount} provider add-ons created.\n`);
 
   // ── Step 5: Write DemoDataRegistry records ─────────────────────────
   console.log("Step 5: Writing DemoDataRegistry records...");

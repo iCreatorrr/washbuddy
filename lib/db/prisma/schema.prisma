@@ -480,6 +480,7 @@ model Provider {
   clientProfiles       ClientProfile[]
   discounts            ProviderDiscount[]
   subscriptionPackages SubscriptionPackage[]
+  addOns               ProviderAddOn[]
 
   @@index([isActive])
   @@index([approvalStatus])
@@ -564,6 +565,7 @@ model Location {
   washNotes            WashNote[]
   discounts            ProviderDiscount[]
   subscriptionPackages SubscriptionPackage[]
+  addOns               ProviderAddOn[]
 
   @@index([providerId])
   @@index([isVisible])
@@ -645,6 +647,7 @@ model Service {
   compatibilityRules ServiceCompatibility[]
   bookings           Booking[]
   bookingHolds       BookingHold[]
+  pricing            ServicePricing[]
 
   @@index([locationId])
   @@index([isVisible])
@@ -735,6 +738,7 @@ model Booking {
   discountAmountMinor        Int       @default(0) @map("discount_amount_minor")
   discountDescription        String?   @map("discount_description")
   additionalServiceIds       String[]  @default([]) @map("additional_service_ids")
+  addOnsTotalMinor           Int       @default(0) @map("add_ons_total_minor")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
@@ -757,6 +761,7 @@ model Booking {
   photos           BookingPhoto[]
   messages         BookingMessage[]
   washNotes        WashNote[]
+  addOns           BookingAddOn[]
 
   @@index([locationId, scheduledStartAtUtc, scheduledEndAtUtc, status])
   @@index([customerId])
@@ -1227,6 +1232,73 @@ model NotificationPreference {
 
   @@unique([userId, eventType])
   @@map("notification_preferences")
+}
+
+// ─── V2: SERVICE PRICING (per-vehicle-class) ───────────────────────────────
+
+model ServicePricing {
+  id            String   @id @default(uuid()) @db.Uuid
+  serviceId     String   @map("service_id") @db.Uuid
+  vehicleClass  String   @map("vehicle_class") // SMALL, MEDIUM, LARGE, EXTRA_LARGE
+  priceMinor    Int      @map("price_minor")
+  durationMins  Int      @map("duration_mins")
+  isAvailable   Boolean  @default(true) @map("is_available")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  service Service @relation(fields: [serviceId], references: [id])
+
+  @@unique([serviceId, vehicleClass])
+  @@index([serviceId])
+  @@map("service_pricing")
+}
+
+// ─── V2: PROVIDER ADD-ONS ──────────────────────────────────────────────────
+
+model ProviderAddOn {
+  id             String   @id @default(uuid()) @db.Uuid
+  providerId     String   @map("provider_id") @db.Uuid
+  locationId     String   @map("location_id") @db.Uuid
+  category       String   @map("category") // RESTROOM_SUPPLIES, DRIVER_AMENITIES, VEHICLE_SUPPLIES, SPECIALTY_TREATMENTS, CUSTOM
+  name           String
+  description    String?
+  iconName       String   @default("Package") @map("icon_name")
+  priceMinor     Int      @map("price_minor")
+  currencyCode   String   @map("currency_code") @db.Char(3)
+  quantityMode   String   @default("COUNTABLE") @map("quantity_mode") // COUNTABLE or FLAT
+  isActive       Boolean  @default(true) @map("is_active")
+  isFromTemplate Boolean  @default(false) @map("is_from_template")
+  displayOrder   Int      @default(0) @map("display_order")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  provider      Provider       @relation(fields: [providerId], references: [id])
+  location      Location       @relation(fields: [locationId], references: [id])
+  bookingAddOns BookingAddOn[]
+
+  @@index([locationId, isActive])
+  @@index([providerId])
+  @@map("provider_add_ons")
+}
+
+// ─── V2: BOOKING ADD-ONS ───────────────────────────────────────────────────
+
+model BookingAddOn {
+  id             String   @id @default(uuid()) @db.Uuid
+  bookingId      String   @map("booking_id") @db.Uuid
+  addOnId        String?  @map("add_on_id") @db.Uuid
+  name           String
+  priceMinor     Int      @map("price_minor")
+  quantity       Int      @default(1)
+  totalMinor     Int      @map("total_minor")
+  isCustomOneOff Boolean  @default(false) @map("is_custom_one_off")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  booking Booking        @relation(fields: [bookingId], references: [id])
+  addOn   ProviderAddOn? @relation(fields: [addOnId], references: [id])
+
+  @@index([bookingId])
+  @@map("booking_add_ons")
 }
 
 // ─── DEMO DATA REGISTRY ────────────────────────────────────────────────────
