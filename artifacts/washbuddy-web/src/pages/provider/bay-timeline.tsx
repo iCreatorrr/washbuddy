@@ -25,6 +25,7 @@ export default function BayTimeline() {
   const [locations, setLocations] = useState<any[]>([]);
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const startHour = 6;
   const endHour = 22;
 
@@ -126,7 +127,7 @@ export default function BayTimeline() {
         <div className="flex flex-wrap gap-3 items-center">
           <div className="flex items-center gap-1">
             <Button variant="outline" size="icon" onClick={() => setSelectedDate(format(subDays(parseISO(selectedDate), 1), "yyyy-MM-dd"))}><ChevronLeft className="h-4 w-4" /></Button>
-            <Popover>
+            <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
               <PopoverTrigger asChild>
                 <Button variant="outline" className="gap-2 min-w-[160px]"><CalendarIcon className="h-4 w-4" />{format(parseISO(selectedDate), "EEE, MMM d")}</Button>
               </PopoverTrigger>
@@ -134,7 +135,7 @@ export default function BayTimeline() {
                 <Calendar
                   mode="single"
                   selected={parseISO(selectedDate)}
-                  onSelect={(day: Date | undefined) => { if (day) setSelectedDate(format(day, "yyyy-MM-dd")); }}
+                  onSelect={(day: Date | undefined) => { if (day) { setSelectedDate(format(day, "yyyy-MM-dd")); setCalendarOpen(false); } }}
                 />
               </PopoverContent>
             </Popover>

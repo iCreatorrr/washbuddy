@@ -27,6 +27,7 @@ export default function DailyBoard() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   // Filters (client-side)
   const [filterStatus, setFilterStatus] = useState("all");
@@ -135,7 +136,7 @@ export default function DailyBoard() {
             <Button variant="outline" size="icon" onClick={() => setSelectedDate(format(subDays(parseISO(selectedDate), 1), "yyyy-MM-dd"))}>
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <Popover>
+            <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
               <PopoverTrigger asChild>
                 <Button variant="outline" className="gap-2 min-w-[160px]">
                   <CalendarIcon className="h-4 w-4" />
@@ -146,7 +147,7 @@ export default function DailyBoard() {
                 <Calendar
                   mode="single"
                   selected={parseISO(selectedDate)}
-                  onSelect={(day: Date | undefined) => { if (day) setSelectedDate(format(day, "yyyy-MM-dd")); }}
+                  onSelect={(day: Date | undefined) => { if (day) { setSelectedDate(format(day, "yyyy-MM-dd")); setCalendarOpen(false); } }}
                 />
               </PopoverContent>
             </Popover>
