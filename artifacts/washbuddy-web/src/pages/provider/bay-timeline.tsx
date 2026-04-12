@@ -1,37 +1,19 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { Card, Badge, Button } from "@/components/ui";
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, Plus, Wrench } from "lucide-react";
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Wrench } from "lucide-react";
 import { useAuth } from "@/contexts/auth";
 import { useLocation } from "wouter";
 import { format, addDays, subDays, parseISO } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { toast } from "sonner";
+import { getTimelineBlockColors } from "@/lib/service-colors";
+import { cn } from "@/lib/utils";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
 function getProviderId(user: any): string | null {
   return user?.roles?.find((r: any) => (r.role === "PROVIDER_ADMIN" || r.role === "PROVIDER_STAFF") && r.scopeId)?.scopeId || null;
 }
-
-const SERVICE_COLORS: Record<string, string> = {
-  "Exterior": "bg-blue-100 border-blue-300 text-blue-800",
-  "Interior": "bg-green-100 border-green-300 text-green-800",
-  "Full Detail": "bg-purple-100 border-purple-300 text-purple-800",
-  "Undercarriage": "bg-amber-100 border-amber-300 text-amber-800",
-  "Quick": "bg-slate-100 border-slate-300 text-slate-800",
-  "Express": "bg-slate-100 border-slate-300 text-slate-800",
-  "Engine": "bg-red-100 border-red-300 text-red-800",
-};
-
-function getServiceColor(name: string): string {
-  for (const [key, val] of Object.entries(SERVICE_COLORS)) {
-    if (name.toLowerCase().includes(key.toLowerCase())) return val;
-  }
-  return "bg-gray-100 border-gray-300 text-gray-800";
-}
-
-const SOURCE_BORDER: Record<string, string> = { PLATFORM: "border-l-blue-500", DIRECT: "border-l-gray-400", WALK_IN: "border-l-orange-500" };
 
 export default function BayTimeline() {
   const { user } = useAuth();
@@ -95,15 +77,37 @@ export default function BayTimeline() {
   function getBlockPosition(startUtc: string, endUtc: string) {
     const start = new Date(startUtc);
     const end = new Date(endUtc);
-    // Convert to local hours in timezone
     const startLocal = new Date(start.toLocaleString("en-US", { timeZone: tz }));
     const endLocal = new Date(end.toLocaleString("en-US", { timeZone: tz }));
     const startMins = startLocal.getHours() * 60 + startLocal.getMinutes();
     const endMins = endLocal.getHours() * 60 + endLocal.getMinutes();
     const viewStart = startHour * 60;
     const left = Math.max(0, ((startMins - viewStart) / totalMinutes) * 100);
-    const width = Math.max(2, ((endMins - startMins) / totalMinutes) * 100);
-    return { left: `${left}%`, width: `${width}%` };
+    const width = Math.max(3, ((endMins - startMins) / totalMinutes) * 100);
+    return { left, width, startMins };
+  }
+
+  // Compute overlap indices within a bay's bookings
+  function computeOverlapSlots(bookings: any[]): Map<string, { slotIndex: number; slotCount: number }> {
+    const slots = new Map<string, { slotIndex: number; slotCount: number }>();
+    if (!bookings?.length) return slots;
+
+    const blocks = bookings.map((b: any) => {
+      const pos = getBlockPosition(b.scheduledStartAtUtc, b.scheduledEndAtUtc);
+      return { id: b.id, start: pos.startMins, end: pos.startMins + (pos.width / 100) * totalMinutes };
+    });
+
+    // For each booking, find how many overlap and assign a slot index
+    for (let i = 0; i < blocks.length; i++) {
+      const overlapping = blocks.filter((other, j) =>
+        j !== i && other.start < blocks[i].end && other.end > blocks[i].start
+      );
+      const group = [blocks[i], ...overlapping].sort((a, b) => a.start - b.start || a.id.localeCompare(b.id));
+      const slotIndex = group.findIndex((g) => g.id === blocks[i].id);
+      const slotCount = group.length;
+      slots.set(blocks[i].id, { slotIndex, slotCount });
+    }
+    return slots;
   }
 
   if (!providerId) return <div className="p-8 text-center text-slate-500">No provider access.</div>;
@@ -145,7 +149,7 @@ export default function BayTimeline() {
 
       {/* Timeline Grid */}
       {isLoading ? (
-        <div className="space-y-4">{[1, 2, 3].map((i) => <div key={i} className="h-16 animate-pulse bg-slate-100 rounded-xl" />)}</div>
+        <div className="space-y-4">{[1, 2, 3].map((i) => <div key={i} className="h-20 animate-pulse bg-slate-100 rounded-xl" />)}</div>
       ) : (
         <Card className="overflow-x-auto">
           <div className="min-w-[900px]">
@@ -162,48 +166,71 @@ export default function BayTimeline() {
             </div>
 
             {/* Bay rows */}
-            {bays.map((bay: any) => (
-              <div key={bay.id} className={`flex border-b border-slate-100 ${!bay.isActive && bay.outOfServiceSince ? "bg-slate-50/70" : ""}`}>
-                <div className="w-[120px] shrink-0 p-2 flex flex-col justify-center">
-                  <div className="flex items-center gap-1">
-                    {bay.outOfServiceSince && <Wrench className="h-3 w-3 text-amber-500" />}
-                    <span className="text-sm font-medium text-slate-900">{bay.name}</span>
+            {bays.map((bay: any) => {
+              const overlapSlots = computeOverlapSlots(bay.bookings || []);
+              const ROW_HEIGHT = 72; // px per bay row
+              return (
+                <div key={bay.id} className={cn("flex border-b border-slate-100", !bay.isActive && bay.outOfServiceSince && "bg-slate-50/70")}>
+                  <div className="w-[120px] shrink-0 p-2 flex flex-col justify-center">
+                    <div className="flex items-center gap-1">
+                      {bay.outOfServiceSince && <Wrench className="h-3 w-3 text-amber-500" />}
+                      <span className="text-sm font-medium text-slate-900">{bay.name}</span>
+                    </div>
+                    <div className="flex gap-0.5 mt-0.5">
+                      {bay.supportedClasses?.map((c: string) => (
+                        <span key={c} className="text-[9px] px-1 py-0.5 rounded bg-slate-200 text-slate-600">{c[0]}</span>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex gap-0.5 mt-0.5">
-                    {bay.supportedClasses?.map((c: string) => (
-                      <span key={c} className="text-[9px] px-1 py-0.5 rounded bg-slate-200 text-slate-600">{c[0]}</span>
+                  <div className="flex-1 relative" style={{ height: `${ROW_HEIGHT}px` }}>
+                    {/* Hour gridlines */}
+                    {hours.map((h) => (
+                      <div key={h} className="absolute top-0 h-full border-l border-slate-100" style={{ left: `${((h - startHour) / (endHour - startHour)) * 100}%` }} />
                     ))}
+
+                    {/* Current time line */}
+                    {nowPos != null && selectedDate === format(new Date(), "yyyy-MM-dd") && (
+                      <div className="absolute top-0 h-full border-l-2 border-red-500 z-10" style={{ left: `${nowPos}%` }} />
+                    )}
+
+                    {/* Booking blocks */}
+                    {bay.bookings?.map((b: any) => {
+                      const pos = getBlockPosition(b.scheduledStartAtUtc, b.scheduledEndAtUtc);
+                      const colorClasses = getTimelineBlockColors(b.serviceNameSnapshot);
+                      const slot = overlapSlots.get(b.id) || { slotIndex: 0, slotCount: 1 };
+                      const blockHeight = (ROW_HEIGHT - 8) / slot.slotCount; // 4px top+bottom padding
+                      const blockTop = 4 + slot.slotIndex * blockHeight;
+                      const clientName = b.driverFirstName || b.offPlatformClientName || "";
+
+                      return (
+                        <div
+                          key={b.id}
+                          className={cn(
+                            "absolute rounded-md border overflow-hidden cursor-pointer hover:shadow-lg hover:z-20 transition-shadow z-[5] flex flex-col justify-center px-2",
+                            colorClasses
+                          )}
+                          style={{
+                            left: `${pos.left}%`,
+                            width: `${pos.width}%`,
+                            top: `${blockTop}px`,
+                            height: `${blockHeight - 2}px`,
+                          }}
+                          title={`${b.serviceNameSnapshot} — ${clientName}\n${b.vehicleUnitNumber || b.fleetPlaceholderClass || ""}`}
+                          onClick={() => navigate(`/bookings/${b.id}`)}
+                        >
+                          <p className="text-xs font-bold truncate leading-tight">{b.serviceNameSnapshot}</p>
+                          {blockHeight > 28 && (
+                            <p className="text-[10px] truncate leading-tight opacity-80">
+                              {clientName}{b.vehicleUnitNumber ? ` · ${b.vehicleUnitNumber}` : ""}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-                <div className="flex-1 relative h-16">
-                  {/* Hour gridlines */}
-                  {hours.map((h) => (
-                    <div key={h} className="absolute top-0 h-full border-l border-slate-100" style={{ left: `${((h - startHour) / (endHour - startHour)) * 100}%` }} />
-                  ))}
-
-                  {/* Current time line */}
-                  {nowPos != null && selectedDate === format(new Date(), "yyyy-MM-dd") && (
-                    <div className="absolute top-0 h-full border-l-2 border-red-500 z-10" style={{ left: `${nowPos}%` }} />
-                  )}
-
-                  {/* Booking blocks */}
-                  {bay.bookings?.map((b: any) => {
-                    const pos = getBlockPosition(b.scheduledStartAtUtc, b.scheduledEndAtUtc);
-                    const color = getServiceColor(b.serviceNameSnapshot);
-                    const srcBorder = SOURCE_BORDER[b.bookingSource] || SOURCE_BORDER.PLATFORM;
-                    return (
-                      <div key={b.id} className={`absolute top-[10%] h-[80%] rounded border ${color} border-l-[3px] ${srcBorder} px-1 overflow-hidden cursor-pointer hover:shadow-md hover:z-20 transition-shadow z-[5]`}
-                        style={{ left: pos.left, width: pos.width }}
-                        title={`${b.serviceNameSnapshot} - ${b.driverFirstName || b.offPlatformClientName || "Unknown"}`}
-                        onClick={() => navigate(`/bookings/${b.id}`)}>
-                        <p className="text-[10px] font-bold truncate">{b.vehicleUnitNumber || b.fleetPlaceholderClass || ""}</p>
-                        <p className="text-[9px] truncate">{b.driverFirstName || b.offPlatformClientName || ""}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
       )}

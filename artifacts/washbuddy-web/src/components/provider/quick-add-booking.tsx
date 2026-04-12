@@ -4,6 +4,7 @@ import { X, Check, Droplets, Armchair, Sparkles, CircleDot, Zap, Cog, Package, P
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import { getServiceColors } from "@/lib/service-colors";
 import * as Icons from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -243,14 +244,17 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
                     const available = isServiceAvailable(svc);
                     const price = getServicePrice(svc);
                     const dur = getServiceDuration(svc);
+                    const colors = getServiceColors(svc.name);
                     return (
                       <button key={svc.id} type="button" disabled={!available} onClick={() => toggleService(svc.id)}
                         className={cn("relative flex flex-col items-center gap-1 p-4 rounded-lg border-2 transition-all min-h-[100px]",
-                          isSelected ? "bg-blue-50 border-blue-500 text-blue-900"
-                          : available ? "bg-white border-gray-200 hover:border-gray-300 text-gray-700"
-                          : "bg-muted/30 border-gray-100 text-gray-400 cursor-not-allowed")}>
-                        {isSelected && <div className="absolute top-2 right-2"><Check className="h-4 w-4 text-blue-600" /></div>}
-                        <ServiceIcon name={svc.name} className={cn("h-8 w-8", isSelected ? "text-blue-600" : "text-gray-400")} />
+                          isSelected
+                            ? `${colors.tileBgSelected} ${colors.tileBorderSelected} ${colors.tileTextSelected}`
+                            : available
+                              ? `bg-white ${colors.tileBorder} hover:shadow-sm text-gray-700`
+                              : "bg-muted/30 border-gray-100 text-gray-400 cursor-not-allowed")}>
+                        {isSelected && <div className="absolute top-2 right-2"><Check className={cn("h-4 w-4", colors.tileIconSelected)} /></div>}
+                        <ServiceIcon name={svc.name} className={cn("h-8 w-8", isSelected ? colors.tileIconSelected : colors.tileIcon)} />
                         <span className="text-sm font-medium text-center leading-tight">{svc.name}</span>
                         <span className="text-xs">{formatCurrency(price)} · {dur}min</span>
                         {!available && <span className="text-xs text-muted-foreground">N/A for this class</span>}
@@ -258,7 +262,6 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
                     );
                   })}
                 </div>
-                {selectedServiceIds.length === 0 && <p className="text-sm text-red-500">Select at least one service</p>}
                 {selectedServiceIds.length > 0 && (
                   <p className="text-sm text-slate-500">{selectedServiceIds.length} service{selectedServiceIds.length > 1 ? "s" : ""} — Subtotal: {formatCurrency(servicesTotal)} · {totalDuration}min</p>
                 )}
@@ -325,11 +328,18 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
 
           {step === 1 ? (
             <div className="space-y-2">
-              <Button className="w-full h-11" onClick={() => setStep(2)} disabled={selectedServiceIds.length === 0}>
+              {(!clientName.trim() || selectedServiceIds.length === 0) && (
+                <p className="text-xs text-amber-400 text-center">
+                  {!clientName.trim() && selectedServiceIds.length === 0 ? "Enter client name and select a service to continue"
+                    : !clientName.trim() ? "Enter client name to continue"
+                    : "Select at least one service to continue"}
+                </p>
+              )}
+              <Button className="w-full h-11" onClick={() => setStep(2)} disabled={!clientName.trim() || selectedServiceIds.length === 0}>
                 Next: Add-Ons <ArrowRight className="h-4 w-4 ml-1" />
               </Button>
-              <button onClick={handleSubmit} disabled={selectedServiceIds.length === 0 || saving}
-                className="w-full text-xs text-slate-400 hover:text-white transition-colors py-1">
+              <button onClick={handleSubmit} disabled={!clientName.trim() || selectedServiceIds.length === 0 || saving}
+                className="w-full text-xs text-slate-400 hover:text-white transition-colors py-1 disabled:opacity-40">
                 Skip add-ons and create booking
               </button>
             </div>

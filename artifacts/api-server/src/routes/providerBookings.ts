@@ -242,13 +242,30 @@ router.post("/providers/:providerId/bookings/off-platform", requireAuth, require
 
     const location = await prisma.location.findUnique({ where: { id: locationId }, select: { timezone: true } });
 
-    // Auto-assign bay if not provided
+    // Auto-assign bay if not provided — pick one with no time conflict
     let assignedBayId = bayId || null;
     if (!assignedBayId && vehicleClass) {
-      const available = await prisma.washBay.findFirst({
+      const startUtc = new Date(scheduledStartAtUtc);
+      const endUtc = scheduledEndAtUtc ? new Date(scheduledEndAtUtc) : new Date(startUtc.getTime() + (service.durationMins || 30) * 60000);
+
+      const candidateBays = await prisma.washBay.findMany({
         where: { locationId, isActive: true, supportedClasses: { has: vehicleClass } },
+        include: {
+          bookings: {
+            where: {
+              status: { notIn: ["CUSTOMER_CANCELLED", "PROVIDER_CANCELLED", "NO_SHOW"] },
+              scheduledStartAtUtc: { lt: endUtc },
+              scheduledEndAtUtc: { gt: startUtc },
+            },
+            select: { id: true },
+          },
+        },
+        orderBy: { name: "asc" },
       });
-      assignedBayId = available?.id || null;
+
+      // Prefer a bay with no conflicting bookings; fall back to the first candidate
+      const freeBay = candidateBays.find((b) => b.bookings.length === 0);
+      assignedBayId = freeBay?.id || candidateBays[0]?.id || null;
     }
 
     // Upsert client profile
