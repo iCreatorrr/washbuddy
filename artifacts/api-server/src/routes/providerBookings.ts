@@ -34,6 +34,91 @@ function getDayRangeUtc(dateStr: string, timezone: string): { startUtc: Date; en
 
 const ACTIVE_STATUSES = ["PROVIDER_CONFIRMED", "HELD", "CHECKED_IN", "IN_SERVICE", "COMPLETED_PENDING_WINDOW", "COMPLETED", "SETTLED"];
 
+// ─── Provider Bay Availability ──────────────────────────────────────────────
+
+router.get("/providers/:providerId/locations/:locationId/bay-availability", requireAuth, requireProviderAccess(), async (req, res) => {
+  try {
+    const { locationId } = req.params;
+    const dateStr = req.query.date as string;
+    const vehicleClass = (req.query.vehicleClass as string) || "MEDIUM";
+    const durationMins = parseInt(req.query.durationMins as string) || 30;
+
+    if (!dateStr) { res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "date query param required" }); return; }
+
+    const location = await prisma.location.findUnique({ where: { id: locationId }, select: { timezone: true } });
+    if (!location) { res.status(404).json({ errorCode: "NOT_FOUND", message: "Location not found" }); return; }
+
+    const { startUtc, endUtc } = getDayRangeUtc(dateStr, location.timezone);
+
+    // Get compatible bays
+    const bays = await prisma.washBay.findMany({
+      where: { locationId, isActive: true, supportedClasses: { has: vehicleClass } },
+      select: { id: true, name: true },
+    });
+
+    if (bays.length === 0) {
+      // No bays support this vehicle class — all slots unavailable
+      res.json({ slots: [], bayCount: 0, message: `No bays support ${vehicleClass} vehicles` });
+      return;
+    }
+
+    // Get all active bookings for the day on these bays
+    const bayIds = bays.map((b) => b.id);
+    const existingBookings = await prisma.booking.findMany({
+      where: {
+        washBayId: { in: bayIds },
+        status: { notIn: ["CUSTOMER_CANCELLED", "PROVIDER_CANCELLED", "NO_SHOW"] as any },
+        scheduledStartAtUtc: { lt: endUtc },
+        scheduledEndAtUtc: { gt: startUtc },
+      },
+      select: { washBayId: true, scheduledStartAtUtc: true, scheduledEndAtUtc: true },
+    });
+
+    // Generate 30-minute time slots from 6am to 9pm (local)
+    const slots: { time: string; available: boolean; availableBays: number }[] = [];
+    const now = new Date();
+
+    for (let hour = 6; hour <= 21; hour++) {
+      for (const minute of [0, 30]) {
+        const slotTime = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+
+        // Convert slot time to UTC for comparison
+        const slotLocalStr = `${dateStr}T${slotTime}:00`;
+        // Approximate UTC by using the same offset approach
+        const slotUtcApprox = new Date(slotLocalStr + "Z");
+        // Adjust: use offset from getDayRangeUtc
+        const offsetMs = startUtc.getTime() - new Date(`${dateStr}T00:00:00Z`).getTime();
+        const slotStartUtc = new Date(slotUtcApprox.getTime() - offsetMs);
+        const slotEndUtc = new Date(slotStartUtc.getTime() + durationMins * 60000);
+
+        // Past time check
+        if (slotStartUtc < now) {
+          slots.push({ time: slotTime, available: false, availableBays: 0 });
+          continue;
+        }
+
+        // Count how many bays are free at this slot
+        let freeBays = bays.length;
+        for (const bay of bays) {
+          const hasConflict = existingBookings.some(
+            (b) => b.washBayId === bay.id &&
+              new Date(b.scheduledStartAtUtc) < slotEndUtc &&
+              new Date(b.scheduledEndAtUtc) > slotStartUtc
+          );
+          if (hasConflict) freeBays--;
+        }
+
+        slots.push({ time: slotTime, available: freeBays > 0, availableBays: freeBays });
+      }
+    }
+
+    res.json({ slots, bayCount: bays.length });
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to get bay availability");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to load availability" });
+  }
+});
+
 // ─── Daily Wash Board ───────────────────────────────────────────────────────
 
 router.get("/providers/:providerId/locations/:locationId/daily-board", requireAuth, requireProviderAccess(), async (req, res) => {
@@ -230,7 +315,7 @@ router.post("/providers/:providerId/bookings/off-platform", requireAuth, require
   try {
     const user = req.user as SessionUser;
     const { providerId } = req.params;
-    const { locationId, serviceId, vehicleClass, bayId, clientName, clientPhone, clientEmail, scheduledStartAtUtc, scheduledEndAtUtc, notes, processPayment, bookingSource } = req.body;
+    const { locationId, serviceId, serviceIds, vehicleClass, bayId, clientName, clientPhone, clientEmail, scheduledStartAtUtc, scheduledEndAtUtc, notes, processPayment, bookingSource } = req.body;
 
     if (!locationId || !serviceId || !clientName || !scheduledStartAtUtc || !scheduledEndAtUtc) {
       res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "locationId, serviceId, clientName, scheduledStartAtUtc, scheduledEndAtUtc are required" });
@@ -240,32 +325,64 @@ router.post("/providers/:providerId/bookings/off-platform", requireAuth, require
     const service = await prisma.service.findFirst({ where: { id: serviceId, locationId } });
     if (!service) { res.status(404).json({ errorCode: "NOT_FOUND", message: "Service not found" }); return; }
 
+    // Resolve all selected service names for the snapshot
+    const allServiceIds: string[] = Array.isArray(serviceIds) && serviceIds.length > 0 ? serviceIds : [serviceId];
+    const allServices = await prisma.service.findMany({ where: { id: { in: allServiceIds }, locationId }, select: { name: true, basePriceMinor: true, durationMins: true } });
+    const serviceNamesSnapshot = allServices.map((s) => s.name).join(", ") || service.name;
+    const combinedPrice = allServices.reduce((sum, s) => sum + s.basePriceMinor, 0) || service.basePriceMinor;
+
     const location = await prisma.location.findUnique({ where: { id: locationId }, select: { timezone: true } });
+
+    // Bug 3: Prevent booking in the past
+    const bookingStartUtc = new Date(scheduledStartAtUtc);
+    if (bookingStartUtc < new Date()) {
+      res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "Cannot book a wash in the past. Please select a future time." });
+      return;
+    }
+
+    const bookingEndUtc = scheduledEndAtUtc ? new Date(scheduledEndAtUtc) : new Date(bookingStartUtc.getTime() + (service.durationMins || 30) * 60000);
 
     // Auto-assign bay if not provided — pick one with no time conflict
     let assignedBayId = bayId || null;
-    if (!assignedBayId && vehicleClass) {
-      const startUtc = new Date(scheduledStartAtUtc);
-      const endUtc = scheduledEndAtUtc ? new Date(scheduledEndAtUtc) : new Date(startUtc.getTime() + (service.durationMins || 30) * 60000);
+    const vClass = vehicleClass || "MEDIUM";
 
-      const candidateBays = await prisma.washBay.findMany({
-        where: { locationId, isActive: true, supportedClasses: { has: vehicleClass } },
-        include: {
-          bookings: {
-            where: {
-              status: { notIn: ["CUSTOMER_CANCELLED", "PROVIDER_CANCELLED", "NO_SHOW"] },
-              scheduledStartAtUtc: { lt: endUtc },
-              scheduledEndAtUtc: { gt: startUtc },
-            },
-            select: { id: true },
+    const candidateBays = await prisma.washBay.findMany({
+      where: { locationId, isActive: true, supportedClasses: { has: vClass } },
+      include: {
+        bookings: {
+          where: {
+            status: { notIn: ["CUSTOMER_CANCELLED", "PROVIDER_CANCELLED", "NO_SHOW"] as any },
+            scheduledStartAtUtc: { lt: bookingEndUtc },
+            scheduledEndAtUtc: { gt: bookingStartUtc },
           },
+          select: { id: true },
         },
-        orderBy: { name: "asc" },
-      });
+      },
+      orderBy: { name: "asc" },
+    });
 
-      // Prefer a bay with no conflicting bookings; fall back to the first candidate
+    if (!assignedBayId) {
+      // Pick the first bay with no conflicting bookings
       const freeBay = candidateBays.find((b) => b.bookings.length === 0);
-      assignedBayId = freeBay?.id || candidateBays[0]?.id || null;
+      if (!freeBay) {
+        // Bug 4: No bay available at this time
+        res.status(409).json({
+          errorCode: "NO_BAY_AVAILABLE",
+          message: `No wash bay available for ${vClass} vehicles at this time. All ${candidateBays.length} compatible bay(s) are booked.`,
+        });
+        return;
+      }
+      assignedBayId = freeBay.id;
+    } else {
+      // Validate manually selected bay has no conflict
+      const selectedBay = candidateBays.find((b) => b.id === assignedBayId);
+      if (selectedBay && selectedBay.bookings.length > 0) {
+        res.status(409).json({
+          errorCode: "BAY_CONFLICT",
+          message: `${selectedBay.name || "Selected bay"} is already booked at this time. Choose a different bay or time.`,
+        });
+        return;
+      }
     }
 
     // Upsert client profile
@@ -288,7 +405,7 @@ router.post("/providers/:providerId/bookings/off-platform", requireAuth, require
 
     // Off-platform/walk-in bookings NEVER incur platform fee (updated business rule)
     const fee = 0;
-    const total = service.basePriceMinor;
+    const total = combinedPrice;
 
     const booking = await prisma.booking.create({
       data: {
@@ -297,8 +414,8 @@ router.post("/providers/:providerId/bookings/off-platform", requireAuth, require
         customerId: user.id,
         status: "PROVIDER_CONFIRMED",
         idempotencyKey: `offplat-${Date.now()}-${locationId}-${clientName.replace(/\s/g, "")}`,
-        serviceNameSnapshot: service.name,
-        serviceBasePriceMinor: service.basePriceMinor,
+        serviceNameSnapshot: serviceNamesSnapshot,
+        serviceBasePriceMinor: combinedPrice,
         platformFeeMinor: fee,
         totalPriceMinor: total,
         currencyCode: service.currencyCode,

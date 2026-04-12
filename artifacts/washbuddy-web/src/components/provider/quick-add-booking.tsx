@@ -9,6 +9,13 @@ import * as Icons from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
+function formatSlotTime(t: string): string {
+  const [h, m] = t.split(":").map(Number);
+  const ampm = h >= 12 ? "PM" : "AM";
+  const hr = h % 12 || 12;
+  return `${hr}:${String(m).padStart(2, "0")} ${ampm}`;
+}
+
 function DynamicIcon({ name, className }: { name: string; className?: string }) {
   const Icon = (Icons as any)[name] || Icons.Package;
   return <Icon className={className} />;
@@ -62,6 +69,8 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
   const [bays, setBays] = useState<any[]>([]);
   const [addOns, setAddOns] = useState<any[]>([]);
   const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [availableSlots, setAvailableSlots] = useState<{ time: string; available: boolean; availableBays: number }[]>([]);
+  const [bayCount, setBayCount] = useState(0);
 
   // Load services (with pricing), bays, and add-ons
   useEffect(() => {
@@ -87,6 +96,16 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
     }, 300);
     return () => clearTimeout(t);
   }, [clientName]);
+
+  // Fetch bay availability when date, vehicle class, or duration changes
+  useEffect(() => {
+    if (!providerId || !locationId || !date) return;
+    const params = new URLSearchParams({ date, vehicleClass, durationMins: String(totalDuration || 30) });
+    fetch(`${API_BASE}/api/providers/${providerId}/locations/${locationId}/bay-availability?${params}`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((d) => { setAvailableSlots(d.slots || []); setBayCount(d.bayCount || 0); })
+      .catch(() => {});
+  }, [providerId, locationId, date, vehicleClass, totalDuration]);
 
   const toggleService = (id: string) => {
     setSelectedServiceIds((prev) => prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]);
@@ -273,9 +292,26 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
 
               {/* Date/Time/Bay */}
               <div className="grid grid-cols-2 gap-3">
-                <div><Label>Date</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
-                <div><Label>Start Time</Label><Input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} /></div>
+                <div><Label>Date</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} min={new Date().toISOString().split("T")[0]} /></div>
+                <div>
+                  <Label>Start Time</Label>
+                  <select value={startTime} onChange={(e) => setStartTime(e.target.value)}
+                    className="w-full h-12 px-3 border-2 border-slate-200 rounded-xl text-sm bg-white">
+                    {availableSlots.length > 0 ? (
+                      availableSlots.map((slot) => (
+                        <option key={slot.time} value={slot.time} disabled={!slot.available}>
+                          {formatSlotTime(slot.time)}{!slot.available ? " — Fully booked" : ` (${slot.availableBays} bay${slot.availableBays !== 1 ? "s" : ""} free)`}
+                        </option>
+                      ))
+                    ) : (
+                      <option value={startTime}>{formatSlotTime(startTime)}</option>
+                    )}
+                  </select>
+                </div>
               </div>
+              {availableSlots.length > 0 && bayCount > 0 && (
+                <p className="text-xs text-slate-400">{bayCount} bay{bayCount !== 1 ? "s" : ""} support {vehicleClass.replace("_", " ")} vehicles at this location</p>
+              )}
               <div><Label>Bay</Label>
                 <select value={bayId} onChange={(e) => setBayId(e.target.value)} className="w-full h-10 px-3 border border-slate-200 rounded-xl text-sm bg-white">
                   <option value="">Auto-assign</option>
