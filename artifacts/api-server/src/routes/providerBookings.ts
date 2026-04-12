@@ -63,18 +63,24 @@ router.get("/providers/:providerId/locations/:locationId/bay-availability", requ
     }
 
     // Get all active bookings for the day on these bays
+    // Use raw UTC day range (matching frontend's UTC interpretation)
+    const dayStartUtc = new Date(`${dateStr}T06:00:00Z`);
+    const dayEndUtc = new Date(`${dateStr}T23:59:59Z`);
     const bayIds = bays.map((b) => b.id);
     const existingBookings = await prisma.booking.findMany({
       where: {
         washBayId: { in: bayIds },
         status: { notIn: ["CUSTOMER_CANCELLED", "PROVIDER_CANCELLED", "NO_SHOW"] as any },
-        scheduledStartAtUtc: { lt: endUtc },
-        scheduledEndAtUtc: { gt: startUtc },
+        scheduledStartAtUtc: { lt: dayEndUtc },
+        scheduledEndAtUtc: { gt: dayStartUtc },
       },
       select: { washBayId: true, scheduledStartAtUtc: true, scheduledEndAtUtc: true },
     });
 
-    // Generate 30-minute time slots from 6am to 9pm (local)
+    // Generate 30-minute time slots from 6am to 9pm
+    // IMPORTANT: Use the same UTC calculation as the frontend booking creation:
+    // Frontend sends scheduledStartAtUtc = new Date(`${date}T${time}:00Z`)
+    // So we must match that exactly here for consistency.
     const slots: { time: string; available: boolean; availableBays: number }[] = [];
     const now = new Date();
 
@@ -82,13 +88,8 @@ router.get("/providers/:providerId/locations/:locationId/bay-availability", requ
       for (const minute of [0, 30]) {
         const slotTime = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 
-        // Convert slot time to UTC for comparison
-        const slotLocalStr = `${dateStr}T${slotTime}:00`;
-        // Approximate UTC by using the same offset approach
-        const slotUtcApprox = new Date(slotLocalStr + "Z");
-        // Adjust: use offset from getDayRangeUtc
-        const offsetMs = startUtc.getTime() - new Date(`${dateStr}T00:00:00Z`).getTime();
-        const slotStartUtc = new Date(slotUtcApprox.getTime() - offsetMs);
+        // Match frontend: new Date(`${date}T${time}:00Z`)
+        const slotStartUtc = new Date(`${dateStr}T${slotTime}:00Z`);
         const slotEndUtc = new Date(slotStartUtc.getTime() + durationMins * 60000);
 
         // Past time check
@@ -97,7 +98,7 @@ router.get("/providers/:providerId/locations/:locationId/bay-availability", requ
           continue;
         }
 
-        // Count how many bays are free at this slot
+        // Count how many bays are free at this slot (considering full wash duration)
         let freeBays = bays.length;
         for (const bay of bays) {
           const hasConflict = existingBookings.some(

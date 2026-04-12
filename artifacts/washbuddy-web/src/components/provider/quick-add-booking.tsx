@@ -103,7 +103,17 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
     const params = new URLSearchParams({ date, vehicleClass, durationMins: String(totalDuration || 30) });
     fetch(`${API_BASE}/api/providers/${providerId}/locations/${locationId}/bay-availability?${params}`, { credentials: "include" })
       .then((r) => r.json())
-      .then((d) => { setAvailableSlots(d.slots || []); setBayCount(d.bayCount || 0); })
+      .then((d) => {
+        const slots = d.slots || [];
+        setAvailableSlots(slots);
+        setBayCount(d.bayCount || 0);
+        // If current time selection is unavailable, auto-select the first available slot
+        const currentSlot = slots.find((s: any) => s.time === startTime);
+        if (currentSlot && !currentSlot.available) {
+          const firstAvail = slots.find((s: any) => s.available);
+          if (firstAvail) setStartTime(firstAvail.time);
+        }
+      })
       .catch(() => {});
   }, [providerId, locationId, date, vehicleClass, totalDuration]);
 
