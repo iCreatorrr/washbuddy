@@ -97,24 +97,41 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
     return () => clearTimeout(t);
   }, [clientName]);
 
+  // Generate fallback time slots (used when availability API fails or returns empty)
+  const fallbackSlots = React.useMemo(() => {
+    const slots: { time: string; available: boolean; availableBays: number }[] = [];
+    for (let h = 6; h <= 21; h++) {
+      for (const m of [0, 30]) {
+        slots.push({ time: `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`, available: true, availableBays: -1 });
+      }
+    }
+    return slots;
+  }, []);
+
   // Fetch bay availability when date, vehicle class, or duration changes
   useEffect(() => {
     if (!providerId || !locationId || !date) return;
-    const params = new URLSearchParams({ date, vehicleClass, durationMins: String(totalDuration || 30) });
+    const dur = totalDuration > 0 ? totalDuration : 30;
+    const params = new URLSearchParams({ date, vehicleClass, durationMins: String(dur) });
     fetch(`${API_BASE}/api/providers/${providerId}/locations/${locationId}/bay-availability?${params}`, { credentials: "include" })
-      .then((r) => r.json())
+      .then((r) => { if (!r.ok) throw new Error("Failed"); return r.json(); })
       .then((d) => {
         const slots = d.slots || [];
-        setAvailableSlots(slots);
-        setBayCount(d.bayCount || 0);
-        // If current time selection is unavailable, auto-select the first available slot
-        const currentSlot = slots.find((s: any) => s.time === startTime);
-        if (currentSlot && !currentSlot.available) {
-          const firstAvail = slots.find((s: any) => s.available);
-          if (firstAvail) setStartTime(firstAvail.time);
+        if (slots.length > 0) {
+          setAvailableSlots(slots);
+          setBayCount(d.bayCount || 0);
+          // If current time selection is unavailable, auto-select the first available slot
+          const currentSlot = slots.find((s: any) => s.time === startTime);
+          if (currentSlot && !currentSlot.available) {
+            const firstAvail = slots.find((s: any) => s.available);
+            if (firstAvail) setStartTime(firstAvail.time);
+          }
+        } else {
+          setAvailableSlots(fallbackSlots);
+          setBayCount(d.bayCount || 0);
         }
       })
-      .catch(() => {});
+      .catch(() => { setAvailableSlots(fallbackSlots); });
   }, [providerId, locationId, date, vehicleClass, totalDuration]);
 
   const toggleService = (id: string) => {
@@ -307,15 +324,11 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
                   <Label>Start Time</Label>
                   <select value={startTime} onChange={(e) => setStartTime(e.target.value)}
                     className="w-full h-12 px-3 border-2 border-slate-200 rounded-xl text-sm bg-white">
-                    {availableSlots.length > 0 ? (
-                      availableSlots.map((slot) => (
-                        <option key={slot.time} value={slot.time} disabled={!slot.available}>
-                          {formatSlotTime(slot.time)}{!slot.available ? " — Fully booked" : ` (${slot.availableBays} bay${slot.availableBays !== 1 ? "s" : ""} free)`}
-                        </option>
-                      ))
-                    ) : (
-                      <option value={startTime}>{formatSlotTime(startTime)}</option>
-                    )}
+                    {availableSlots.map((slot) => (
+                      <option key={slot.time} value={slot.time} disabled={!slot.available}>
+                        {formatSlotTime(slot.time)}{slot.availableBays === -1 ? "" : !slot.available ? " — Fully booked" : ` (${slot.availableBays} bay${slot.availableBays !== 1 ? "s" : ""} free)`}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>

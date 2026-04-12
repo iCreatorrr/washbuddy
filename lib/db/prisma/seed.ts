@@ -940,15 +940,18 @@ async function main() {
   // Fetch all approved locations for wash bay creation
   const allApprovedLocations = await prisma.location.findMany({
     where: { isVisible: true, provider: { approvalStatus: "APPROVED" } },
-    include: { services: { where: { isVisible: true }, select: { id: true, capacityPerSlot: true } } },
+    include: { services: { select: { id: true, capacityPerSlot: true } } },
     take: 45,
   });
 
   // Wash Bays — 1-4 per location based on capacity
+  // Ensure every location gets at least 3 bays (even if no services are configured yet)
   let bayCount = 0;
   for (const loc of allApprovedLocations) {
-    const maxCap = Math.max(...loc.services.map((s) => s.capacityPerSlot), 1);
-    const numBays = Math.min(maxCap, 4);
+    const maxCap = loc.services.length > 0
+      ? Math.max(...loc.services.map((s) => s.capacityPerSlot), 3)
+      : 3;
+    const numBays = Math.min(Math.max(maxCap, 3), 4);
     const classes = [["SMALL", "MEDIUM"], ["SMALL", "MEDIUM", "LARGE"], ["MEDIUM", "LARGE", "EXTRA_LARGE"], ["SMALL", "MEDIUM", "LARGE", "EXTRA_LARGE"]];
     for (let b = 0; b < numBays; b++) {
       await prisma.washBay.create({
