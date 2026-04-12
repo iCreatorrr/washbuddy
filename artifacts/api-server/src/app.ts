@@ -74,10 +74,11 @@ export async function createApp(): Promise<Express> {
       name: "wash_buddy_sid",
       resave: false,
       saveUninitialized: false,
+      proxy: true,
       cookie: {
-        secure: process.env.NODE_ENV === "production",
+        secure: process.env.NODE_ENV === "production" ? true : false,
         httpOnly: true,
-        sameSite: "lax",
+        sameSite: process.env.NODE_ENV === "production" ? "none" as const : "lax" as const,
         maxAge: 7 * 24 * 60 * 60 * 1000,
       },
     }),

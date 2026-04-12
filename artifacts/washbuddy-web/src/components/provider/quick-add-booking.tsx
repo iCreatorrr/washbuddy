@@ -168,7 +168,11 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
         method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.message || "Failed"); }
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        if (res.status === 401) throw new Error("Session expired — please refresh the page and log in again");
+        throw new Error(d.message || "Failed to create booking");
+      }
       toast.success(`Booking created for ${clientName}`);
       onSuccess();
       onClose();
