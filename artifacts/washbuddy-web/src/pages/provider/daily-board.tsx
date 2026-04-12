@@ -179,7 +179,7 @@ export default function DailyBoard() {
         </div>
       ) : (data?.upcoming?.length || 0) + (data?.inProgress?.length || 0) + (data?.completed?.length || 0) === 0 ? (
         <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-slate-300">
-          <Calendar className="h-12 w-12 text-slate-300 mx-auto mb-4" />
+          <CalendarIcon className="h-12 w-12 text-slate-300 mx-auto mb-4" />
           <h3 className="text-lg font-bold text-slate-900">No bookings scheduled for {format(new Date(selectedDate + "T12:00:00"), "MMMM d")}</h3>
           <p className="text-slate-500 mt-1">Add bookings using the + button or manage your availability in Settings.</p>
         </div>
