@@ -199,6 +199,68 @@ router.get("/locations/search", async (req, res) => {
   }
 });
 
+// Public location detail — used by customer-facing location detail page
+router.get("/locations/:locationId", async (req, res) => {
+  try {
+    const loc = await prisma.location.findFirst({
+      where: {
+        id: req.params.locationId,
+        isVisible: true,
+        provider: { isActive: true, approvalStatus: "APPROVED" },
+      },
+      include: {
+        provider: { select: { id: true, name: true } },
+        services: {
+          where: { isVisible: true },
+          select: {
+            id: true, name: true, description: true, durationMins: true,
+            basePriceMinor: true, currencyCode: true, platformFeeMinor: true,
+            capacityPerSlot: true, leadTimeMins: true, requiresConfirmation: true,
+            pricing: true,
+            compatibilityRules: { select: { categoryCode: true, subtypeCode: true, maxLengthInches: true, maxHeightInches: true } },
+          },
+        },
+        operatingWindows: {
+          select: { dayOfWeek: true, openTime: true, closeTime: true },
+          orderBy: [{ dayOfWeek: "asc" as const }, { openTime: "asc" as const }],
+        },
+        reviews: { where: { isHidden: false }, select: { rating: true } },
+      },
+    });
+
+    if (!loc) {
+      res.status(404).json({ errorCode: "NOT_FOUND", message: "Location not found" });
+      return;
+    }
+
+    const now = new Date();
+    const openStatus = isWithinOperatingHours(now, loc.timezone, loc.operatingWindows);
+    const nextOpen = openStatus ? null : getNextOpenAt(now, loc.timezone, loc.operatingWindows);
+    const reviewRatings = (loc as any).reviews?.map((r: any) => r.rating) || [];
+    const reviewCount = reviewRatings.length;
+    const averageRating = reviewCount > 0 ? parseFloat((reviewRatings.reduce((s: number, r: number) => s + r, 0) / reviewCount).toFixed(1)) : null;
+
+    res.json({
+      location: {
+        ...loc,
+        stateCode: loc.regionCode,
+        isOpenNow: openStatus,
+        nextOpenAt: nextOpen?.toISOString() ?? null,
+        averageRating,
+        reviewCount,
+        reviews: undefined,
+        services: loc.services.map((s) => ({
+          ...s,
+          allInPriceMinor: calculateAllInPrice(s.basePriceMinor),
+        })),
+      },
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to get location detail");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to get location" });
+  }
+});
+
 router.get("/providers/:providerId/locations", requireAuth, requireProviderAccess(), async (req, res) => {
   try {
     const locations = await prisma.location.findMany({

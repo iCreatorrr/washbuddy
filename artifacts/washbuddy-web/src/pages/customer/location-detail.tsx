@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useRoute, useLocation } from "wouter";
-import { useSearchLocations, useGetAvailability, useCreateBookingHold, useCreateBooking, useListVehicles } from "@workspace/api-client-react";
+import { useGetAvailability, useCreateBookingHold, useCreateBooking, useListVehicles } from "@workspace/api-client-react";
 import { Card, Button, Badge, ErrorState } from "@/components/ui";
 import { MapPin, Clock, Truck, ShieldCheck, CheckCircle2, ChevronLeft, ArrowRight, Navigation, Star, Zap, AlertTriangle, Timer } from "lucide-react";
 import { LocationReviews } from "@/components/location-reviews";
@@ -59,8 +59,21 @@ export default function LocationDetail() {
   const [holdExpiresAt, setHoldExpiresAt] = useState<Date | null>(null);
   const [holdTimeLeft, setHoldTimeLeft] = useState<number | null>(null);
 
-  const { data: searchData, isLoading: isSearchLoading, isError: isSearchError, refetch: refetchSearch } = useSearchLocations({}, { request: { credentials: 'include' } });
-  const locData = searchData?.locations.find(l => l.id === locationId);
+  const [locData, setLocData] = useState<any>(null);
+  const [isSearchLoading, setIsSearchLoading] = useState(true);
+  const [isSearchError, setIsSearchError] = useState(false);
+
+  const API_BASE = import.meta.env.VITE_API_URL || "";
+  useEffect(() => {
+    if (!locationId) return;
+    setIsSearchLoading(true);
+    setIsSearchError(false);
+    fetch(`${API_BASE}/api/locations/${locationId}`, { credentials: "include" })
+      .then((r) => { if (!r.ok) throw new Error("Not found"); return r.json(); })
+      .then((d) => setLocData(d.location))
+      .catch(() => setIsSearchError(true))
+      .finally(() => setIsSearchLoading(false));
+  }, [locationId]);
 
   const services = locData?.services || [];
 
@@ -146,7 +159,7 @@ export default function LocationDetail() {
     }
   };
 
-  if (isSearchError) return <div className="max-w-5xl mx-auto py-8"><ErrorState message="Could not load location details." onRetry={() => refetchSearch()} /></div>;
+  if (isSearchError) return <div className="max-w-5xl mx-auto py-8"><ErrorState message="Could not load location details." onRetry={() => { setIsSearchError(false); setIsSearchLoading(true); fetch(`${API_BASE}/api/locations/${locationId}`, { credentials: "include" }).then((r) => r.json()).then((d) => setLocData(d.location)).catch(() => setIsSearchError(true)).finally(() => setIsSearchLoading(false)); }} /></div>;
   if (isSearchLoading) return <div className="p-12 text-center text-slate-500"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto" /></div>;
   if (!locData) return <div className="max-w-5xl mx-auto py-8"><ErrorState message="Location not found. It may have been removed." /></div>;
 
