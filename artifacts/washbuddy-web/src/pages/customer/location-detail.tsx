@@ -62,18 +62,42 @@ export default function LocationDetail() {
   const [locData, setLocData] = useState<any>(null);
   const [isSearchLoading, setIsSearchLoading] = useState(true);
   const [isSearchError, setIsSearchError] = useState(false);
+  const [fetchErrorDetails, setFetchErrorDetails] = useState<string | null>(null);
 
   const API_BASE = import.meta.env.VITE_API_URL || "";
-  useEffect(() => {
+  const fetchLocation = React.useCallback(async () => {
     if (!locationId) return;
     setIsSearchLoading(true);
     setIsSearchError(false);
-    fetch(`${API_BASE}/api/locations/${locationId}`, { credentials: "include" })
-      .then((r) => { if (!r.ok) throw new Error("Not found"); return r.json(); })
-      .then((d) => setLocData(d.location))
-      .catch(() => setIsSearchError(true))
-      .finally(() => setIsSearchLoading(false));
-  }, [locationId]);
+    setFetchErrorDetails(null);
+    try {
+      const r = await fetch(`${API_BASE}/api/locations/${locationId}`, { credentials: "include" });
+      if (!r.ok) {
+        const errBody = await r.json().catch(() => ({}));
+        const msg = `HTTP ${r.status} — ${errBody.message || errBody.errorCode || r.statusText}`;
+        console.error("Location fetch failed:", msg, { locationId, url: `${API_BASE}/api/locations/${locationId}` });
+        setFetchErrorDetails(msg);
+        setIsSearchError(true);
+        return;
+      }
+      const d = await r.json();
+      if (!d?.location) {
+        console.error("Location response missing 'location' field:", d);
+        setFetchErrorDetails("Response missing location data");
+        setIsSearchError(true);
+        return;
+      }
+      setLocData(d.location);
+    } catch (err: any) {
+      console.error("Location fetch exception:", err);
+      setFetchErrorDetails(err?.message || "Network error");
+      setIsSearchError(true);
+    } finally {
+      setIsSearchLoading(false);
+    }
+  }, [locationId, API_BASE]);
+
+  useEffect(() => { fetchLocation(); }, [fetchLocation]);
 
   const services = locData?.services || [];
 
@@ -159,7 +183,7 @@ export default function LocationDetail() {
     }
   };
 
-  if (isSearchError) return <div className="max-w-5xl mx-auto py-8"><ErrorState message="Could not load location details." onRetry={() => { setIsSearchError(false); setIsSearchLoading(true); fetch(`${API_BASE}/api/locations/${locationId}`, { credentials: "include" }).then((r) => r.json()).then((d) => setLocData(d.location)).catch(() => setIsSearchError(true)).finally(() => setIsSearchLoading(false)); }} /></div>;
+  if (isSearchError) return <div className="max-w-5xl mx-auto py-8"><ErrorState message={fetchErrorDetails ? `Could not load location details (${fetchErrorDetails})` : "Could not load location details."} onRetry={fetchLocation} /></div>;
   if (isSearchLoading) return <div className="p-12 text-center text-slate-500"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto" /></div>;
   if (!locData) return <div className="max-w-5xl mx-auto py-8"><ErrorState message="Location not found. It may have been removed." /></div>;
 

@@ -200,23 +200,29 @@ router.get("/locations/search", async (req, res) => {
 });
 
 // Public location detail — used by customer-facing location detail page
+// Query by UUID only (no visibility/approval filters) — if the route planner
+// surfaces the location, the detail page must be able to resolve it.
 router.get("/locations/:locationId", async (req, res) => {
   try {
-    const loc = await prisma.location.findFirst({
-      where: {
-        id: req.params.locationId,
-        isVisible: true,
-        provider: { isActive: true, approvalStatus: "APPROVED" },
-      },
+    const { locationId } = req.params;
+
+    // Basic UUID format check to give a better error than a Prisma crash
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(locationId)) {
+      res.status(400).json({ errorCode: "INVALID_ID", message: "Invalid location id format" });
+      return;
+    }
+
+    const loc = await prisma.location.findUnique({
+      where: { id: locationId },
       include: {
-        provider: { select: { id: true, name: true } },
+        provider: { select: { id: true, name: true, approvalStatus: true, isActive: true } },
         services: {
           where: { isVisible: true },
           select: {
             id: true, name: true, description: true, durationMins: true,
             basePriceMinor: true, currencyCode: true, platformFeeMinor: true,
             capacityPerSlot: true, leadTimeMins: true, requiresConfirmation: true,
-            pricing: true,
             compatibilityRules: { select: { categoryCode: true, subtypeCode: true, maxLengthInches: true, maxHeightInches: true } },
           },
         },
@@ -229,6 +235,7 @@ router.get("/locations/:locationId", async (req, res) => {
     });
 
     if (!loc) {
+      req.log.warn({ locationId }, "Location detail 404 — no row with this id");
       res.status(404).json({ errorCode: "NOT_FOUND", message: "Location not found" });
       return;
     }
@@ -255,8 +262,8 @@ router.get("/locations/:locationId", async (req, res) => {
         })),
       },
     });
-  } catch (err) {
-    req.log.error({ err }, "Failed to get location detail");
+  } catch (err: any) {
+    req.log.error({ err: err?.message, stack: err?.stack, locationId: req.params.locationId }, "Failed to get location detail");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to get location" });
   }
 });
