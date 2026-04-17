@@ -719,8 +719,20 @@ export default function RoutePlanner() {
       `;
       L.DomEvent.on(btn, "click", (e) => {
         L.DomEvent.stopPropagation(e);
-        const userCoords = origin && geoStatus === "granted" ? `&ulat=${origin.lat.toFixed(4)}&ulng=${origin.lng.toFixed(4)}` : "";
-        setNavLocation(`/location/${loc.id}${routeReturnParams}${userCoords}`);
+        // Inline URL build — buildLocationUrl closure captures stale state in
+        // the Leaflet popup effect, so construct directly with current values.
+        const qs = new URLSearchParams();
+        if (origin && destination) {
+          qs.set("ref", "route");
+          qs.set("from", serializeCityForUrl(origin));
+          qs.set("to", serializeCityForUrl(destination));
+        }
+        if (origin && geoStatus === "granted") {
+          qs.set("ulat", origin.lat.toFixed(4));
+          qs.set("ulng", origin.lng.toFixed(4));
+        }
+        const query = qs.toString();
+        setNavLocation(`/location/${loc.id}${query ? `?${query}` : ""}`);
       });
 
       marker.bindPopup(popup, { closeButton: false });
@@ -750,9 +762,23 @@ export default function RoutePlanner() {
     }
   }, [route, origin, destination, nearbyLocations, initialLocations, setNavLocation, etas]);
 
-  const routeReturnParams = origin && destination
-    ? `?ref=route&from=${encodeURIComponent(serializeCityForUrl(origin))}&to=${encodeURIComponent(serializeCityForUrl(destination))}`
-    : "";
+  // Build a location detail URL with optional return-to-route + user coords.
+  // Uses URLSearchParams so separators (? vs &) are always correct, even when
+  // some params are absent (e.g. no destination set yet).
+  const buildLocationUrl = (locId: string) => {
+    const qs = new URLSearchParams();
+    if (origin && destination) {
+      qs.set("ref", "route");
+      qs.set("from", serializeCityForUrl(origin));
+      qs.set("to", serializeCityForUrl(destination));
+    }
+    if (origin && geoStatus === "granted") {
+      qs.set("ulat", origin.lat.toFixed(4));
+      qs.set("ulng", origin.lng.toFixed(4));
+    }
+    const query = qs.toString();
+    return `/location/${locId}${query ? `?${query}` : ""}`;
+  };
 
   const routeVersionRef = useRef(0);
   const planRouteRef = useRef<(o: CityOption, d: CityOption) => void>();
@@ -1031,7 +1057,7 @@ export default function RoutePlanner() {
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: idx * 0.03 }}
                 >
-                  <Link href={`/location/${loc.id}${routeReturnParams}${origin && geoStatus === "granted" ? `&ulat=${origin.lat.toFixed(4)}&ulng=${origin.lng.toFixed(4)}` : ""}`} className="block">
+                  <Link href={buildLocationUrl(loc.id)} className="block">
                     <div className="bg-white rounded-xl border border-slate-200 p-4 hover:border-blue-300 hover:shadow-sm transition-all cursor-pointer">
                       <div className="flex items-start justify-between mb-1">
                         <h3 className="font-semibold text-slate-900 text-sm leading-tight">{loc.name}</h3>
