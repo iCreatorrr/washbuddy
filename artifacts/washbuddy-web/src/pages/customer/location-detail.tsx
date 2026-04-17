@@ -70,26 +70,49 @@ export default function LocationDetail() {
     setIsSearchLoading(true);
     setIsSearchError(false);
     setFetchErrorDetails(null);
+    console.log("[LocationDetail] Fetching location:", locationId);
+
+    // Try dedicated detail endpoint first
     try {
       const r = await fetch(`${API_BASE}/api/locations/${locationId}`, { credentials: "include" });
+      if (r.ok) {
+        const d = await r.json();
+        if (d?.location) {
+          console.log("[LocationDetail] Loaded from /api/locations/:id");
+          setLocData(d.location);
+          setIsSearchLoading(false);
+          return;
+        }
+      } else {
+        console.warn(`[LocationDetail] /api/locations/${locationId} returned ${r.status}, falling back to search`);
+      }
+    } catch (err: any) {
+      console.warn("[LocationDetail] Detail endpoint threw, falling back to search:", err?.message);
+    }
+
+    // Fallback: search endpoint (works even if dedicated endpoint isn't deployed yet)
+    try {
+      const r = await fetch(`${API_BASE}/api/locations/search`, { credentials: "include" });
       if (!r.ok) {
-        const errBody = await r.json().catch(() => ({}));
-        const msg = `HTTP ${r.status} — ${errBody.message || errBody.errorCode || r.statusText}`;
-        console.error("Location fetch failed:", msg, { locationId, url: `${API_BASE}/api/locations/${locationId}` });
+        const msg = `HTTP ${r.status} on search fallback`;
+        console.error("[LocationDetail] Search fallback failed:", msg);
         setFetchErrorDetails(msg);
         setIsSearchError(true);
         return;
       }
       const d = await r.json();
-      if (!d?.location) {
-        console.error("Location response missing 'location' field:", d);
-        setFetchErrorDetails("Response missing location data");
+      const match = (d?.locations || []).find((l: any) => l.id === locationId);
+      if (!match) {
+        const msg = `Location ${locationId} not found in search results (${(d?.locations || []).length} locations returned)`;
+        console.error("[LocationDetail]", msg);
+        setFetchErrorDetails("Location not in search results");
         setIsSearchError(true);
         return;
       }
-      setLocData(d.location);
+      console.log("[LocationDetail] Loaded from search fallback");
+      setLocData(match);
     } catch (err: any) {
-      console.error("Location fetch exception:", err);
+      console.error("[LocationDetail] Both endpoints failed:", err);
       setFetchErrorDetails(err?.message || "Network error");
       setIsSearchError(true);
     } finally {
