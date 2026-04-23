@@ -50,15 +50,29 @@ router.get("/providers/:providerId/locations/:locationId/bay-availability", requ
 
     const { startUtc, endUtc } = getDayRangeUtc(dateStr, location.timezone);
 
-    // Get compatible bays
-    const bays = await prisma.washBay.findMany({
-      where: { locationId, isActive: true, supportedClasses: { has: vehicleClass } },
-      select: { id: true, name: true },
-    });
+    // Get all active bays for this location, plus the subset compatible with
+    // the requested vehicle class. The distinction matters for the UI: a
+    // location with no bays at all gets a different message than one whose
+    // bays just don't fit this vehicle class.
+    const [totalBayCount, bays] = await Promise.all([
+      prisma.washBay.count({ where: { locationId, isActive: true } }),
+      prisma.washBay.findMany({
+        where: { locationId, isActive: true, supportedClasses: { has: vehicleClass } },
+        select: { id: true, name: true },
+      }),
+    ]);
 
     if (bays.length === 0) {
-      // No bays support this vehicle class — all slots unavailable
-      res.json({ slots: [], bayCount: 0, message: `No bays support ${vehicleClass} vehicles` });
+      const message = totalBayCount === 0
+        ? "This location has no bays configured. Add a bay in Settings before booking."
+        : `No bays at this location support ${vehicleClass} vehicles.`;
+      res.json({
+        slots: [],
+        bayCount: 0,
+        totalBayCount,
+        errorCode: totalBayCount === 0 ? "LOCATION_HAS_NO_BAYS" : "NO_COMPATIBLE_BAY",
+        message,
+      });
       return;
     }
 
@@ -113,7 +127,7 @@ router.get("/providers/:providerId/locations/:locationId/bay-availability", requ
       }
     }
 
-    res.json({ slots, bayCount: bays.length });
+    res.json({ slots, bayCount: bays.length, totalBayCount });
   } catch (err: any) {
     req.log.error({ err }, "Failed to get bay availability");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to load availability" });
@@ -291,16 +305,23 @@ router.get("/providers/:providerId/locations/:locationId/bay-timeline", requireA
 
     const dayOfWeek = new Date(dateStr + "T12:00:00Z").getUTCDay();
 
+    // Only include the synthetic "Unassigned" row when real bays exist, so the
+    // frontend can render a proper empty state when bayCount === 0.
+    const rows = bays.length > 0
+      ? [
+          { id: "unassigned", name: "Unassigned", supportedClasses: [], isActive: true, outOfServiceSince: null, outOfServiceReason: null, outOfServiceEstReturn: null, displayOrder: -1, bookings: unassignedBookings },
+          ...bays.map((bay) => ({
+            id: bay.id, name: bay.name, supportedClasses: bay.supportedClasses, isActive: bay.isActive,
+            outOfServiceSince: bay.outOfServiceSince, outOfServiceReason: bay.outOfServiceReason,
+            outOfServiceEstReturn: bay.outOfServiceEstReturn, displayOrder: bay.displayOrder,
+            bookings: bayBookingsMap.get(bay.id) || [],
+          })),
+        ]
+      : [];
+
     res.json({
-      bays: [
-        { id: "unassigned", name: "Unassigned", supportedClasses: [], isActive: true, outOfServiceSince: null, outOfServiceReason: null, outOfServiceEstReturn: null, displayOrder: -1, bookings: unassignedBookings },
-        ...bays.map((bay) => ({
-          id: bay.id, name: bay.name, supportedClasses: bay.supportedClasses, isActive: bay.isActive,
-          outOfServiceSince: bay.outOfServiceSince, outOfServiceReason: bay.outOfServiceReason,
-          outOfServiceEstReturn: bay.outOfServiceEstReturn, displayOrder: bay.displayOrder,
-          bookings: bayBookingsMap.get(bay.id) || [],
-        })),
-      ],
+      bays: rows,
+      bayCount: bays.length,
       operatingWindows: location.operatingWindows.filter((w) => w.dayOfWeek === dayOfWeek),
       locationTimezone: location.timezone,
     });
@@ -347,6 +368,17 @@ router.post("/providers/:providerId/bookings/off-platform", requireAuth, require
     let assignedBayId = bayId || null;
     const vClass = vehicleClass || "MEDIUM";
 
+    // First distinguish "no bays at all" from "all bays busy" so the frontend
+    // can surface the right message.
+    const totalBayCount = await prisma.washBay.count({ where: { locationId, isActive: true } });
+    if (totalBayCount === 0) {
+      res.status(409).json({
+        errorCode: "LOCATION_HAS_NO_BAYS",
+        message: "This location has no bays configured. Add a bay in Settings before booking.",
+      });
+      return;
+    }
+
     const candidateBays = await prisma.washBay.findMany({
       where: { locationId, isActive: true, supportedClasses: { has: vClass } },
       include: {
@@ -363,10 +395,16 @@ router.post("/providers/:providerId/bookings/off-platform", requireAuth, require
     });
 
     if (!assignedBayId) {
+      if (candidateBays.length === 0) {
+        res.status(409).json({
+          errorCode: "NO_COMPATIBLE_BAY",
+          message: `No bay at this location supports ${vClass} vehicles. Update bay configuration in Settings.`,
+        });
+        return;
+      }
       // Pick the first bay with no conflicting bookings
       const freeBay = candidateBays.find((b) => b.bookings.length === 0);
       if (!freeBay) {
-        // Bug 4: No bay available at this time
         res.status(409).json({
           errorCode: "NO_BAY_AVAILABLE",
           message: `No wash bay available for ${vClass} vehicles at this time. All ${candidateBays.length} compatible bay(s) are booked.`,

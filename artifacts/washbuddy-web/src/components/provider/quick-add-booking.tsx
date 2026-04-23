@@ -71,6 +71,7 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [availableSlots, setAvailableSlots] = useState<{ time: string; available: boolean; availableBays: number }[]>([]);
   const [bayCount, setBayCount] = useState(0);
+  const [totalBayCount, setTotalBayCount] = useState<number | null>(null);
 
   // Load services (with pricing), bays, and add-ons
   useEffect(() => {
@@ -79,7 +80,11 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
       .then((r) => r.json()).then((d) => setServices(d.services || []))
       .catch(() => {});
     fetch(`${API_BASE}/api/providers/${providerId}/locations/${locationId}/bays`, { credentials: "include" })
-      .then((r) => r.json()).then((d) => setBays(d.bays || []))
+      .then((r) => r.json()).then((d) => {
+        const all = d.bays || [];
+        setBays(all);
+        setTotalBayCount(all.length);
+      })
       .catch(() => {});
     fetch(`${API_BASE}/api/providers/${providerId}/locations/${locationId}/add-ons`, { credentials: "include" })
       .then((r) => r.json()).then((d) => setAddOns((d.addOns || []).filter((a: any) => a.isActive)))
@@ -117,6 +122,7 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
       .then((r) => { if (!r.ok) throw new Error("Failed"); return r.json(); })
       .then((d) => {
         const slots = d.slots || [];
+        if (typeof d.totalBayCount === "number") setTotalBayCount(d.totalBayCount);
         if (slots.length > 0) {
           setAvailableSlots(slots);
           setBayCount(d.bayCount || 0);
@@ -217,6 +223,13 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         if (res.status === 401) throw new Error("Session expired — please refresh the page and log in again");
+        if (d.errorCode === "LOCATION_HAS_NO_BAYS") {
+          const settingsUrl = `/provider/settings?tab=bays&locationId=${locationId}`;
+          toast.error("This location has no bays configured. Add a bay in Settings before booking.", {
+            action: { label: "Open Settings", onClick: () => { window.location.href = settingsUrl; } },
+          });
+          return;
+        }
         throw new Error(d.message || "Failed to create booking");
       }
       toast.success(`Booking created for ${clientName}`);
@@ -249,6 +262,15 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {totalBayCount === 0 && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+              <p className="font-bold">No bays configured for this location</p>
+              <p className="mt-0.5">Bookings can't be created until at least one bay is set up.</p>
+              <a href={`/provider/settings?tab=bays&locationId=${locationId}`} className="inline-block mt-2 text-primary font-semibold underline">
+                Open bay settings →
+              </a>
+            </div>
+          )}
           {step === 1 ? (
             <>
               {/* Source toggle */}
@@ -398,16 +420,16 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
                     : "Select at least one service to continue"}
                 </p>
               )}
-              <Button className="w-full h-11" onClick={() => setStep(2)} disabled={!clientName.trim() || selectedServiceIds.length === 0}>
+              <Button className="w-full h-11" onClick={() => setStep(2)} disabled={!clientName.trim() || selectedServiceIds.length === 0 || totalBayCount === 0}>
                 Next: Add-Ons <ArrowRight className="h-4 w-4 ml-1" />
               </Button>
-              <button onClick={handleSubmit} disabled={!clientName.trim() || selectedServiceIds.length === 0 || saving}
+              <button onClick={handleSubmit} disabled={!clientName.trim() || selectedServiceIds.length === 0 || saving || totalBayCount === 0}
                 className="w-full text-xs text-slate-400 hover:text-white transition-colors py-1 disabled:opacity-40">
                 Skip add-ons and create booking
               </button>
             </div>
           ) : (
-            <Button className="w-full h-11" onClick={handleSubmit} isLoading={saving}>Create Booking</Button>
+            <Button className="w-full h-11" onClick={handleSubmit} isLoading={saving} disabled={totalBayCount === 0}>Create Booking</Button>
           )}
         </div>
       </div>

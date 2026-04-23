@@ -336,7 +336,22 @@ router.post("/providers/:providerId/locations", requireAuth, requireProviderAcce
       },
     });
 
-    res.status(201).json({ location });
+    // Auto-provision one default bay so the location is immediately bookable.
+    // The provider can rename/resize/add more in Settings → Bays; leaving zero
+    // bays here is the exact state that causes the "0 compatible bay(s)" bug.
+    const defaultBay = await prisma.washBay.create({
+      data: {
+        locationId: location.id,
+        name: "Bay 1",
+        maxVehicleLengthIn: 540,
+        maxVehicleHeightIn: 156,
+        supportedClasses: ["SMALL", "MEDIUM", "LARGE"],
+        isActive: true,
+        displayOrder: 0,
+      },
+    });
+
+    res.status(201).json({ location, defaultBay });
   } catch (err) {
     req.log.error({ err }, "Failed to create location");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to create location" });

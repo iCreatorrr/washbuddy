@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Card, Badge, Button } from "@/components/ui";
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Filter, LayoutList, Clock, CheckCircle2, Truck } from "lucide-react";
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Filter, LayoutList, Clock, CheckCircle2, Truck, AlertTriangle, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { useAuth } from "@/contexts/auth";
 import { BookingCard } from "@/components/provider/booking-card";
@@ -25,6 +25,8 @@ export default function DailyBoard() {
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [locationBayCount, setLocationBayCount] = useState<number | null>(null);
+  const [noBayBannerDismissed, setNoBayBannerDismissed] = useState(false);
 
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -56,6 +58,16 @@ export default function DailyBoard() {
       .catch(() => {})
       .finally(() => setIsLoading(false));
   }, [providerId, selectedLocation, selectedDate, refreshKey]);
+
+  // Probe bay count for the selected location — drives the no-bays banner.
+  useEffect(() => {
+    if (!providerId || !selectedLocation) { setLocationBayCount(null); return; }
+    setNoBayBannerDismissed(false);
+    fetch(`${API_BASE}/api/providers/${providerId}/locations/${selectedLocation}/bays`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((d) => setLocationBayCount((d.bays || []).length))
+      .catch(() => setLocationBayCount(null));
+  }, [providerId, selectedLocation, refreshKey]);
 
   // Auto-refresh every 30 seconds
   useEffect(() => {
@@ -126,8 +138,30 @@ export default function DailyBoard() {
           <h1 className="text-3xl font-display font-bold text-slate-900">Daily Wash Board</h1>
           <p className="text-slate-500 mt-1">Manage today's washes and track progress.</p>
         </div>
-        <Button className="gap-2" onClick={() => setIsQuickAddOpen(true)}><Plus className="h-4 w-4" /> Add Booking</Button>
+        <Button className="gap-2" onClick={() => setIsQuickAddOpen(true)} disabled={locationBayCount === 0}>
+          <Plus className="h-4 w-4" /> Add Booking
+        </Button>
       </div>
+
+      {/* No-bays banner */}
+      {locationBayCount === 0 && !noBayBannerDismissed && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 flex items-start gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-bold text-amber-900">This location has no bays configured</p>
+            <p className="text-sm text-amber-800 mt-0.5">Bookings are disabled until at least one bay is set up.</p>
+          </div>
+          <a
+            href={`/provider/settings?tab=bays&locationId=${selectedLocation}`}
+            className="text-sm font-bold text-primary hover:underline whitespace-nowrap"
+          >
+            Add a bay →
+          </a>
+          <button onClick={() => setNoBayBannerDismissed(true)} className="p-1 hover:bg-amber-100 rounded">
+            <X className="h-4 w-4 text-amber-700" />
+          </button>
+        </div>
+      )}
 
       {/* Date + Location bar */}
       <Card className="p-4">

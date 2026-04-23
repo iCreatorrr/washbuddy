@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Card, Badge, Button } from "@/components/ui";
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Wrench } from "lucide-react";
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Wrench, LayoutGrid } from "lucide-react";
 import { useAuth } from "@/contexts/auth";
 import { useLocation } from "wouter";
 import { format, addDays, subDays, parseISO } from "date-fns";
@@ -73,6 +73,7 @@ export default function BayTimeline() {
   }, []);
 
   const bays = data?.bays || [];
+  const bayCount = data?.bayCount ?? bays.filter((b: any) => b.id !== "unassigned").length;
   const tz = data?.locationTimezone || "America/New_York";
 
   function getBlockPosition(startUtc: string, endUtc: string) {
@@ -151,6 +152,21 @@ export default function BayTimeline() {
       {/* Timeline Grid */}
       {isLoading ? (
         <div className="space-y-4">{[1, 2, 3].map((i) => <div key={i} className="h-20 animate-pulse bg-slate-100 rounded-xl" />)}</div>
+      ) : bayCount === 0 ? (
+        <Card className="p-10 text-center">
+          <LayoutGrid className="h-12 w-12 text-slate-300 mx-auto mb-4" />
+          <h3 className="text-lg font-bold text-slate-900">No bays configured for this location</h3>
+          <p className="text-slate-500 mt-1 max-w-md mx-auto">
+            Bookings cannot be created without at least one wash bay. Configure
+            bays so auto-matching can route each booking to a compatible slot.
+          </p>
+          <Button
+            className="mt-5"
+            onClick={() => navigate(`/provider/settings?tab=bays&locationId=${selectedLocation}`)}
+          >
+            Add a bay
+          </Button>
+        </Card>
       ) : (
         <Card className="overflow-x-auto">
           <div className="min-w-[900px]">
