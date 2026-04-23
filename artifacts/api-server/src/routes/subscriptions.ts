@@ -4,6 +4,11 @@ import { requireAuth } from "../middlewares/requireAuth";
 import type { SessionUser } from "../lib/auth";
 import { isFleetRole, getFleetId } from "../lib/auth";
 import { calculatePlatformFee } from "../lib/feeCalculator";
+import {
+  deriveVehicleClassFromLength,
+  findAvailableBayTx,
+  resolveServiceDuration,
+} from "../lib/bayMatching";
 
 const router: IRouter = Router();
 
@@ -42,6 +47,8 @@ router.post("/fleets/:fleetId/subscriptions", requireAuth, async (req, res) => {
     if (!pkg) { res.status(404).json({ errorCode: "NOT_FOUND" }); return; }
 
     const subscriptions = [];
+    const unassignable: { vehicleId: string; reason: string }[] = [];
+
     for (const vehicleId of vehicleIds) {
       const sub = await prisma.fleetSubscription.create({
         data: {
@@ -51,26 +58,65 @@ router.post("/fleets/:fleetId/subscriptions", requireAuth, async (req, res) => {
         },
       });
 
-      // Create first booking
       const fee = calculatePlatformFee(pkg.pricePerWashMinor, { isSubscription: true });
-      await prisma.booking.create({
-        data: {
-          locationId: pkg.locationId, serviceId: pkg.includedServiceIds[0] || "",
-          customerId: user.id, vehicleId, status: "PROVIDER_CONFIRMED",
-          idempotencyKey: `sub-${sub.id}-${Date.now()}`,
-          serviceNameSnapshot: pkg.name, serviceBasePriceMinor: pkg.pricePerWashMinor,
-          platformFeeMinor: fee, totalPriceMinor: pkg.pricePerWashMinor + fee,
-          currencyCode: pkg.currencyCode, locationTimezone: pkg.location.timezone,
-          scheduledStartAtUtc: new Date(startDate + "T10:00:00Z"),
-          scheduledEndAtUtc: new Date(startDate + "T11:00:00Z"),
-          bookingSource: "PLATFORM",
-        },
+      const serviceId = pkg.includedServiceIds[0];
+      if (!serviceId) {
+        unassignable.push({ vehicleId, reason: "NO_SERVICE_IN_PACKAGE" });
+        subscriptions.push(sub);
+        continue;
+      }
+
+      const vehicle = await prisma.vehicle.findUnique({
+        where: { id: vehicleId },
+        select: { lengthInches: true, unitNumber: true },
       });
+      const vClass = deriveVehicleClassFromLength(vehicle?.lengthInches ?? null);
+      if (!vClass) {
+        unassignable.push({ vehicleId, reason: "VEHICLE_CLASS_UNRESOLVED" });
+        subscriptions.push(sub);
+        continue;
+      }
+
+      const duration = (await resolveServiceDuration(prisma, serviceId, vClass)) ?? 60;
+      const startUtc = new Date(startDate + "T10:00:00Z");
+      const endUtc = new Date(startUtc.getTime() + duration * 60 * 1000);
+
+      try {
+        await prisma.$transaction(async (tx: any) => {
+          const bay = await findAvailableBayTx(tx, {
+            locationId: pkg.locationId,
+            vehicleClass: vClass,
+            startUtc,
+            durationMins: duration,
+          });
+          if (!bay) throw new Error("NO_BAY_AVAILABLE");
+
+          await tx.booking.create({
+            data: {
+              locationId: pkg.locationId, serviceId, customerId: user.id, vehicleId,
+              status: "PROVIDER_CONFIRMED",
+              idempotencyKey: `sub-${sub.id}-${Date.now()}`,
+              serviceNameSnapshot: pkg.name, serviceBasePriceMinor: pkg.pricePerWashMinor,
+              platformFeeMinor: fee, totalPriceMinor: pkg.pricePerWashMinor + fee,
+              currencyCode: pkg.currencyCode, locationTimezone: pkg.location.timezone,
+              scheduledStartAtUtc: startUtc,
+              scheduledEndAtUtc: endUtc,
+              bookingSource: "PLATFORM",
+              washBayId: bay.id,
+            },
+          });
+        }, { isolationLevel: "Serializable" });
+      } catch (txErr: any) {
+        unassignable.push({
+          vehicleId,
+          reason: txErr?.message === "NO_BAY_AVAILABLE" ? "NO_BAY_AVAILABLE" : "BOOKING_CREATE_FAILED",
+        });
+      }
 
       subscriptions.push(sub);
     }
 
-    res.status(201).json({ subscriptions });
+    res.status(201).json({ subscriptions, unassignable });
   } catch (err: any) {
     req.log.error({ err }, "Failed to create subscriptions");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to subscribe" });

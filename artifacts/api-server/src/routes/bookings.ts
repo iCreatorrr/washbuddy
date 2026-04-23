@@ -7,6 +7,14 @@ import { calculatePlatformFee, calculateAllInPrice } from "../lib/feeCalculator"
 import { incrementRespondedInSla } from "../lib/slaEnforcer";
 import { isDriver, getFleetId } from "../lib/auth";
 import { notifyBookingRequested, notifyBookingConfirmed, notifyBookingDeclined, notifyBookingCancelled, notifyBookingCompleted } from "../lib/bookingNotifier";
+import {
+  deriveVehicleClassFromLength,
+  findAvailableBayTx,
+  normalizeVehicleClass,
+  resolveServiceDuration,
+  type VehicleClass,
+} from "../lib/bayMatching";
+import { findNextAvailableSlot } from "../lib/nextAvailableSlot";
 import crypto from "crypto";
 
 const router: IRouter = Router();
@@ -104,8 +112,19 @@ router.post("/bookings/hold", requireAuth, async (req, res) => {
       }
     }
 
+    // Resolve the vehicle class up front: the hold checks that at least one
+    // compatible bay is free for the requested window, matching what the
+    // driver was shown by the availability endpoint.
+    const vehicleClassHint = await resolveBookingVehicleClass(prisma, {
+      vehicleId: vehicleId || null,
+      fleetPlaceholderClass: req.body.fleetPlaceholderClass || null,
+    });
+
     const slotStart = new Date(slotStartUtc);
-    const slotEnd = new Date(slotStart.getTime() + service.durationMins * 60 * 1000);
+    const durationMins = vehicleClassHint
+      ? (await resolveServiceDuration(prisma, service.id, vehicleClassHint)) ?? service.durationMins
+      : service.durationMins;
+    const slotEnd = new Date(slotStart.getTime() + durationMins * 60 * 1000);
     const now = new Date();
 
     const leadTimeDeadline = new Date(slotStart.getTime() - service.leadTimeMins * 60 * 1000);
@@ -118,29 +137,23 @@ router.post("/bookings/hold", requireAuth, async (req, res) => {
     const expiresAt = new Date(now.getTime() + HOLD_TTL_MS);
 
     const hold = await prisma.$transaction(async (tx) => {
-      const existingBookings = await tx.booking.count({
-        where: {
+      // Bay-level guard: if we know the class, require a matching free bay;
+      // otherwise require any free bay. Matches the availability endpoint.
+      const classToCheck: VehicleClass = vehicleClassHint || "MEDIUM";
+      const classesToTry: VehicleClass[] = vehicleClassHint
+        ? [vehicleClassHint]
+        : ["SMALL", "MEDIUM", "LARGE", "EXTRA_LARGE"];
+      let anyBay: { id: string } | null = null;
+      for (const c of classesToTry) {
+        anyBay = await findAvailableBayTx(tx, {
           locationId,
-          serviceId,
-          scheduledStartAtUtc: slotStart,
-          status: { notIn: ["CUSTOMER_CANCELLED", "PROVIDER_CANCELLED", "EXPIRED", "NO_SHOW", "REFUNDED"] },
-        },
-      });
-
-      const activeHolds = await tx.bookingHold.count({
-        where: {
-          locationId,
-          serviceId,
-          slotStartAtUtc: slotStart,
-          bookingId: null,
-          isReleased: false,
-          expiresAtUtc: { gt: now },
-        },
-      });
-
-      if (existingBookings + activeHolds >= service.capacityPerSlot) {
-        throw new Error("SLOT_FULL");
+          vehicleClass: c,
+          startUtc: slotStart,
+          durationMins,
+        });
+        if (anyBay) break;
       }
+      if (!anyBay) throw new Error("NO_BAY_AVAILABLE");
 
       return tx.bookingHold.create({
         data: {
@@ -165,14 +178,39 @@ router.post("/bookings/hold", requireAuth, async (req, res) => {
       },
     });
   } catch (err: any) {
-    if (err?.message === "SLOT_FULL") {
-      res.status(409).json({ errorCode: "SLOT_FULL", message: "No capacity remaining for this slot" });
+    if (err?.message === "NO_BAY_AVAILABLE") {
+      res.status(409).json({
+        errorCode: "NO_BAY_AVAILABLE",
+        message: "No compatible wash bay is free for this slot.",
+      });
       return;
     }
     req.log.error({ err }, "Failed to create booking hold");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to create booking hold" });
   }
 });
+
+/**
+ * Resolve the vehicle class for a booking from either the vehicle's length
+ * or an explicit fleet placeholder. Returns null when neither is usable —
+ * callers decide how to handle that (e.g. auto-assign with best-effort
+ * MEDIUM fallback vs. hard reject). We reject at booking-creation time;
+ * hold creation is permissive.
+ */
+async function resolveBookingVehicleClass(
+  tx: any,
+  params: { vehicleId: string | null; fleetPlaceholderClass: string | null },
+): Promise<VehicleClass | null> {
+  if (params.vehicleId) {
+    const vehicle = await tx.vehicle.findUnique({
+      where: { id: params.vehicleId },
+      select: { lengthInches: true },
+    });
+    const fromLength = deriveVehicleClassFromLength(vehicle?.lengthInches ?? null);
+    if (fromLength) return fromLength;
+  }
+  return normalizeVehicleClass(params.fleetPlaceholderClass);
+}
 
 router.post("/bookings", requireAuth, async (req, res) => {
   try {
@@ -196,9 +234,13 @@ router.post("/bookings", requireAuth, async (req, res) => {
     }
 
     const user = req.user as SessionUser;
-    const now = new Date();
 
-    const booking = await prisma.$transaction(async (tx) => {
+    // Runs the hold→booking creation inside a Serializable transaction and
+    // auto-assigns a bay. Wrapped so we can retry once on serialization
+    // conflict (another concurrent booking that grabbed the same bay).
+    const runCreate = async () => prisma.$transaction(async (tx) => {
+      const now = new Date();
+
       const hold = await tx.bookingHold.findFirst({
         where: {
           id: holdId,
@@ -208,29 +250,40 @@ router.post("/bookings", requireAuth, async (req, res) => {
           expiresAtUtc: { gt: now },
         },
       });
-
-      if (!hold) {
-        throw new Error("HOLD_NOT_AVAILABLE");
-      }
+      if (!hold) throw new Error("HOLD_NOT_AVAILABLE");
 
       const service = await tx.service.findUnique({
         where: { id: hold.serviceId },
         include: { location: true },
       });
+      if (!service) throw new Error("SERVICE_NOT_FOUND");
 
-      if (!service) {
-        throw new Error("SERVICE_NOT_FOUND");
-      }
+      const vClass = await resolveBookingVehicleClass(tx, {
+        vehicleId: vehicleId || null,
+        fleetPlaceholderClass: fleetPlaceholderClass || null,
+      });
+      if (!vClass) throw new Error("VEHICLE_CLASS_UNRESOLVED");
+
+      const duration = (await resolveServiceDuration(tx, service.id, vClass)) ?? service.durationMins;
+      const startUtc = hold.slotStartAtUtc;
+      const endUtc = new Date(startUtc.getTime() + duration * 60 * 1000);
+
+      const bay = await findAvailableBayTx(tx, {
+        locationId: hold.locationId,
+        vehicleClass: vClass,
+        startUtc,
+        durationMins: duration,
+      });
+      if (!bay) throw new Error("SLOT_JUST_TAKEN");
 
       const calculatedFee = calculatePlatformFee(service.basePriceMinor);
       const totalPrice = service.basePriceMinor + calculatedFee;
 
       // PRD 3.3: 5 min SLA for bookings within 24h, 10 min for 24h+ out
       const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-      const responseSla = hold.slotStartAtUtc.getTime() - now.getTime() < TWENTY_FOUR_HOURS_MS
+      const responseSla = startUtc.getTime() - now.getTime() < TWENTY_FOUR_HOURS_MS
         ? service.location.responseSlaUnder1hMins
         : service.location.responseSlaFutureMins;
-
       const responseDeadline = new Date(now.getTime() + responseSla * 60 * 1000);
 
       const b = await tx.booking.create({
@@ -248,10 +301,12 @@ router.post("/bookings", requireAuth, async (req, res) => {
           totalPriceMinor: totalPrice,
           currencyCode: service.currencyCode,
           locationTimezone: service.location.timezone,
-          scheduledStartAtUtc: hold.slotStartAtUtc,
-          scheduledEndAtUtc: hold.slotEndAtUtc,
+          scheduledStartAtUtc: startUtc,
+          scheduledEndAtUtc: endUtc,
           providerResponseDeadlineUtc: service.requiresConfirmation ? responseDeadline : null,
           bookingHoldExpiresUtc: hold.expiresAtUtc,
+          washBayId: bay.id,
+          bookingSource: "PLATFORM",
         },
       });
 
@@ -261,7 +316,7 @@ router.post("/bookings", requireAuth, async (req, res) => {
           fromStatus: null,
           toStatus: service.requiresConfirmation ? "REQUESTED" : "PROVIDER_CONFIRMED",
           changedBy: user.id,
-          reason: "Booking created",
+          reason: `Booking created; assigned to ${bay.name}`,
         },
       });
 
@@ -270,16 +325,33 @@ router.post("/bookings", requireAuth, async (req, res) => {
         data: { bookingId: b.id },
       });
 
-      return b;
+      return { booking: b, service, vClass, duration, startUtc };
     }, { isolationLevel: "Serializable" });
 
-    res.status(201).json({ booking });
+    let result;
+    try {
+      result = await runCreate();
+    } catch (err: any) {
+      // Prisma emits P2034 for serialization failures. Retry once.
+      const isSerializationFailure = err?.code === "P2034" || /could not serialize/i.test(err?.message || "");
+      if (isSerializationFailure) {
+        try {
+          result = await runCreate();
+        } catch (err2: any) {
+          // Convert to SLOT_JUST_TAKEN so the client renders the alternate-slot CTA.
+          throw Object.assign(new Error("SLOT_JUST_TAKEN"), { cause: err2 });
+        }
+      } else {
+        throw err;
+      }
+    }
 
-    // Fire-and-forget notifications
-    if (booking.status === "REQUESTED") {
-      notifyBookingRequested(booking.id).catch(() => {});
-    } else if (booking.status === "PROVIDER_CONFIRMED") {
-      notifyBookingConfirmed(booking.id).catch(() => {});
+    res.status(201).json({ booking: result.booking });
+
+    if (result.booking.status === "REQUESTED") {
+      notifyBookingRequested(result.booking.id).catch(() => {});
+    } else if (result.booking.status === "PROVIDER_CONFIRMED") {
+      notifyBookingConfirmed(result.booking.id).catch(() => {});
     }
   } catch (err: any) {
     if (err?.message === "HOLD_NOT_AVAILABLE") {
@@ -288,6 +360,52 @@ router.post("/bookings", requireAuth, async (req, res) => {
     }
     if (err?.message === "SERVICE_NOT_FOUND") {
       res.status(404).json({ errorCode: "NOT_FOUND", message: "Service no longer exists" });
+      return;
+    }
+    if (err?.message === "VEHICLE_CLASS_UNRESOLVED") {
+      res.status(400).json({
+        errorCode: "VEHICLE_CLASS_UNRESOLVED",
+        message: "Couldn't determine vehicle class. Make sure the vehicle has a valid length, or supply a fleetPlaceholderClass.",
+      });
+      return;
+    }
+    if (err?.message === "SLOT_JUST_TAKEN") {
+      // Compute a helpful next-available slot for the client's one-tap retry.
+      try {
+        const { holdId: holdIdFromBody } = req.body;
+        const hold = await prisma.bookingHold.findUnique({ where: { id: holdIdFromBody } });
+        if (hold) {
+          const vClass = await resolveBookingVehicleClass(prisma, {
+            vehicleId: req.body.vehicleId || null,
+            fleetPlaceholderClass: req.body.fleetPlaceholderClass || null,
+          });
+          const duration = vClass
+            ? (await resolveServiceDuration(prisma, hold.serviceId, vClass)) ?? 0
+            : 0;
+          const next = vClass && duration
+            ? await findNextAvailableSlot(prisma, {
+                locationId: hold.locationId,
+                serviceId: hold.serviceId,
+                vehicleClass: vClass,
+                durationMins: duration,
+                afterUtc: hold.slotStartAtUtc,
+              })
+            : null;
+          res.status(409).json({
+            errorCode: "SLOT_JUST_TAKEN",
+            message: "Another booking just took this slot. Try the next available time.",
+            nextAvailableSlot: next,
+          });
+          return;
+        }
+      } catch (nextErr) {
+        req.log.warn({ err: nextErr }, "Failed to compute nextAvailableSlot");
+      }
+      res.status(409).json({
+        errorCode: "SLOT_JUST_TAKEN",
+        message: "Another booking just took this slot.",
+        nextAvailableSlot: null,
+      });
       return;
     }
     req.log.error({ err }, "Failed to create booking");

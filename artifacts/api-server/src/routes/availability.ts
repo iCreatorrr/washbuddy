@@ -1,12 +1,18 @@
 import { Router, type IRouter } from "express";
 import { prisma } from "@workspace/db";
 import { getLocalTimeInfo, localTimeToUtc } from "../lib/timezone";
+import {
+  findAvailableBayTx,
+  normalizeVehicleClass,
+  resolveServiceDuration,
+  type VehicleClass,
+} from "../lib/bayMatching";
 
 const router: IRouter = Router();
 
 router.get("/locations/:locationId/availability", async (req, res) => {
   try {
-    const { date, serviceId } = req.query;
+    const { date, serviceId, vehicleClass: vehicleClassRaw } = req.query;
 
     if (!date || !serviceId) {
       res.status(400).json({
@@ -15,6 +21,8 @@ router.get("/locations/:locationId/availability", async (req, res) => {
       });
       return;
     }
+
+    const vehicleClass = normalizeVehicleClass(vehicleClassRaw as string | null | undefined);
 
     const location = await prisma.location.findUnique({
       where: { id: req.params.locationId as string },
@@ -38,8 +46,6 @@ router.get("/locations/:locationId/availability", async (req, res) => {
     const dateStr = date as string;
     const tz = location.timezone;
 
-    // Determine the day of week in the LOCATION'S timezone for the requested date.
-    // Parse the date as a local date in the location's timezone.
     const localInfo = getLocalTimeInfo(new Date(`${dateStr}T12:00:00Z`), tz);
     const dayOfWeek = localInfo.dayOfWeek;
 
@@ -53,16 +59,24 @@ router.get("/locations/:locationId/availability", async (req, res) => {
       return;
     }
 
+    // Service duration is class-aware when the caller specifies a vehicle
+    // class; otherwise we use the base duration. The driver's availability
+    // view typically hits this before the vehicle is picked, in which case
+    // the base duration is the most conservative estimate.
+    const effectiveClass: VehicleClass = vehicleClass || "MEDIUM";
+    const resolvedDuration = vehicleClass
+      ? await resolveServiceDuration(prisma, service.id, effectiveClass)
+      : service.durationMins;
+    const slotDuration = resolvedDuration ?? service.durationMins;
+
     const slots: Array<{
       startTime: string;
       endTime: string;
       startUtc: string;
       endUtc: string;
       available: boolean;
-      remainingCapacity: number;
+      reason?: string;
     }> = [];
-
-    const slotDuration = service.durationMins;
     const now = new Date();
 
     for (const window of windows) {
@@ -81,46 +95,47 @@ router.get("/locations/:locationId/availability", async (req, res) => {
 
         const startTime = `${String(startH).padStart(2, "0")}:${String(startM).padStart(2, "0")}`;
         const endTime = `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
-
-        // Convert local slot times to UTC using the location's timezone
         const slotStartUtc = localTimeToUtc(dateStr, startTime, tz);
         const slotEndUtc = localTimeToUtc(dateStr, endTime, tz);
 
         const leadTimeDeadline = new Date(slotStartUtc.getTime() - service.leadTimeMins * 60 * 1000);
-        const tooLate = now > leadTimeDeadline;
+        if (now > leadTimeDeadline) {
+          slots.push({ startTime, endTime, startUtc: slotStartUtc.toISOString(), endUtc: slotEndUtc.toISOString(), available: false, reason: "LEAD_TIME_PASSED" });
+          continue;
+        }
 
-        const existingBookings = await prisma.booking.count({
-          where: {
+        // Drive slot availability off bay occupancy, not per-service capacity.
+        // When the caller supplies a vehicleClass we filter precisely; when
+        // they don't, we check whether ANY supported class has a free bay —
+        // the driver still can't see a slot that zero bays can host.
+        let bayFree: { id: string } | null = null;
+        if (vehicleClass) {
+          bayFree = await findAvailableBayTx(prisma, {
             locationId: location.id,
-            serviceId: service.id,
-            scheduledStartAtUtc: slotStartUtc,
-            status: {
-              notIn: ["CUSTOMER_CANCELLED", "PROVIDER_CANCELLED", "EXPIRED", "NO_SHOW", "REFUNDED"],
-            },
-          },
-        });
-
-        const activeHolds = await prisma.bookingHold.count({
-          where: {
-            locationId: location.id,
-            serviceId: service.id,
-            slotStartAtUtc: slotStartUtc,
-            bookingId: null,
-            isReleased: false,
-            expiresAtUtc: { gt: now },
-          },
-        });
-
-        const usedCapacity = existingBookings + activeHolds;
-        const remaining = Math.max(0, service.capacityPerSlot - usedCapacity);
+            vehicleClass,
+            startUtc: slotStartUtc,
+            durationMins: slotDuration,
+          });
+        } else {
+          const classesToTry: VehicleClass[] = ["SMALL", "MEDIUM", "LARGE", "EXTRA_LARGE"];
+          for (const c of classesToTry) {
+            bayFree = await findAvailableBayTx(prisma, {
+              locationId: location.id,
+              vehicleClass: c,
+              startUtc: slotStartUtc,
+              durationMins: slotDuration,
+            });
+            if (bayFree) break;
+          }
+        }
 
         slots.push({
           startTime,
           endTime,
           startUtc: slotStartUtc.toISOString(),
           endUtc: slotEndUtc.toISOString(),
-          available: remaining > 0 && !tooLate,
-          remainingCapacity: remaining,
+          available: !!bayFree,
+          reason: bayFree ? undefined : "NO_BAY_AVAILABLE",
         });
       }
     }
@@ -130,7 +145,8 @@ router.get("/locations/:locationId/availability", async (req, res) => {
       locationId: location.id,
       serviceId: service.id,
       serviceName: service.name,
-      durationMins: service.durationMins,
+      durationMins: slotDuration,
+      vehicleClass: vehicleClass || null,
       slots,
     });
   } catch (err) {

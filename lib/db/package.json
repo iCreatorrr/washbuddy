@@ -21,6 +21,7 @@
     "demo:validate-future": "tsx src/demo-seed/scripts/validate-future-bookings.ts",
     "demo:purge-future": "tsx src/demo-seed/scripts/purge.ts",
     "demo:backfill-bays": "tsx src/demo-seed/scripts/backfill-bays.ts",
+    "demo:cleanup-unassigned-bookings": "tsx src/demo-seed/scripts/cleanup-unassigned-bookings.ts",
     "studio": "prisma studio --schema=./prisma/schema.prisma"
   },
   "devDependencies": {
