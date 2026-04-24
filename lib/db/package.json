@@ -22,6 +22,7 @@
     "demo:purge-future": "tsx src/demo-seed/scripts/purge.ts",
     "demo:backfill-bays": "tsx src/demo-seed/scripts/backfill-bays.ts",
     "demo:cleanup-unassigned-bookings": "tsx src/demo-seed/scripts/cleanup-unassigned-bookings.ts",
+    "demo:configure-bronx-bays": "tsx src/demo-seed/scripts/configure-bronx-bays.ts",
     "studio": "prisma studio --schema=./prisma/schema.prisma"
   },
   "devDependencies": {
