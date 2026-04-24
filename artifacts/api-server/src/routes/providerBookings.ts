@@ -305,23 +305,21 @@ router.get("/providers/:providerId/locations/:locationId/bay-timeline", requireA
 
     const dayOfWeek = new Date(dateStr + "T12:00:00Z").getUTCDay();
 
-    // Only include the synthetic "Unassigned" row when real bays exist, so the
-    // frontend can render a proper empty state when bayCount === 0.
-    const rows = bays.length > 0
-      ? [
-          { id: "unassigned", name: "Unassigned", supportedClasses: [], isActive: true, outOfServiceSince: null, outOfServiceReason: null, outOfServiceEstReturn: null, displayOrder: -1, bookings: unassignedBookings },
-          ...bays.map((bay) => ({
-            id: bay.id, name: bay.name, supportedClasses: bay.supportedClasses, isActive: bay.isActive,
-            outOfServiceSince: bay.outOfServiceSince, outOfServiceReason: bay.outOfServiceReason,
-            outOfServiceEstReturn: bay.outOfServiceEstReturn, displayOrder: bay.displayOrder,
-            bookings: bayBookingsMap.get(bay.id) || [],
-          })),
-        ]
-      : [];
+    // Since auto-assignment landed, platform bookings should always carry a
+    // washBayId. The timeline no longer renders a synthetic "Unassigned" row;
+    // instead we return any stragglers in `unassignedBookings` so the
+    // frontend can flag them with a warning banner.
+    const rows = bays.map((bay) => ({
+      id: bay.id, name: bay.name, supportedClasses: bay.supportedClasses, isActive: bay.isActive,
+      outOfServiceSince: bay.outOfServiceSince, outOfServiceReason: bay.outOfServiceReason,
+      outOfServiceEstReturn: bay.outOfServiceEstReturn, displayOrder: bay.displayOrder,
+      bookings: bayBookingsMap.get(bay.id) || [],
+    }));
 
     res.json({
       bays: rows,
       bayCount: bays.length,
+      unassignedBookings,
       operatingWindows: location.operatingWindows.filter((w) => w.dayOfWeek === dayOfWeek),
       locationTimezone: location.timezone,
     });

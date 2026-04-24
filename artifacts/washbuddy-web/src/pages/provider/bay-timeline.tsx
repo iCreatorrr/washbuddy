@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Card, Badge, Button } from "@/components/ui";
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Wrench, LayoutGrid } from "lucide-react";
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Wrench, LayoutGrid, AlertTriangle } from "lucide-react";
 import { useAuth } from "@/contexts/auth";
 import { useLocation } from "wouter";
 import { format, addDays, subDays, parseISO } from "date-fns";
@@ -73,7 +73,8 @@ export default function BayTimeline() {
   }, []);
 
   const bays = data?.bays || [];
-  const bayCount = data?.bayCount ?? bays.filter((b: any) => b.id !== "unassigned").length;
+  const bayCount = data?.bayCount ?? bays.length;
+  const unassignedBookings: any[] = data?.unassignedBookings || [];
   const tz = data?.locationTimezone || "America/New_York";
 
   function getBlockPosition(startUtc: string, endUtc: string) {
@@ -148,6 +149,27 @@ export default function BayTimeline() {
           </select>
         </div>
       </Card>
+
+      {/* Orphan-booking warning */}
+      {!isLoading && unassignedBookings.length > 0 && (
+        <div
+          role="button"
+          onClick={() => navigate(`/bookings/${unassignedBookings[0].id}`)}
+          className="rounded-xl border border-amber-300 bg-amber-50 p-3 flex items-start gap-3 cursor-pointer hover:bg-amber-100 transition-colors"
+        >
+          <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-bold text-amber-900">
+              {unassignedBookings.length === 1
+                ? "1 booking has no bay assigned — click to resolve"
+                : `${unassignedBookings.length} bookings have no bay assigned — click to open the first`}
+            </p>
+            <p className="text-sm text-amber-800 mt-0.5">
+              This shouldn't happen under normal operation. Reassign from the booking's detail page.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Timeline Grid */}
       {isLoading ? (
