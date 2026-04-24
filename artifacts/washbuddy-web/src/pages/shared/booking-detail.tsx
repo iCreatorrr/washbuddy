@@ -252,8 +252,19 @@ export default function BookingDetail() {
               <div className="bg-slate-100 p-3 rounded-xl text-slate-500"><User className="h-5 w-5" /></div>
               <div>
                 <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Customer</p>
-                <p className="font-bold text-slate-900">{b.customer?.firstName} {b.customer?.lastName}</p>
-                <p className="text-sm text-slate-500">{b.customer?.email}</p>
+                {b.isOffPlatform ? (
+                  <>
+                    <p className="font-bold text-slate-900">{b.offPlatformClientName || "Walk-in"}</p>
+                    <p className="text-sm text-slate-500">
+                      {b.offPlatformClientPhone || b.offPlatformClientEmail || "No contact info on file"}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-bold text-slate-900">{b.customer?.firstName} {b.customer?.lastName}</p>
+                    <p className="text-sm text-slate-500">{b.customer?.email}</p>
+                  </>
+                )}
               </div>
             </div>
           )}
