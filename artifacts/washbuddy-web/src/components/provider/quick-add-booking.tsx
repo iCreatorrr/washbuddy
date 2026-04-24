@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Button, Input, Label, Badge } from "@/components/ui";
 import { X, Check, Droplets, Armchair, Sparkles, CircleDot, Zap, Cog, Package, Plus, Minus, ArrowLeft, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, localDateTimeToUtc } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { getServiceColors } from "@/lib/service-colors";
 import * as Icons from "lucide-react";
@@ -35,6 +35,7 @@ function ServiceIcon({ name, className }: { name: string; className?: string }) 
 interface QuickAddProps {
   providerId: string;
   locationId: string;
+  locationTimezone: string;
   onClose: () => void;
   onSuccess: () => void;
   prefillBayId?: string;
@@ -50,7 +51,7 @@ interface SelectedAddOn {
   isCustomOneOff: boolean;
 }
 
-export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, prefillBayId, prefillDate, prefillTime }: QuickAddProps) {
+export function QuickAddBooking({ providerId, locationId, locationTimezone, onClose, onSuccess, prefillBayId, prefillDate, prefillTime }: QuickAddProps) {
   const [step, setStep] = useState<1 | 2>(1);
   const [source, setSource] = useState<"DIRECT" | "WALK_IN">("DIRECT");
   const [clientName, setClientName] = useState("");
@@ -198,7 +199,8 @@ export function QuickAddBooking({ providerId, locationId, onClose, onSuccess, pr
     if (!clientName.trim() || selectedServiceIds.length === 0) { toast.error("Client name and at least one service required"); return; }
     setSaving(true);
     try {
-      const startUtc = new Date(`${date}T${startTime}:00Z`);
+      // startTime is wall-clock in the location's timezone; convert to true UTC.
+      const startUtc = localDateTimeToUtc(date, startTime, locationTimezone);
       const endUtc = new Date(startUtc.getTime() + totalDuration * 60000);
 
       const body: any = {

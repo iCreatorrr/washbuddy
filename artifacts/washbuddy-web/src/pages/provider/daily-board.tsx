@@ -127,6 +127,7 @@ export default function DailyBoard() {
         <QuickAddBooking
           providerId={providerId}
           locationId={selectedLocation}
+          locationTimezone={locations.find((l: any) => l.id === selectedLocation)?.timezone || "America/New_York"}
           onClose={() => setIsQuickAddOpen(false)}
           onSuccess={refresh}
         />

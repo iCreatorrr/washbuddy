@@ -163,7 +163,7 @@ export default function FleetOverview() {
                       <td className="py-2.5 px-3 font-medium text-slate-900">{b.vehicle?.unitNumber || "—"}</td>
                       <td className="py-2.5 px-3 text-slate-600">{b.serviceNameSnapshot}</td>
                       <td className="py-2.5 px-3 text-slate-500 hidden md:table-cell">{formatLocationDisplay(b.location?.provider?.name, b.location?.name)}</td>
-                      <td className="py-2.5 px-3 text-slate-500">{formatDate(b.scheduledStartAtUtc, "MMM d")}</td>
+                      <td className="py-2.5 px-3 text-slate-500">{formatDate(b.scheduledStartAtUtc, "MMM d", b.locationTimezone)}</td>
                       <td className="py-2.5 px-3"><Badge className={getStatusColor(b.status)}>{getStatusLabel(b.status)}</Badge></td>
                       <td className="py-2.5 px-3 text-right font-bold text-slate-900">{formatCurrency(b.totalPriceMinor, b.currencyCode)}</td>
                     </tr>

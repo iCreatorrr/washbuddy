@@ -170,7 +170,7 @@ export default function MyBookings() {
                   <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm font-medium text-slate-500">
                     <span className="flex items-center gap-1.5">
                       <Calendar className="h-4 w-4 text-slate-400" />
-                      {formatDate(booking.scheduledStartAtUtc, "EEE, MMM d · h:mm a")}
+                      {formatDate(booking.scheduledStartAtUtc, "EEE, MMM d · h:mm a", booking.locationTimezone)}
                     </span>
                     <span className="flex items-center gap-1.5">
                       <MapPin className="h-4 w-4 text-slate-400" />
@@ -202,7 +202,7 @@ export default function MyBookings() {
                         setCancelTarget({
                           id: booking.id,
                           name: booking.serviceNameSnapshot,
-                          date: formatDate(booking.scheduledStartAtUtc, "MMM d, yyyy") || "",
+                          date: formatDate(booking.scheduledStartAtUtc, "MMM d, yyyy", booking.locationTimezone) || "",
                         });
                       }}
                     >

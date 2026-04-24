@@ -150,7 +150,7 @@ export default function ProviderDashboard() {
       <h3 className="font-bold text-slate-900 text-lg mb-1">{b.serviceNameSnapshot}</h3>
       <div className="space-y-1 text-sm text-slate-600 mb-4">
         <p className="font-medium">{b.customer?.firstName} {b.customer?.lastName}</p>
-        <p className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-slate-400" /> {formatDate(b.scheduledStartAtUtc, "EEE, MMM d · h:mm a")}</p>
+        <p className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-slate-400" /> {formatDate(b.scheduledStartAtUtc, "EEE, MMM d · h:mm a", b.locationTimezone)}</p>
         {b.vehicle && <p className="flex items-center gap-1.5"><Truck className="h-3.5 w-3.5 text-slate-400" /> {b.vehicle.unitNumber} ({b.vehicle.subtypeCode?.replace(/_/g, " ")})</p>}
         <p className="font-bold text-slate-900">{formatCurrency(b.serviceBasePriceMinor, b.currencyCode)}</p>
       </div>
@@ -179,7 +179,7 @@ export default function ProviderDashboard() {
     <Card className="p-5 border-2 hover:border-blue-300 transition-colors">
       <div className="flex justify-between items-start mb-3">
         <Badge className={getStatusColor(b.status)}>{getStatusLabel(b.status)}</Badge>
-        <span className="text-xs font-bold text-slate-400">{formatDate(b.scheduledStartAtUtc, "h:mm a")}</span>
+        <span className="text-xs font-bold text-slate-400">{formatDate(b.scheduledStartAtUtc, "h:mm a", b.locationTimezone)}</span>
       </div>
       <h3 className="font-bold text-slate-900 text-lg mb-1">{b.serviceNameSnapshot}</h3>
       <div className="space-y-1 text-sm text-slate-600 mb-4">

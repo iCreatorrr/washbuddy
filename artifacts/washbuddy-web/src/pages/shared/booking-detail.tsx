@@ -224,8 +224,8 @@ export default function BookingDetail() {
             <div className="bg-slate-100 p-3 rounded-xl text-slate-500"><Calendar className="h-5 w-5" /></div>
             <div>
               <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Schedule</p>
-              <p className="font-bold text-slate-900">{formatDate(b.scheduledStartAtUtc)}</p>
-              <p className="text-sm text-slate-500">to {formatDate(b.scheduledEndAtUtc, "h:mm a")}</p>
+              <p className="font-bold text-slate-900">{formatDate(b.scheduledStartAtUtc, "MMM d, yyyy • h:mm a", b.locationTimezone)}</p>
+              <p className="text-sm text-slate-500">to {formatDate(b.scheduledEndAtUtc, "h:mm a", b.locationTimezone)}</p>
             </div>
           </div>
 

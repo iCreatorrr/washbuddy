@@ -229,7 +229,7 @@ export default function ClientsPage() {
                         <div className="flex justify-between items-start">
                           <div>
                             <p className="text-sm font-semibold text-slate-900">{b.serviceNameSnapshot}</p>
-                            <p className="text-xs text-slate-500">{formatDate(b.scheduledStartAtUtc, "MMM d, yyyy")}</p>
+                            <p className="text-xs text-slate-500">{formatDate(b.scheduledStartAtUtc, "MMM d, yyyy", b.locationTimezone)}</p>
                             {b.locationName && <p className="text-xs text-slate-400">{b.locationName}</p>}
                           </div>
                           <div className="text-right">

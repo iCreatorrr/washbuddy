@@ -13,13 +13,68 @@ export function formatCurrency(cents: number, currencyCode = "USD") {
   }).format(cents / 100);
 }
 
-export function formatDate(dateString: string | undefined | null, formatStr = "MMM d, yyyy • h:mm a") {
+/**
+ * Project the wall-clock components of a UTC date into the given IANA
+ * timezone, returned as a "faux-local" Date whose getHours/getDate/etc.
+ * match what a viewer in that timezone would see. Intended only as a
+ * vehicle for passing components into date-fns — do not convert back
+ * with toISOString().
+ */
+function dateInTimezone(d: Date, timezone: string): Date {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "0";
+  const hourStr = get("hour");
+  const hour = hourStr === "24" ? 0 : parseInt(hourStr, 10);
+  return new Date(
+    parseInt(get("year"), 10),
+    parseInt(get("month"), 10) - 1,
+    parseInt(get("day"), 10),
+    hour,
+    parseInt(get("minute"), 10),
+    parseInt(get("second"), 10),
+  );
+}
+
+export function formatDate(
+  dateString: string | undefined | null,
+  formatStr = "MMM d, yyyy • h:mm a",
+  timezone?: string,
+) {
   if (!dateString) return "N/A";
   try {
-    return format(parseISO(dateString), formatStr);
+    const parsed = parseISO(dateString);
+    const source = timezone ? dateInTimezone(parsed, timezone) : parsed;
+    return format(source, formatStr);
   } catch (e) {
     return dateString;
   }
+}
+
+/**
+ * Convert a local wall-clock date+time in the given IANA timezone to a
+ * UTC Date, DST-aware. Mirrors the backend's timezone.ts implementation
+ * without crossing the HTTP boundary.
+ */
+export function localDateTimeToUtc(dateStr: string, timeStr: string, timezone: string): Date {
+  const approxUtc = new Date(`${dateStr}T${timeStr}:00Z`);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(approxUtc);
+  const hourStr = parts.find((p) => p.type === "hour")?.value ?? "0";
+  const minuteStr = parts.find((p) => p.type === "minute")?.value ?? "0";
+  const actualH = hourStr === "24" ? 0 : parseInt(hourStr, 10);
+  const actualM = parseInt(minuteStr, 10);
+  const [targetH, targetM] = timeStr.split(":").map(Number);
+  const diffMinutes = (targetH * 60 + targetM) - (actualH * 60 + actualM);
+  return new Date(approxUtc.getTime() + diffMinutes * 60 * 1000);
 }
 
 export function getStatusColor(status: string) {
