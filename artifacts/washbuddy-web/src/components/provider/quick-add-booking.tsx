@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Button, Input, Label, Badge } from "@/components/ui";
 import { X, Check, Droplets, Armchair, Sparkles, CircleDot, Zap, Cog, Package, Plus, Minus, ArrowLeft, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
-import { formatCurrency, localDateTimeToUtc } from "@/lib/utils";
+import { formatCurrency, formatVehicleClass, localDateTimeToUtc } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { getServiceColors } from "@/lib/service-colors";
 import * as Icons from "lucide-react";
@@ -357,7 +357,7 @@ export function QuickAddBooking({ providerId, locationId, locationTimezone, onCl
                 </div>
               </div>
               {availableSlots.length > 0 && bayCount > 0 && (
-                <p className="text-xs text-slate-400">{bayCount} bay{bayCount !== 1 ? "s" : ""} support {vehicleClass.replace("_", " ")} vehicles at this location</p>
+                <p className="text-xs text-slate-400">{bayCount} bay{bayCount !== 1 ? "s" : ""} support {formatVehicleClass(vehicleClass)} vehicles at this location</p>
               )}
               <div><Label>Bay</Label>
                 <select value={bayId} onChange={(e) => setBayId(e.target.value)} className="w-full h-10 px-3 border border-slate-200 rounded-xl text-sm bg-white">

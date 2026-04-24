@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Card, Badge, Button } from "@/components/ui";
 import { Bus, Star, AlertTriangle, Sparkles, ChevronDown, MessageSquare, Camera, StickyNote } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatVehicleClass } from "@/lib/utils";
 import { toast } from "sonner";
 import { PhotoPrompt } from "./photo-prompt";
 
@@ -115,7 +115,7 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
       {expanded && (
         <div className="px-4 pb-4 border-t border-slate-100 pt-3 space-y-3">
           <div className="flex flex-wrap gap-4 text-sm text-slate-600">
-            <span>Vehicle: {b.vehicle?.unitNumber || b.fleetPlaceholderClass || "N/A"}</span>
+            <span>Vehicle: {b.vehicle?.unitNumber || formatVehicleClass(b.fleetPlaceholderClass) || "N/A"}</span>
             <span>Bay: {b.washBay?.name || "Unassigned"}</span>
             <span>Price: {formatCurrency(b.totalPriceMinor, b.currencyCode)}</span>
             {b.discountAmountMinor > 0 && <span className="text-green-600">Discount: -{formatCurrency(b.discountAmountMinor)}</span>}

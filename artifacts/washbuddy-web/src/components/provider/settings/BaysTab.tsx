@@ -4,6 +4,7 @@ import { LayoutGrid, Plus, Pencil, Wrench } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
+import { formatVehicleClass } from "@/lib/utils";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 const VEHICLE_CLASSES = ["SMALL", "MEDIUM", "LARGE", "EXTRA_LARGE"] as const;
@@ -199,7 +200,7 @@ export function BaysTab({ providerId }: { providerId: string }) {
                 </p>
                 <div className="flex flex-wrap gap-1 mt-2">
                   {bay.supportedClasses.map((c) => (
-                    <span key={c} className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600">{c.replace("_", " ")}</span>
+                    <span key={c} className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600">{formatVehicleClass(c)}</span>
                   ))}
                 </div>
               </div>
@@ -241,7 +242,7 @@ export function BaysTab({ providerId }: { providerId: string }) {
                   return (
                     <button key={c} type="button" onClick={() => toggleClass(c)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${on ? "bg-primary text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
-                      {c.replace("_", " ")}
+                      {formatVehicleClass(c)}
                     </button>
                   );
                 })}

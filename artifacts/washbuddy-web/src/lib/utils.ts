@@ -13,6 +13,20 @@ export function formatCurrency(cents: number, currencyCode = "USD") {
   }).format(cents / 100);
 }
 
+const VEHICLE_CLASS_LABELS: Record<string, string> = {
+  SMALL: "Small",
+  MEDIUM: "Medium",
+  LARGE: "Large",
+  EXTRA_LARGE: "Extra Large",
+};
+
+/** Human-readable label for a vehicle class enum value. Unknown values
+ * pass through with underscores replaced by spaces for graceful fallback. */
+export function formatVehicleClass(cls: string | null | undefined): string {
+  if (!cls) return "";
+  return VEHICLE_CLASS_LABELS[cls] ?? cls.replace(/_/g, " ");
+}
+
 /**
  * Project the wall-clock components of a UTC date into the given IANA
  * timezone, returned as a "faux-local" Date whose getHours/getDate/etc.
