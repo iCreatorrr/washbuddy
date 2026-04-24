@@ -206,11 +206,11 @@ export default function LocationDetail() {
     }
   };
 
+  const [holdId, setHoldId] = useState<string | null>(null);
+
   if (isSearchError) return <div className="max-w-5xl mx-auto py-8"><ErrorState message={fetchErrorDetails ? `Could not load location details (${fetchErrorDetails})` : "Could not load location details."} onRetry={fetchLocation} /></div>;
   if (isSearchLoading) return <div className="p-12 text-center text-slate-500"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto" /></div>;
   if (!locData) return <div className="max-w-5xl mx-auto py-8"><ErrorState message="Location not found. It may have been removed." /></div>;
-
-  const [holdId, setHoldId] = useState<string | null>(null);
 
   const handleCreateHold = async () => {
     if (!selectedService || !selectedSlot) return;

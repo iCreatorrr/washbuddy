@@ -114,33 +114,6 @@ export function QuickAddBooking({ providerId, locationId, locationTimezone, onCl
     return slots;
   }, []);
 
-  // Fetch bay availability when date, vehicle class, or duration changes
-  useEffect(() => {
-    if (!providerId || !locationId || !date) return;
-    const dur = totalDuration > 0 ? totalDuration : 30;
-    const params = new URLSearchParams({ date, vehicleClass, durationMins: String(dur) });
-    fetch(`${API_BASE}/api/providers/${providerId}/locations/${locationId}/bay-availability?${params}`, { credentials: "include" })
-      .then((r) => { if (!r.ok) throw new Error("Failed"); return r.json(); })
-      .then((d) => {
-        const slots = d.slots || [];
-        if (typeof d.totalBayCount === "number") setTotalBayCount(d.totalBayCount);
-        if (slots.length > 0) {
-          setAvailableSlots(slots);
-          setBayCount(d.bayCount || 0);
-          // If current time selection is unavailable, auto-select the first available slot
-          const currentSlot = slots.find((s: any) => s.time === startTime);
-          if (currentSlot && !currentSlot.available) {
-            const firstAvail = slots.find((s: any) => s.available);
-            if (firstAvail) setStartTime(firstAvail.time);
-          }
-        } else {
-          setAvailableSlots(fallbackSlots);
-          setBayCount(d.bayCount || 0);
-        }
-      })
-      .catch(() => { setAvailableSlots(fallbackSlots); });
-  }, [providerId, locationId, date, vehicleClass, totalDuration]);
-
   const toggleService = (id: string) => {
     setSelectedServiceIds((prev) => prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]);
   };
@@ -169,6 +142,33 @@ export function QuickAddBooking({ providerId, locationId, locationTimezone, onCl
     const svc = services.find((s) => s.id === id);
     return sum + (svc ? getServiceDuration(svc) : 0);
   }, 0);
+
+  // Fetch bay availability when date, vehicle class, or duration changes
+  useEffect(() => {
+    if (!providerId || !locationId || !date) return;
+    const dur = totalDuration > 0 ? totalDuration : 30;
+    const params = new URLSearchParams({ date, vehicleClass, durationMins: String(dur) });
+    fetch(`${API_BASE}/api/providers/${providerId}/locations/${locationId}/bay-availability?${params}`, { credentials: "include" })
+      .then((r) => { if (!r.ok) throw new Error("Failed"); return r.json(); })
+      .then((d) => {
+        const slots = d.slots || [];
+        if (typeof d.totalBayCount === "number") setTotalBayCount(d.totalBayCount);
+        if (slots.length > 0) {
+          setAvailableSlots(slots);
+          setBayCount(d.bayCount || 0);
+          // If current time selection is unavailable, auto-select the first available slot
+          const currentSlot = slots.find((s: any) => s.time === startTime);
+          if (currentSlot && !currentSlot.available) {
+            const firstAvail = slots.find((s: any) => s.available);
+            if (firstAvail) setStartTime(firstAvail.time);
+          }
+        } else {
+          setAvailableSlots(fallbackSlots);
+          setBayCount(d.bayCount || 0);
+        }
+      })
+      .catch(() => { setAvailableSlots(fallbackSlots); });
+  }, [providerId, locationId, date, vehicleClass, totalDuration]);
 
   const addOnsTotal = selectedAddOns.reduce((sum, a) => sum + a.priceMinor * a.quantity, 0);
   const grandTotal = servicesTotal + addOnsTotal;

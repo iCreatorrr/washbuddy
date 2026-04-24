@@ -15,7 +15,6 @@ modules = ["nodejs-24", "postgresql-16"]
   env = { "CI" = "true" }
 
   [workflows]
-  runButton = "Project"
 
   [agent]
   stack = "PNPM_WORKSPACE"
@@ -32,4 +31,4 @@ integrations = ["github:1.0.0"]
   [userenv]
 
   [userenv.shared]
-  
+  runButton = "Project"

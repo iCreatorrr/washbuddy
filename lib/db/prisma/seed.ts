@@ -283,11 +283,25 @@ async function main() {
   await prisma.paymentIntentInternal.deleteMany({});
   await prisma.bookingStatusHistory.deleteMany({});
   await prisma.bookingHold.deleteMany({});
+  await prisma.bookingPhoto.deleteMany({});
+  await prisma.bookingMessage.deleteMany({});
+  await prisma.washNote.deleteMany({});
+  await prisma.fileAsset.deleteMany({});
+  await prisma.bookingAddOn.deleteMany({});
   await prisma.booking.deleteMany({});
   await prisma.serviceCompatibility.deleteMany({});
+  await prisma.servicePricing.deleteMany({});
+  await prisma.providerAddOn.deleteMany({});
   await prisma.service.deleteMany({});
   await prisma.operatingWindow.deleteMany({});
   await prisma.providerMembership.deleteMany({});
+  await prisma.washBay.deleteMany({});
+  await prisma.clientProfile.deleteMany({});
+  await prisma.providerDiscount.deleteMany({});
+  await prisma.fleetSubscription.deleteMany({});
+  await prisma.subscriptionPackage.deleteMany({});
+  await prisma.notificationPreference.deleteMany({});
+  await prisma.providerResponseMetric.deleteMany({});
   await prisma.location.deleteMany({});
   await prisma.provider.deleteMany({});
 
@@ -981,8 +995,17 @@ async function main() {
     const usr = clientUsers[i % clientUsers.length];
     const tags = i < 2 ? ["VIP"] : i < 5 ? ["FREQUENT"] : i < 6 ? ["SERVICE_RECOVERY"] : ["NEW_CLIENT"];
     if (i >= 8) tags.push("FLEET_ACCOUNT");
-    await prisma.clientProfile.create({
-      data: {
+    await prisma.clientProfile.upsert({
+      where: { providerId_userId: { providerId: prov.providerId, userId: usr.id } },
+      update: {
+        name: `${usr.firstName} ${usr.lastName}`,
+        email: usr.email,
+        tags,
+        lifetimeSpendMinor: randomBetween(5000, 80000),
+        visitCount: i < 5 ? randomBetween(5, 20) : randomBetween(0, 3),
+        lastVisitAt: new Date(Date.now() - randomBetween(1, 30) * 24 * 60 * 60 * 1000),
+      },
+      create: {
         providerId: prov.providerId,
         userId: usr.id,
         name: `${usr.firstName} ${usr.lastName}`,
