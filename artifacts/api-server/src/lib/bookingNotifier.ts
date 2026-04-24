@@ -77,18 +77,19 @@ export async function notifyBookingRequested(bookingId: string): Promise<void> {
     const customerName = `${b.customer.firstName} ${b.customer.lastName}`;
 
     // In-app + email to provider admins
+    const bookingUrl = `/bookings/${b.id}`;
     for (const admin of admins) {
       await createNotification(admin.userId, {
         subject: "New booking request",
         body: `${customerName} requested ${b.serviceNameSnapshot} at ${b.location.name} on ${fmtDate(b.scheduledStartAtUtc)}.`,
-        actionUrl: "/provider",
+        actionUrl: bookingUrl,
         metadata: { bookingId: b.id, type: "BOOKING_REQUESTED" },
       });
       await sendEmail({ to: admin.email, ...templates.bookingRequested({
         providerName: admin.firstName, customerName, serviceName: b.serviceNameSnapshot,
         locationName: b.location.name, scheduledDate: fmtDate(b.scheduledStartAtUtc),
         scheduledTime: fmtTime(b.scheduledStartAtUtc), responseDeadlineMinutes: 5,
-        actionUrl: "/provider",
+        actionUrl: bookingUrl,
       })});
     }
 
@@ -136,10 +137,11 @@ export async function notifyBookingDeclined(bookingId: string, reasonCode?: stri
     const alternatives = await findAlternatives(b.location.id);
     const reason = reasonCode?.replace(/_/g, " ").toLowerCase() || "provider declined";
 
+    const bookingUrl = `/bookings/${b.id}`;
     await createNotification(b.customer.id, {
       subject: "Booking declined",
       body: `Your request for ${b.serviceNameSnapshot} at ${b.location.name} was declined. Reason: ${reason}.`,
-      actionUrl: "/search",
+      actionUrl: bookingUrl,
       metadata: { bookingId: b.id, type: "BOOKING_DECLINED" },
     });
 
@@ -148,7 +150,7 @@ export async function notifyBookingDeclined(bookingId: string, reasonCode?: stri
       await sendEmail({ to: email, ...templates.bookingDeclined({
         customerName: b.customer.firstName, serviceName: b.serviceNameSnapshot,
         locationName: b.location.name, reason, alternatives,
-        actionUrl: "/search",
+        actionUrl: bookingUrl,
       })});
     }
   } catch (err) { logger.error({ err, bookingId }, "notifyBookingDeclined failed"); }
@@ -162,6 +164,7 @@ export async function notifyBookingCancelled(bookingId: string, cancelledBy: "cu
     const cancellerLabel = cancelledBy === "customer" ? `${b.customer.firstName} ${b.customer.lastName}` : b.location.provider.name;
     const scheduledDate = fmtDate(b.scheduledStartAtUtc);
 
+    const bookingUrl = `/bookings/${b.id}`;
     if (cancelledBy === "customer") {
       // Notify provider
       const admins = await getProviderAdmins(b.location.providerId);
@@ -169,13 +172,13 @@ export async function notifyBookingCancelled(bookingId: string, cancelledBy: "cu
         await createNotification(admin.userId, {
           subject: "Booking cancelled by customer",
           body: `${b.customer.firstName} ${b.customer.lastName} cancelled their ${b.serviceNameSnapshot} at ${b.location.name} on ${scheduledDate}.`,
-          actionUrl: "/provider",
+          actionUrl: bookingUrl,
           metadata: { bookingId: b.id, type: "BOOKING_CANCELLED" },
         });
         await sendEmail({ to: admin.email, ...templates.bookingCancelled({
           recipientName: admin.firstName, cancelledBy: cancellerLabel,
           serviceName: b.serviceNameSnapshot, locationName: b.location.name,
-          scheduledDate, actionUrl: "/provider",
+          scheduledDate, actionUrl: bookingUrl,
         })});
       }
     } else {
@@ -183,7 +186,7 @@ export async function notifyBookingCancelled(bookingId: string, cancelledBy: "cu
       await createNotification(b.customer.id, {
         subject: "Booking cancelled by provider",
         body: `${b.location.provider.name} cancelled your ${b.serviceNameSnapshot} on ${scheduledDate}. We apologize for the inconvenience.`,
-        actionUrl: "/search",
+        actionUrl: bookingUrl,
         metadata: { bookingId: b.id, type: "BOOKING_CANCELLED" },
       });
       const email = await getUserEmail(b.customer.id);
@@ -191,7 +194,7 @@ export async function notifyBookingCancelled(bookingId: string, cancelledBy: "cu
         await sendEmail({ to: email, ...templates.bookingCancelled({
           recipientName: b.customer.firstName, cancelledBy: cancellerLabel,
           serviceName: b.serviceNameSnapshot, locationName: b.location.name,
-          scheduledDate, actionUrl: "/search",
+          scheduledDate, actionUrl: bookingUrl,
         })});
       }
     }
