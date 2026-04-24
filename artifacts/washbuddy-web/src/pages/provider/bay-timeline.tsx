@@ -8,6 +8,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { getTimelineBlockColors } from "@/lib/service-colors";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -76,6 +77,41 @@ export default function BayTimeline() {
   const bayCount = data?.bayCount ?? bays.length;
   const unassignedBookings: any[] = data?.unassignedBookings || [];
   const tz = data?.locationTimezone || "America/New_York";
+
+  // Optimistic overrides for drag-and-drop: keyed by bookingId → bayId. We
+  // render these as if the drop succeeded; on server error we roll back.
+  const [optimisticBay, setOptimisticBay] = useState<Record<string, string>>({});
+  const [dragOverBayId, setDragOverBayId] = useState<string | null>(null);
+
+  const handleDrop = async (targetBayId: string, bookingId: string, originalBayId: string | null) => {
+    setDragOverBayId(null);
+    if (targetBayId === originalBayId) return;
+    // Optimistic UI
+    setOptimisticBay((prev) => ({ ...prev, [bookingId]: targetBayId }));
+    try {
+      const res = await fetch(`${API_BASE}/api/bookings/${bookingId}/assign-bay`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ bayId: targetBayId }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.message || "Move failed");
+      }
+      toast.success("Booking moved");
+      // Refresh authoritative data
+      const r = await fetch(`${API_BASE}/api/providers/${providerId}/locations/${selectedLocation}/bay-timeline?date=${selectedDate}`, { credentials: "include" });
+      setData(await r.json());
+    } catch (err: any) {
+      toast.error(err?.message || "Couldn't move booking");
+    } finally {
+      setOptimisticBay((prev) => {
+        const { [bookingId]: _, ...rest } = prev;
+        return rest;
+      });
+    }
+  };
 
   function getBlockPosition(startUtc: string, endUtc: string) {
     const start = new Date(startUtc);
@@ -204,12 +240,43 @@ export default function BayTimeline() {
               </div>
             </div>
 
-            {/* Bay rows */}
-            {bays.map((bay: any) => {
-              const overlapSlots = computeOverlapSlots(bay.bookings || []);
-              const ROW_HEIGHT = 72; // px per bay row
-              return (
-                <div key={bay.id} className={cn("flex border-b border-slate-100", !bay.isActive && bay.outOfServiceSince && "bg-slate-50/70")}>
+            {/* Bay rows (with optimistic drag overrides applied) */}
+            {(() => {
+              // Rebuild per-bay booking lists accounting for optimistic moves.
+              const byBay: Record<string, any[]> = {};
+              for (const bay of bays) byBay[bay.id] = [];
+              for (const bay of bays) {
+                for (const b of bay.bookings || []) {
+                  const targetBay = optimisticBay[b.id] || bay.id;
+                  if (byBay[targetBay]) byBay[targetBay].push(b);
+                  else byBay[bay.id].push(b);
+                }
+              }
+              return bays.map((bay: any) => {
+                const bookingsForBay = byBay[bay.id] || [];
+                const overlapSlots = computeOverlapSlots(bookingsForBay);
+                const ROW_HEIGHT = 72;
+                const isDropTarget = dragOverBayId === bay.id;
+                return (
+                  <div
+                    key={bay.id}
+                    className={cn(
+                      "flex border-b border-slate-100 transition-colors",
+                      !bay.isActive && bay.outOfServiceSince && "bg-slate-50/70",
+                      isDropTarget && "bg-blue-50 ring-2 ring-blue-300",
+                    )}
+                    onDragOver={(e) => { e.preventDefault(); setDragOverBayId(bay.id); }}
+                    onDragLeave={() => setDragOverBayId((cur) => (cur === bay.id ? null : cur))}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const payload = e.dataTransfer.getData("application/json");
+                      if (!payload) return;
+                      try {
+                        const { bookingId, originalBayId } = JSON.parse(payload);
+                        handleDrop(bay.id, bookingId, originalBayId);
+                      } catch {}
+                    }}
+                  >
                   <div className="w-[120px] shrink-0 p-2 flex flex-col justify-center">
                     <div className="flex items-center gap-1">
                       {bay.outOfServiceSince && <Wrench className="h-3 w-3 text-amber-500" />}
@@ -233,19 +300,25 @@ export default function BayTimeline() {
                     )}
 
                     {/* Booking blocks */}
-                    {bay.bookings?.map((b: any) => {
+                    {bookingsForBay.map((b: any) => {
                       const pos = getBlockPosition(b.scheduledStartAtUtc, b.scheduledEndAtUtc);
                       const colorClasses = getTimelineBlockColors(b.serviceNameSnapshot);
                       const slot = overlapSlots.get(b.id) || { slotIndex: 0, slotCount: 1 };
-                      const blockHeight = (ROW_HEIGHT - 8) / slot.slotCount; // 4px top+bottom padding
+                      const blockHeight = (ROW_HEIGHT - 8) / slot.slotCount;
                       const blockTop = 4 + slot.slotIndex * blockHeight;
                       const clientName = b.driverFirstName || b.offPlatformClientName || "";
+                      const originalBayId = bay.id;
 
                       return (
                         <div
                           key={b.id}
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.effectAllowed = "move";
+                            e.dataTransfer.setData("application/json", JSON.stringify({ bookingId: b.id, originalBayId }));
+                          }}
                           className={cn(
-                            "absolute rounded-md border overflow-hidden cursor-pointer hover:shadow-lg hover:z-20 transition-shadow z-[5] flex flex-col justify-center px-2",
+                            "absolute rounded-md border overflow-hidden cursor-grab active:cursor-grabbing hover:shadow-lg hover:z-20 transition-shadow z-[5] flex flex-col justify-center px-2",
                             colorClasses
                           )}
                           style={{
@@ -269,7 +342,8 @@ export default function BayTimeline() {
                   </div>
                 </div>
               );
-            })}
+              });
+            })()}
           </div>
         </Card>
       )}

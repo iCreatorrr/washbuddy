@@ -9,6 +9,7 @@ import { requireAuth, requireProviderAccess } from "../middlewares/requireAuth";
 import type { SessionUser } from "../lib/auth";
 import { calculatePlatformFee } from "../lib/feeCalculator";
 import { logger } from "../lib/logger";
+import { deriveVehicleClassFromLength, normalizeVehicleClass } from "../lib/bayMatching";
 
 const router: IRouter = Router();
 
@@ -647,12 +648,49 @@ router.patch("/bookings/:bookingId/assign-bay", requireAuth, async (req, res) =>
   try {
     const { bayId } = req.body;
     const user = req.user as SessionUser;
-    const booking = await prisma.booking.findUnique({ where: { id: req.params.bookingId } });
+    const booking = await prisma.booking.findUnique({
+      where: { id: req.params.bookingId },
+      include: { vehicle: { select: { lengthInches: true } } },
+    });
     if (!booking) { res.status(404).json({ errorCode: "NOT_FOUND" }); return; }
 
     const bay = await prisma.washBay.findUnique({ where: { id: bayId } });
     if (!bay || bay.locationId !== booking.locationId || !bay.isActive) {
       res.status(400).json({ errorCode: "INVALID", message: "Bay not available at this location" });
+      return;
+    }
+
+    // Class compatibility: derive class from the booking's vehicle length, or
+    // fall back to fleetPlaceholderClass. If we can't determine a class, we
+    // allow the move (matches pre-existing permissive behavior) but the
+    // common path enforces compatibility.
+    const vClass = deriveVehicleClassFromLength(booking.vehicle?.lengthInches ?? null)
+      || normalizeVehicleClass(booking.fleetPlaceholderClass);
+    if (vClass && !bay.supportedClasses.includes(vClass)) {
+      res.status(409).json({
+        errorCode: "BAY_CLASS_INCOMPATIBLE",
+        message: `${bay.name} does not support ${vClass.replace("_", " ").toLowerCase()} vehicles.`,
+      });
+      return;
+    }
+
+    // Overlap check: is another non-cancelled booking already using this bay
+    // during the target window?
+    const conflict = await prisma.booking.findFirst({
+      where: {
+        id: { not: booking.id },
+        washBayId: bayId,
+        status: { notIn: ["CUSTOMER_CANCELLED", "PROVIDER_CANCELLED", "PROVIDER_DECLINED", "EXPIRED", "NO_SHOW"] as any },
+        scheduledStartAtUtc: { lt: booking.scheduledEndAtUtc },
+        scheduledEndAtUtc: { gt: booking.scheduledStartAtUtc },
+      },
+      select: { id: true },
+    });
+    if (conflict) {
+      res.status(409).json({
+        errorCode: "BAY_TIME_CONFLICT",
+        message: `${bay.name} is already booked during this time window.`,
+      });
       return;
     }
 
@@ -663,6 +701,7 @@ router.patch("/bookings/:bookingId/assign-bay", requireAuth, async (req, res) =>
 
     res.json({ booking: updated });
   } catch (err: any) {
+    req.log.error({ err }, "Failed to assign bay");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to assign bay" });
   }
 });
