@@ -97,7 +97,11 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
           <p className="text-xs text-slate-500 truncate">{b.fleetName || ""}</p>
         </div>
         <span className="text-xs text-slate-500 min-w-[100px] max-w-[200px] truncate hidden sm:block" title={b.serviceNameSnapshot}>{b.serviceNameSnapshot}</span>
-        <span className="text-xs text-slate-500 w-[80px] truncate hidden md:block">{b.assignedOperator?.firstName || <span className="text-orange-500">Unassigned</span>}</span>
+        <span className="text-xs w-[80px] truncate hidden md:block" title={b.washBay?.name ? `Bay: ${b.washBay.name}` : "No bay assigned"}>
+          {b.washBay?.name
+            ? <span className="text-slate-600 font-medium">{b.washBay.name}</span>
+            : <span className="text-orange-500">Unassigned</span>}
+        </span>
         <Badge className={`text-[10px] shrink-0 ${src.className || ""}`} variant={src.variant as any}>{src.label}</Badge>
         <Badge className={`text-[10px] shrink-0 ${st.className}`}>{st.label}</Badge>
         {b.status === "IN_SERVICE" && b.serviceStartedAtUtc && (
