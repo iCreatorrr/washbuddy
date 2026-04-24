@@ -7,15 +7,26 @@ import { PhotoPrompt } from "./photo-prompt";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
-const VEHICLE_CLASS_MAP: Record<string, { label: string; color: string }> = {
-  MINIBUS: { label: "S", color: "bg-slate-200 text-slate-700" },
-  SHUTTLE: { label: "S", color: "bg-slate-200 text-slate-700" },
-  STANDARD: { label: "M", color: "bg-blue-200 text-blue-700" },
-  SCHOOL_BUS: { label: "M", color: "bg-blue-200 text-blue-700" },
-  COACH: { label: "L", color: "bg-indigo-200 text-indigo-700" },
-  DOUBLE_DECKER: { label: "XL", color: "bg-purple-200 text-purple-700" },
-  ARTICULATED: { label: "XL", color: "bg-purple-200 text-purple-700" },
+const VEHICLE_CLASS_BADGE: Record<string, { label: string; color: string }> = {
+  SMALL:       { label: "S",  color: "bg-slate-200 text-slate-700" },
+  MEDIUM:      { label: "M",  color: "bg-blue-200 text-blue-700" },
+  LARGE:       { label: "L",  color: "bg-indigo-200 text-indigo-700" },
+  EXTRA_LARGE: { label: "XL", color: "bg-purple-200 text-purple-700" },
 };
+
+function deriveVehicleClass(lengthInches: number | null | undefined): keyof typeof VEHICLE_CLASS_BADGE | null {
+  if (typeof lengthInches !== "number" || !Number.isFinite(lengthInches) || lengthInches <= 0) return null;
+  if (lengthInches < 300) return "SMALL";
+  if (lengthInches < 420) return "MEDIUM";
+  if (lengthInches < 540) return "LARGE";
+  return "EXTRA_LARGE";
+}
+
+function classBadgeFor(booking: any): { label: string; color: string } {
+  const fromVehicle = booking.vehicle?.lengthInches != null ? deriveVehicleClass(booking.vehicle.lengthInches) : null;
+  const key = fromVehicle || booking.fleetPlaceholderClass || "MEDIUM";
+  return VEHICLE_CLASS_BADGE[key] || VEHICLE_CLASS_BADGE.MEDIUM;
+}
 
 const SOURCE_BADGE: Record<string, { label: string; variant: string; className?: string }> = {
   PLATFORM: { label: "WashBuddy", variant: "default" },
@@ -55,7 +66,7 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
   const [showPhotoPrompt, setShowPhotoPrompt] = useState<"BEFORE" | "AFTER" | null>(null);
 
   const b = booking;
-  const vc = VEHICLE_CLASS_MAP[b.vehicle?.subtypeCode || b.fleetPlaceholderClass || "STANDARD"] || VEHICLE_CLASS_MAP.STANDARD;
+  const vc = classBadgeFor(b);
   const src = SOURCE_BADGE[b.bookingSource] || SOURCE_BADGE.PLATFORM;
   const st = STATUS_BADGE[b.status] || STATUS_BADGE.PROVIDER_CONFIRMED;
   const clientName = b.customer ? `${b.customer.firstName} ${b.customer.lastName}` : b.offPlatformClientName || "Unknown";
