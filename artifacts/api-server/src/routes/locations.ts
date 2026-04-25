@@ -3,7 +3,7 @@ import { prisma } from "@workspace/db";
 import { requireAuth, requireProviderAccess } from "../middlewares/requireAuth";
 import { isPlatformAdmin, type SessionUser } from "../lib/auth";
 import { calculateAllInPrice } from "../lib/feeCalculator";
-import { isWithinOperatingHours, getNextOpenAt } from "../lib/timezone";
+import { isWithinOperatingHours, getNextOpenAt, localTimeToUtc, formatLocalDate } from "../lib/timezone";
 
 const router: IRouter = Router();
 
@@ -71,10 +71,9 @@ router.get("/locations/available-now", async (req, res) => {
             const startM = slotStart % 60;
             const startTime = `${String(startH).padStart(2, "0")}:${String(startM).padStart(2, "0")}`;
             const dateStr = isToday ? todayStr : new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString().split("T")[0];
-            const slotStartUtc = new Date(`${dateStr}T${startTime}:00Z`);
+            const slotStartUtc = localTimeToUtc(dateStr, startTime, loc.timezone);
 
-            const leadTimeDeadline = new Date(slotStartUtc.getTime() - svc.leadTimeMins * 60 * 1000);
-            if (now > leadTimeDeadline) continue;
+            if (slotStartUtc.getTime() <= now.getTime()) continue;
 
             const existingBookings = await prisma.booking.count({
               where: {

@@ -10,6 +10,7 @@ import type { SessionUser } from "../lib/auth";
 import { calculatePlatformFee } from "../lib/feeCalculator";
 import { logger } from "../lib/logger";
 import { deriveVehicleClassFromLength, normalizeVehicleClass } from "../lib/bayMatching";
+import { localTimeToUtc } from "../lib/timezone";
 
 const router: IRouter = Router();
 
@@ -92,10 +93,12 @@ router.get("/providers/:providerId/locations/:locationId/bay-availability", requ
       select: { washBayId: true, scheduledStartAtUtc: true, scheduledEndAtUtc: true },
     });
 
-    // Generate 30-minute time slots from 6am to 9pm
-    // IMPORTANT: Use the same UTC calculation as the frontend booking creation:
-    // Frontend sends scheduledStartAtUtc = new Date(`${date}T${time}:00Z`)
-    // So we must match that exactly here for consistency.
+    // Generate 30-minute time slots from 6am to 9pm in the LOCATION's local time.
+    // Each slot label is wall-clock in `location.timezone`; we convert to a real
+    // UTC instant via the shared helper so overlap and past-time checks compare
+    // apples-to-apples against `now`. Anything else regresses the timezone bug
+    // class that previously surfaced provider availability ~10h off (slots
+    // labeled e.g. 10:00 ET getting stored as 10:00Z = 06:00 ET).
     const slots: { time: string; available: boolean; availableBays: number }[] = [];
     const now = new Date();
 
@@ -103,8 +106,7 @@ router.get("/providers/:providerId/locations/:locationId/bay-availability", requ
       for (const minute of [0, 30]) {
         const slotTime = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 
-        // Match frontend: new Date(`${date}T${time}:00Z`)
-        const slotStartUtc = new Date(`${dateStr}T${slotTime}:00Z`);
+        const slotStartUtc = localTimeToUtc(dateStr, slotTime, location.timezone);
         const slotEndUtc = new Date(slotStartUtc.getTime() + durationMins * 60000);
 
         // Past time check
