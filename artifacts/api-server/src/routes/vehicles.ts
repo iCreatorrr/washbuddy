@@ -61,31 +61,28 @@ router.get("/vehicles", requireAuth, async (req, res) => {
       return;
     }
 
-    const fleetIds = user.roles
-      .filter((r) => r.scope === "fleet" || (r.role === "DRIVER" && r.scopeId))
-      .map((r) => r.scopeId!)
-      .filter(Boolean);
-
-    const where: Record<string, unknown> = { isActive: true };
-
-    if (fleetIds.length > 0) {
-      where.OR = [{ fleetId: { in: fleetIds } }, { ownerUserId: user.id }];
-    } else {
-      where.ownerUserId = user.id;
-    }
-
-    const [rawVehicles, dbUser, eligible] = await Promise.all([
-      prisma.vehicle.findMany({
-        where,
-        include: {
-          fleet: { select: { id: true, name: true } },
-          owner: { select: { id: true, email: true, firstName: true, lastName: true } },
-        },
-        orderBy: { unitNumber: "asc" },
-      }),
-      prisma.user.findUnique({ where: { id: user.id }, select: { defaultVehicleId: true } }),
+    // The driver-facing list scopes to vehicles the user can actually
+    // operate on: personally-owned + currently-assigned fleet vehicles
+    // (active FleetDriverAssignment). This is the SAME set
+    // `getEligibleVehicleIds` returns, so the "show in My Vehicles" and
+    // "settable as default" sets stay in lockstep — no more cases where a
+    // driver sees a fleet vehicle but the API rejects it as not eligible.
+    // Fleet-wide views (all 200 buses, regardless of who's driving today)
+    // live under /api/fleets/:fleetId/vehicles, not here.
+    const [eligible, dbUser] = await Promise.all([
       getEligibleVehicleIds(user.id),
+      prisma.user.findUnique({ where: { id: user.id }, select: { defaultVehicleId: true } }),
     ]);
+
+    const eligibleIds = Array.from(eligible);
+    const rawVehicles = eligibleIds.length === 0 ? [] : await prisma.vehicle.findMany({
+      where: { id: { in: eligibleIds }, isActive: true },
+      include: {
+        fleet: { select: { id: true, name: true } },
+        owner: { select: { id: true, email: true, firstName: true, lastName: true } },
+      },
+      orderBy: { unitNumber: "asc" },
+    });
 
     // Lazy invalidation: if the user's defaultVehicleId points at a vehicle
     // that's no longer in their eligible set (assignment ended, soft-deleted,
