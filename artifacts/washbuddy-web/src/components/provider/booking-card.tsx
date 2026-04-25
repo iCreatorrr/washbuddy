@@ -109,7 +109,12 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
             : <span className="text-orange-500">Unassigned</span>}
         </span>
         <Badge className={`text-[10px] shrink-0 ${src.className || ""}`} variant={src.variant as any}>{src.label}</Badge>
-        <Badge className={`text-[10px] shrink-0 ${st.className}`}>{st.label}</Badge>
+        {/* Suppress the "Scheduled" badge: PROVIDER_CONFIRMED rows live in
+            the Upcoming section, where the section header already conveys
+            the status. Other statuses still surface their badge. */}
+        {b.status !== "PROVIDER_CONFIRMED" && (
+          <Badge className={`text-[10px] shrink-0 ${st.className}`}>{st.label}</Badge>
+        )}
         {b.status === "IN_SERVICE" && b.serviceStartedAtUtc && (
           <ElapsedTimer startedAt={b.serviceStartedAtUtc} durationMins={30} />
         )}
