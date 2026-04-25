@@ -1,12 +1,24 @@
 import React, { useState, useEffect } from "react";
 import { useRoute, useLocation } from "wouter";
-import { useGetAvailability, useCreateBookingHold, useCreateBooking, useListVehicles } from "@workspace/api-client-react";
+import { useGetAvailability, useCreateBookingHold, useCreateBooking } from "@workspace/api-client-react";
 import { Card, Button, Badge, ErrorState } from "@/components/ui";
-import { MapPin, Clock, Truck, ShieldCheck, CheckCircle2, ChevronLeft, ArrowRight, Navigation, Star, Zap, AlertTriangle, Timer } from "lucide-react";
+import { MapPin, Clock, ShieldCheck, CheckCircle2, ChevronLeft, ArrowRight, Navigation, Star, Zap, AlertTriangle, Timer } from "lucide-react";
 import { LocationReviews } from "@/components/location-reviews";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { format, addDays } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
+import { useActiveVehicle } from "@/contexts/activeVehicle";
+import { ActiveVehiclePill } from "@/components/customer/active-vehicle-pill";
+import {
+  BODY_TYPE_ICON,
+  BODY_TYPE_LABEL,
+  BODY_TYPE_STYLE,
+  deriveSizeClassFromLengthInches,
+  inchesToFeet,
+  normalizeBodyType,
+  SIZE_CLASS_LABEL,
+  vehicleDisplayName,
+} from "@/lib/vehicleBodyType";
 
 async function fetchSingleETA(
   fromLat: number, fromLng: number, toLat: number, toLng: number
@@ -51,7 +63,6 @@ export default function LocationDetail() {
   const [selectedService, setSelectedService] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(format(new Date(), "yyyy-MM-dd"));
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
-  const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [bookingStep, setBookingStep] = useState(1);
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [etaMins, setEtaMins] = useState<number | null>(null);
@@ -127,13 +138,24 @@ export default function LocationDetail() {
 
   const services = locData?.services || [];
 
-  const { data: availabilityData, isLoading: isLoadingSlots } = useGetAvailability(locationId, { date: selectedDate, serviceId: selectedService || "" }, {
-    query: { enabled: !!selectedService && !!selectedDate },
-    request: { credentials: 'include' }
-  });
+  const { activeVehicle, hasAnyVehicle, loading: vehicleLoading } = useActiveVehicle();
+  const activeVehicleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
 
-  const { data: vehiclesData } = useListVehicles({ request: { credentials: 'include' } });
-  const vehicles = vehiclesData?.vehicles || [];
+  // Availability is class-aware: passing the active vehicle's size class
+  // filters slots to those a compatible bay can host. Without an active
+  // vehicle the booking column is gated, so we don't even fire the query.
+  const { data: availabilityData, isLoading: isLoadingSlots } = useGetAvailability(
+    locationId,
+    {
+      date: selectedDate,
+      serviceId: selectedService || "",
+      ...(activeVehicleClass ? { vehicleClass: activeVehicleClass } : {}),
+    } as any,
+    {
+      query: { enabled: !!selectedService && !!selectedDate && !!activeVehicle },
+      request: { credentials: 'include' }
+    }
+  );
 
   const holdMutation = useCreateBookingHold({ request: { credentials: 'include' } });
   const bookMutation = useCreateBooking({ request: { credentials: 'include' } });
@@ -165,12 +187,6 @@ export default function LocationDetail() {
     return () => { cancelled = true; };
   }, [detectedLat, detectedLng, locData?.latitude, locData?.longitude]);
 
-  useEffect(() => {
-    if (bookingStep === 3 && vehicles.length === 1) {
-      setSelectedVehicle(vehicles[0].id);
-    }
-  }, [bookingStep, vehicles]);
-
   // Hold countdown timer
   useEffect(() => {
     if (!holdExpiresAt) { setHoldTimeLeft(null); return; }
@@ -184,10 +200,13 @@ export default function LocationDetail() {
     return () => clearInterval(interval);
   }, [holdExpiresAt]);
 
-  // Vehicle compatibility helper
+  // Service-vs-vehicle compatibility check using whatever rules a service
+  // exposes. We fall back to permissive when no rules are defined; the
+  // ultimate gate is bay availability (driven by size class in feet/inches),
+  // which the API filters via the vehicleClass query param.
   const isVehicleCompatible = (vehicle: any, service: any): boolean => {
     const rules = (service as any).compatibilityRules;
-    if (!rules || rules.length === 0) return true; // No rules = all compatible
+    if (!rules || rules.length === 0) return true;
     return rules.some((rule: any) => {
       if (rule.categoryCode !== vehicle.categoryCode) return false;
       if (rule.subtypeCode && rule.subtypeCode !== vehicle.subtypeCode) return false;
@@ -197,16 +216,11 @@ export default function LocationDetail() {
     });
   };
 
+  // After hold succeeds, drivers go straight to confirm — vehicle is the
+  // pre-selected active one. The old "Step 3: Vehicle Selection" branch is
+  // gone entirely; fleet-admin booking still has its own picker page.
   const advanceFromSlot = () => {
-    if (vehicles.length === 1) {
-      setSelectedVehicle(vehicles[0].id);
-      setBookingStep(4);
-    } else if (vehicles.length === 0) {
-      setSelectedVehicle(null);
-      setBookingStep(4);
-    } else {
-      setBookingStep(3);
-    }
+    setBookingStep(3);
   };
 
   const [holdId, setHoldId] = useState<string | null>(null);
@@ -251,14 +265,14 @@ export default function LocationDetail() {
   };
 
   const handleConfirmBooking = async () => {
-    if (!holdId) return;
+    if (!holdId || !activeVehicle) return;
     setBookingError(null);
     try {
       const idempotencyKey = crypto.randomUUID();
       const bookRes = await bookMutation.mutateAsync({
         data: {
           holdId,
-          vehicleId: selectedVehicle || undefined,
+          vehicleId: activeVehicle.id,
           idempotencyKey
         }
       });
@@ -281,7 +295,6 @@ export default function LocationDetail() {
   const stepComplete = (step: number) => {
     if (step === 1) return !!selectedService;
     if (step === 2) return !!selectedSlot;
-    if (step === 3) return true;
     return false;
   };
 
@@ -325,6 +338,23 @@ export default function LocationDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-6">
 
+          {/* Active vehicle context — drives availability + pricing + bay
+              compatibility for the rest of the flow. The booking column is
+              gated on this; without an active vehicle we render an empty
+              state below instead of Steps 1-3. */}
+          <ActiveVehicleContextCard />
+
+          {!vehicleLoading && !hasAnyVehicle ? (
+            <Card className="p-8 text-center bg-amber-50 border-amber-200">
+              <div className="h-14 w-14 mx-auto bg-amber-100 rounded-2xl flex items-center justify-center mb-3">
+                <AlertTriangle className="h-7 w-7 text-amber-600" />
+              </div>
+              <h3 className="text-lg font-bold text-amber-900">Add a vehicle to book a wash</h3>
+              <p className="text-sm text-amber-800/80 mt-1 max-w-md mx-auto">Bay compatibility and pricing are determined by your vehicle's size class. Add one to continue.</p>
+              <Button className="mt-4" onClick={() => setNav("/vehicles")}>Manage Vehicles</Button>
+            </Card>
+          ) : (<>
+
           {/* Step 1: Select Service */}
           <Card className={`transition-all duration-300 ${bookingStep !== 1 && !stepComplete(1) ? "opacity-50" : ""}`}>
             <div className="p-6 border-b border-slate-100 flex items-center justify-between">
@@ -345,8 +375,7 @@ export default function LocationDetail() {
                     {services.length === 0 ? (
                       <div className="text-center py-8 text-slate-400">No services available at this location.</div>
                     ) : services.map(svc => {
-                      const selectedVeh = selectedVehicle ? vehicles.find(v => v.id === selectedVehicle) : (vehicles.length === 1 ? vehicles[0] : null);
-                      const compatible = !selectedVeh || isVehicleCompatible(selectedVeh, svc);
+                      const compatible = !activeVehicle || isVehicleCompatible(activeVehicle, svc);
                       return (
                         <div
                           key={svc.id}
@@ -376,10 +405,10 @@ export default function LocationDetail() {
                           <div className="flex gap-4 text-xs font-semibold text-slate-400">
                             <span className="flex items-center gap-1"><Clock className="h-4 w-4" /> {svc.durationMins} min</span>
                           </div>
-                          {!compatible && selectedVeh && (
+                          {!compatible && activeVehicle && (
                             <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 px-3 py-1.5 rounded-lg">
                               <AlertTriangle className="h-3.5 w-3.5" />
-                              Your vehicle ({selectedVeh.unitNumber}) exceeds this service's size limit
+                              Your vehicle ({vehicleDisplayName(activeVehicle)}) exceeds this service's size limit
                             </div>
                           )}
                         </div>
@@ -499,83 +528,9 @@ export default function LocationDetail() {
             </div>
           )}
 
-          {/* Step 3: Vehicle Selection (only if multiple vehicles) */}
-          {vehicles.length > 1 && (
-            <Card className={`transition-all duration-300 ${bookingStep < 3 ? "opacity-50 pointer-events-none" : ""}`}>
-              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-                <h2 className="text-xl font-bold flex items-center gap-3">
-                  <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${bookingStep > 3 ? 'bg-green-500 text-white' : bookingStep >= 3 ? 'bg-slate-900 text-white' : 'bg-slate-300 text-white'}`}>
-                    {bookingStep > 3 ? <CheckCircle2 className="h-5 w-5" /> : "3"}
-                  </span>
-                  Select Vehicle
-                </h2>
-                {bookingStep > 3 && (
-                  <button onClick={() => setBookingStep(3)} className="text-sm font-semibold text-primary hover:text-primary/80">Change</button>
-                )}
-              </div>
-              <AnimatePresence>
-                {bookingStep === 3 && (
-                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                    <div className="p-6">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
-                        {vehicles.map(v => {
-                          const compat = selectedSvc ? isVehicleCompatible(v, selectedSvc) : true;
-                          return (
-                            <div
-                              key={v.id}
-                              onClick={() => { if (compat) setSelectedVehicle(v.id); }}
-                              className={`p-4 rounded-xl border-2 flex items-center gap-4 transition-all ${
-                                !compat
-                                  ? 'opacity-50 cursor-not-allowed border-slate-200 bg-slate-50'
-                                  : selectedVehicle === v.id
-                                    ? 'cursor-pointer border-primary bg-blue-50 shadow-sm'
-                                    : 'cursor-pointer border-slate-200 hover:border-primary/40 hover:shadow-sm'
-                              }`}
-                            >
-                              <div className={`p-3 rounded-xl ${selectedVehicle === v.id ? 'bg-primary text-white' : 'bg-slate-100 text-slate-400'}`}>
-                                <Truck className="h-5 w-5" />
-                              </div>
-                              <div className="flex-1">
-                                <div className="font-bold text-slate-900">{v.unitNumber}</div>
-                                <div className="text-xs text-slate-500 capitalize">{(v as any).subtypeCode?.replace(/_/g, ' ').toLowerCase() || v.categoryCode?.replace(/_/g, ' ').toLowerCase()}</div>
-                              </div>
-                              {!compat && (
-                                <span className="text-xs text-amber-600 font-medium">Too large</span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <button onClick={() => { setSelectedVehicle(null); setBookingStep(4); }} className="text-sm text-slate-500 hover:text-slate-700 font-medium">
-                          Skip — I'll specify later
-                        </button>
-                        <Button disabled={!selectedVehicle} onClick={() => setBookingStep(4)} className="gap-2">
-                          Continue <ArrowRight className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-              {bookingStep > 3 && selectedVehicle && (
-                <div className="px-6 py-4 bg-slate-50 text-sm text-slate-600">
-                  <span className="font-semibold text-slate-900">{vehicles.find(v => v.id === selectedVehicle)?.unitNumber}</span>
-                </div>
-              )}
-            </Card>
-          )}
-
-          {/* No vehicles message */}
-          {vehicles.length === 0 && bookingStep >= 3 && !bookingResult && (
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-600">
-              <span className="font-semibold">No vehicles assigned to your account.</span> Contact your fleet manager to assign a vehicle, or proceed without one.
-            </div>
-          )}
-
-          {/* Step 4 (or 3 if single vehicle): Confirm Booking */}
+          {/* Step 3: Confirm Booking — vehicle is the active one, set above */}
           {!bookingResult ? (
-            <Card className={`transition-all duration-300 ${(vehicles.length > 1 ? bookingStep < 4 : bookingStep < 3) ? "opacity-50 pointer-events-none" : ""}`}>
+            <Card className={`transition-all duration-300 ${bookingStep < 3 ? "opacity-50 pointer-events-none" : ""}`}>
               <div className="p-6">
                 {bookingError && (
                   <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm font-medium">
@@ -624,6 +579,7 @@ export default function LocationDetail() {
               </div>
             </Card>
           )}
+          </>)}
         </div>
 
         {/* Right Col - Booking Summary */}
@@ -644,10 +600,11 @@ export default function LocationDetail() {
                   <p className="font-bold text-lg">{selectedSlot ? formatDate(selectedSlot, "MMM d, yyyy") : "—"}</p>
                   {selectedSlot && <p className="text-slate-400 text-sm">{formatDate(selectedSlot, "h:mm a")}</p>}
                 </div>
-                {selectedVehicle && (
+                {activeVehicle && (
                   <div>
                     <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">Vehicle</p>
-                    <p className="font-bold text-lg">{vehicles.find(v => v.id === selectedVehicle)?.unitNumber || "—"}</p>
+                    <p className="font-bold text-lg">{vehicleDisplayName(activeVehicle)}</p>
+                    {activeVehicleClass && <p className="text-slate-400 text-sm">{SIZE_CLASS_LABEL[activeVehicleClass]}</p>}
                   </div>
                 )}
                 <div className="pt-5 border-t border-slate-700/50 flex justify-between items-end">
@@ -710,6 +667,7 @@ export default function LocationDetail() {
         <LocationReviews locationId={locationId} />
       </div>
 
+      {/* shortNoticePending modal — declared inline below */}
       {shortNoticePending && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={cancelShortNotice}>
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
@@ -734,5 +692,35 @@ export default function LocationDetail() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Top-of-flow context card showing the driver's active vehicle. The
+ * "Change" link reuses the same popover the global pill uses, so the
+ * affordance is consistent everywhere a swap can happen. */
+function ActiveVehicleContextCard() {
+  const { activeVehicle, hasAnyVehicle, loading } = useActiveVehicle();
+  if (loading || !hasAnyVehicle || !activeVehicle) return null;
+  const bt = normalizeBodyType(activeVehicle.bodyType);
+  const style = BODY_TYPE_STYLE[bt];
+  const Icon = BODY_TYPE_ICON[bt];
+  const cls = deriveSizeClassFromLengthInches(activeVehicle.lengthInches);
+  const lengthFeet = inchesToFeet(activeVehicle.lengthInches);
+  return (
+    <Card className="relative overflow-hidden p-0">
+      <div className={`absolute left-0 top-0 bottom-0 w-1 ${style.stripe}`} aria-hidden />
+      <div className="px-5 pl-6 py-3 flex items-center gap-3">
+        <div className={`h-10 w-10 ${style.chipBg} rounded-xl flex items-center justify-center shrink-0`}>
+          <Icon className={`h-5 w-5 ${style.chipFg}`} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs uppercase tracking-wider font-bold text-slate-500">Booking for</p>
+          <p className="font-bold text-slate-900 truncate">
+            {vehicleDisplayName(activeVehicle)} <span className="text-slate-400 font-normal">·</span> <span className="font-medium text-slate-600">{BODY_TYPE_LABEL[bt]}{cls ? ` · ${SIZE_CLASS_LABEL[cls]}` : ""}{lengthFeet ? ` · ${lengthFeet} ft` : ""}</span>
+          </p>
+        </div>
+        <ActiveVehiclePill />
+      </div>
+    </Card>
   );
 }
