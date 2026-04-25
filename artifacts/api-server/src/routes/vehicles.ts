@@ -5,6 +5,44 @@ import { isPlatformAdmin, isFleetRole, type SessionUser } from "../lib/auth";
 
 const router: IRouter = Router();
 
+const ACTIVE_BOOKING_STATUSES = [
+  "REQUESTED",
+  "PROVIDER_CONFIRMED",
+  "CHECKED_IN",
+  "IN_SERVICE",
+] as const;
+
+const VALID_BODY_TYPES = ["COACH", "SCHOOL_BUS", "SHUTTLE", "TRANSIT_BUS", "OTHER"] as const;
+type BodyType = (typeof VALID_BODY_TYPES)[number];
+function normalizeBodyType(raw: unknown): BodyType {
+  if (typeof raw !== "string") return "OTHER";
+  const upper = raw.toUpperCase();
+  return (VALID_BODY_TYPES as readonly string[]).includes(upper) ? (upper as BodyType) : "OTHER";
+}
+
+/** Compute the set of vehicle IDs a user is eligible to set as their
+ * default: personally-owned (ownerUserId === user.id) ∪ vehicles they
+ * have a currently-active FleetDriverAssignment for. */
+async function getEligibleVehicleIds(userId: string, now: Date = new Date()): Promise<Set<string>> {
+  const personal = await prisma.vehicle.findMany({
+    where: { ownerUserId: userId, isActive: true },
+    select: { id: true },
+  });
+
+  const assignments = await prisma.fleetDriverAssignment.findMany({
+    where: {
+      driverUserId: userId,
+      startsAt: { lte: now },
+      OR: [{ endsAt: null }, { endsAt: { gte: now } }],
+    },
+    select: { vehicleId: true },
+  });
+
+  const ids = new Set<string>(personal.map((v) => v.id));
+  for (const a of assignments) ids.add(a.vehicleId);
+  return ids;
+}
+
 router.get("/vehicles", requireAuth, async (req, res) => {
   try {
     const user = req.user as SessionUser;
@@ -19,7 +57,7 @@ router.get("/vehicles", requireAuth, async (req, res) => {
         },
         orderBy: { unitNumber: "asc" },
       });
-      res.json({ vehicles });
+      res.json({ vehicles, defaultVehicleId: null });
       return;
     }
 
@@ -31,24 +69,38 @@ router.get("/vehicles", requireAuth, async (req, res) => {
     const where: Record<string, unknown> = { isActive: true };
 
     if (fleetIds.length > 0) {
-      where.OR = [
-        { fleetId: { in: fleetIds } },
-        { ownerUserId: user.id },
-      ];
+      where.OR = [{ fleetId: { in: fleetIds } }, { ownerUserId: user.id }];
     } else {
       where.ownerUserId = user.id;
     }
 
-    const vehicles = await prisma.vehicle.findMany({
-      where,
-      include: {
-        fleet: { select: { id: true, name: true } },
-        owner: { select: { id: true, email: true, firstName: true, lastName: true } },
-      },
-      orderBy: { unitNumber: "asc" },
-    });
+    const [rawVehicles, dbUser, eligible] = await Promise.all([
+      prisma.vehicle.findMany({
+        where,
+        include: {
+          fleet: { select: { id: true, name: true } },
+          owner: { select: { id: true, email: true, firstName: true, lastName: true } },
+        },
+        orderBy: { unitNumber: "asc" },
+      }),
+      prisma.user.findUnique({ where: { id: user.id }, select: { defaultVehicleId: true } }),
+      getEligibleVehicleIds(user.id),
+    ]);
 
-    res.json({ vehicles });
+    // Lazy invalidation: if the user's defaultVehicleId points at a vehicle
+    // that's no longer in their eligible set (assignment ended, soft-deleted,
+    // etc.), surface the active vehicle as null without clearing the column.
+    const storedDefault = dbUser?.defaultVehicleId ?? null;
+    const effectiveDefault = storedDefault && eligible.has(storedDefault) ? storedDefault : null;
+
+    const vehicles = rawVehicles.map((v) => ({
+      ...v,
+      isDefault: effectiveDefault === v.id,
+      isEligibleForDefault: eligible.has(v.id),
+      isOwnedByUser: v.ownerUserId === user.id,
+    }));
+
+    res.json({ vehicles, defaultVehicleId: effectiveDefault });
   } catch (err) {
     req.log.error({ err }, "Failed to list vehicles");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to list vehicles" });
@@ -59,12 +111,9 @@ router.get("/fleets/:fleetId/vehicles", requireAuth, requireFleetAccess(), async
   try {
     const vehicles = await prisma.vehicle.findMany({
       where: { fleetId: req.params.fleetId, isActive: true },
-      include: {
-        owner: { select: { id: true, email: true, firstName: true, lastName: true } },
-      },
+      include: { owner: { select: { id: true, email: true, firstName: true, lastName: true } } },
       orderBy: { unitNumber: "asc" },
     });
-
     res.json({ vehicles });
   } catch (err) {
     req.log.error({ err }, "Failed to list fleet vehicles");
@@ -74,16 +123,21 @@ router.get("/fleets/:fleetId/vehicles", requireAuth, requireFleetAccess(), async
 
 router.post("/vehicles", requireAuth, async (req, res) => {
   try {
-    const { fleetId, categoryCode, subtypeCode, lengthInches, heightInches, hasRestroom, unitNumber, licensePlate } = req.body;
+    const { fleetId, categoryCode, subtypeCode, bodyType, nickname, lengthInches, heightInches, hasRestroom, unitNumber, licensePlate } = req.body;
 
-    if (!categoryCode || !subtypeCode || !lengthInches || !heightInches || !unitNumber) {
+    if (!unitNumber || typeof lengthInches !== "number") {
       res.status(400).json({
         errorCode: "VALIDATION_ERROR",
-        message: "categoryCode, subtypeCode, lengthInches, heightInches, and unitNumber are required",
+        message: "unitNumber and lengthInches are required",
       });
       return;
     }
 
+    // The driver-side flow only collects unitNumber + bodyType + length +
+    // optional nickname. Default the legacy required PRD fields so the model
+    // still has them, since downstream code (admin views, fleet flow) reads
+    // them. categoryCode defaults to BUS, subtypeCode to STANDARD, height to
+    // a reasonable bus value. Fleet admins can refine these later.
     const user = req.user as SessionUser;
 
     if (fleetId) {
@@ -94,14 +148,18 @@ router.post("/vehicles", requireAuth, async (req, res) => {
       }
     }
 
+    const trimmedNickname = typeof nickname === "string" ? nickname.trim().slice(0, 40) : null;
+
     const vehicle = await prisma.vehicle.create({
       data: {
         fleetId: fleetId || null,
         ownerUserId: fleetId ? null : user.id,
-        categoryCode,
-        subtypeCode,
+        categoryCode: categoryCode || "BUS",
+        subtypeCode: subtypeCode || "STANDARD",
+        bodyType: normalizeBodyType(bodyType),
+        nickname: trimmedNickname || null,
         lengthInches,
-        heightInches,
+        heightInches: typeof heightInches === "number" ? heightInches : 132,
         hasRestroom: hasRestroom ?? false,
         unitNumber,
         licensePlate: licensePlate || null,
@@ -112,7 +170,22 @@ router.post("/vehicles", requireAuth, async (req, res) => {
       },
     });
 
-    res.status(201).json({ vehicle });
+    // Auto-set as default if (a) the new vehicle is owned by the creator and
+    // (b) the creator currently has no default. First-vehicle UX: the driver
+    // doesn't have to manually flip the toggle on their first add.
+    let autoDefault = false;
+    if (vehicle.ownerUserId === user.id) {
+      const dbUser = await prisma.user.findUnique({ where: { id: user.id }, select: { defaultVehicleId: true } });
+      const eligible = await getEligibleVehicleIds(user.id);
+      const stored = dbUser?.defaultVehicleId ?? null;
+      const effective = stored && eligible.has(stored) ? stored : null;
+      if (!effective) {
+        await prisma.user.update({ where: { id: user.id }, data: { defaultVehicleId: vehicle.id } });
+        autoDefault = true;
+      }
+    }
+
+    res.status(201).json({ vehicle, autoSetAsDefault: autoDefault });
   } catch (err) {
     req.log.error({ err }, "Failed to create vehicle");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to create vehicle" });
@@ -121,10 +194,7 @@ router.post("/vehicles", requireAuth, async (req, res) => {
 
 router.patch("/vehicles/:vehicleId", requireAuth, async (req, res) => {
   try {
-    const vehicle = await prisma.vehicle.findUnique({
-      where: { id: req.params.vehicleId },
-    });
-
+    const vehicle = await prisma.vehicle.findUnique({ where: { id: req.params.vehicleId } });
     if (!vehicle) {
       res.status(404).json({ errorCode: "NOT_FOUND", message: "Vehicle not found" });
       return;
@@ -140,11 +210,16 @@ router.patch("/vehicles/:vehicleId", requireAuth, async (req, res) => {
       return;
     }
 
-    const { categoryCode, subtypeCode, lengthInches, heightInches, hasRestroom, unitNumber, licensePlate, isActive } = req.body;
+    const { categoryCode, subtypeCode, bodyType, nickname, lengthInches, heightInches, hasRestroom, unitNumber, licensePlate, isActive } = req.body;
     const data: Record<string, unknown> = {};
 
     if (categoryCode !== undefined) data.categoryCode = categoryCode;
     if (subtypeCode !== undefined) data.subtypeCode = subtypeCode;
+    if (bodyType !== undefined) data.bodyType = normalizeBodyType(bodyType);
+    if (nickname !== undefined) {
+      const trimmed = typeof nickname === "string" ? nickname.trim().slice(0, 40) : null;
+      data.nickname = trimmed || null;
+    }
     if (lengthInches !== undefined) data.lengthInches = lengthInches;
     if (heightInches !== undefined) data.heightInches = heightInches;
     if (hasRestroom !== undefined) data.hasRestroom = hasRestroom;
@@ -165,6 +240,148 @@ router.patch("/vehicles/:vehicleId", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Failed to update vehicle");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to update vehicle" });
+  }
+});
+
+// Future bookings count for the delete-flow dialog. Drives the messaging
+// branch ("0 / 1 / N+ bookings"). The :id is a vehicle ID; we count
+// bookings against this vehicle in active statuses with a future start.
+router.get("/vehicles/:vehicleId/future-bookings", requireAuth, async (req, res) => {
+  try {
+    const user = req.user as SessionUser;
+    const vehicle = await prisma.vehicle.findUnique({ where: { id: req.params.vehicleId } });
+    if (!vehicle) {
+      res.status(404).json({ errorCode: "NOT_FOUND", message: "Vehicle not found" });
+      return;
+    }
+    // Only the owner (or admin) can introspect this. Fleet admins use the
+    // fleet vehicle screens, not this driver-facing endpoint.
+    const isAdmin = isPlatformAdmin(user);
+    const ownsVehicle = vehicle.ownerUserId === user.id;
+    if (!isAdmin && !ownsVehicle) {
+      res.status(403).json({ errorCode: "FORBIDDEN", message: "Access denied" });
+      return;
+    }
+
+    const now = new Date();
+    const futureBookings = await prisma.booking.findMany({
+      where: {
+        vehicleId: vehicle.id,
+        scheduledStartAtUtc: { gte: now },
+        status: { in: ACTIVE_BOOKING_STATUSES as any },
+      },
+      select: { id: true, scheduledStartAtUtc: true },
+      orderBy: { scheduledStartAtUtc: "asc" },
+    });
+    res.json({
+      count: futureBookings.length,
+      firstBookingId: futureBookings[0]?.id ?? null,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to load future bookings count");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed" });
+  }
+});
+
+router.delete("/vehicles/:vehicleId", requireAuth, async (req, res) => {
+  try {
+    const user = req.user as SessionUser;
+    const vehicle = await prisma.vehicle.findUnique({ where: { id: req.params.vehicleId } });
+    if (!vehicle) {
+      res.status(404).json({ errorCode: "NOT_FOUND", message: "Vehicle not found" });
+      return;
+    }
+
+    // Only the owner can delete a personal vehicle (or admin). Fleet
+    // vehicles are managed by fleet admins through their own flow.
+    const isAdmin = isPlatformAdmin(user);
+    const ownsVehicle = vehicle.ownerUserId === user.id;
+    if (!isAdmin && !ownsVehicle) {
+      res.status(403).json({ errorCode: "FORBIDDEN", message: "Access denied" });
+      return;
+    }
+
+    const now = new Date();
+    const futureCount = await prisma.booking.count({
+      where: {
+        vehicleId: vehicle.id,
+        scheduledStartAtUtc: { gte: now },
+        status: { in: ACTIVE_BOOKING_STATUSES as any },
+      },
+    });
+    if (futureCount > 0) {
+      res.status(409).json({
+        errorCode: "VEHICLE_HAS_FUTURE_BOOKINGS",
+        message: `This vehicle has ${futureCount} upcoming booking${futureCount === 1 ? "" : "s"}. Cancel ${futureCount === 1 ? "it" : "them"} before deleting.`,
+        futureBookingCount: futureCount,
+      });
+      return;
+    }
+
+    // Cannot delete the user's active default if they have other personal
+    // vehicles. Force them to set another as default first. If this is
+    // their only personal vehicle, allow deletion (pointer auto-clears via
+    // ON DELETE SET NULL).
+    const dbUser = await prisma.user.findUnique({ where: { id: user.id }, select: { defaultVehicleId: true } });
+    if (dbUser?.defaultVehicleId === vehicle.id) {
+      const otherPersonal = await prisma.vehicle.count({
+        where: { ownerUserId: user.id, isActive: true, id: { not: vehicle.id } },
+      });
+      if (otherPersonal > 0) {
+        res.status(409).json({
+          errorCode: "DEFAULT_VEHICLE_DELETE_BLOCKED",
+          message: "Set another vehicle as active before deleting this one.",
+        });
+        return;
+      }
+    }
+
+    // Soft-delete via the existing isActive flag (consistent with how the
+    // model already filters list responses on isActive=true). Hard-delete
+    // would orphan booking history references.
+    await prisma.vehicle.update({ where: { id: vehicle.id }, data: { isActive: false } });
+
+    res.json({ ok: true });
+  } catch (err) {
+    req.log.error({ err }, "Failed to delete vehicle");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to delete vehicle" });
+  }
+});
+
+// Set / clear the user's active default vehicle. Body: { vehicleId | null }.
+// Validates eligibility (personally-owned OR currently-active fleet
+// assignment). Returns the new defaultVehicleId so the client can update
+// optimistic UI without re-fetching.
+router.patch("/users/me/default-vehicle", requireAuth, async (req, res) => {
+  try {
+    const user = req.user as SessionUser;
+    const { vehicleId } = req.body as { vehicleId?: string | null };
+
+    if (vehicleId === null) {
+      await prisma.user.update({ where: { id: user.id }, data: { defaultVehicleId: null } });
+      res.json({ defaultVehicleId: null });
+      return;
+    }
+
+    if (typeof vehicleId !== "string" || vehicleId.length === 0) {
+      res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "vehicleId is required (or null to clear)" });
+      return;
+    }
+
+    const eligible = await getEligibleVehicleIds(user.id);
+    if (!eligible.has(vehicleId)) {
+      res.status(403).json({
+        errorCode: "VEHICLE_NOT_ELIGIBLE",
+        message: "This vehicle isn't eligible for your account.",
+      });
+      return;
+    }
+
+    await prisma.user.update({ where: { id: user.id }, data: { defaultVehicleId: vehicleId } });
+    res.json({ defaultVehicleId: vehicleId });
+  } catch (err) {
+    req.log.error({ err }, "Failed to set default vehicle");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to set default vehicle" });
   }
 });
 
