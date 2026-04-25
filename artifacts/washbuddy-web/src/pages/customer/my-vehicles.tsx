@@ -7,7 +7,7 @@ import { useActiveVehicle, type ActiveVehicleRow } from "@/contexts/activeVehicl
 import {
   BODY_TYPE_ICON,
   BODY_TYPE_LABEL,
-  BODY_TYPE_STYLE,
+  bodyTypeStyleFor,
   BODY_TYPES,
   deriveSizeClassFromLengthFeet,
   feetToInches,
@@ -174,7 +174,10 @@ function VehicleCard({
   onDelete: ((v: VehicleRow) => void) | null;
 }) {
   const bodyType = normalizeBodyType(vehicle.bodyType);
-  const style = BODY_TYPE_STYLE[bodyType];
+  // Prominence by reduction: the active card gets full body-type colour,
+  // every other card desaturates so the eye lands on the active one
+  // without any louder treatment on its part.
+  const style = bodyTypeStyleFor(bodyType, vehicle.isDefault);
   const Icon = BODY_TYPE_ICON[bodyType];
   const lengthFeet = inchesToFeet(vehicle.lengthInches);
   const sizeClass = deriveSizeClassFromLengthFeet(lengthFeet);
@@ -182,7 +185,7 @@ function VehicleCard({
   const secondary = vehicle.nickname?.trim() ? vehicle.unitNumber : null;
 
   return (
-    <Card className={`relative overflow-hidden p-0 transition-shadow ${vehicle.isDefault ? "ring-2 ring-primary shadow-md" : ""}`}>
+    <Card className={`relative overflow-hidden p-0 transition-shadow ${vehicle.isDefault ? "ring-2 ring-primary shadow-md bg-primary/[0.03]" : ""}`}>
       <div className={`absolute left-0 top-0 bottom-0 w-1 ${style.stripe}`} aria-hidden />
       <div className="p-5 pl-6 flex items-start gap-4">
         <div className={`h-12 w-12 ${style.chipBg} rounded-xl flex items-center justify-center shrink-0`}>
@@ -190,7 +193,7 @@ function VehicleCard({
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-bold text-lg text-slate-900 truncate">{display}</h3>
+            <h3 className={`font-bold text-lg truncate ${vehicle.isDefault ? "text-slate-900" : "text-slate-700"}`}>{display}</h3>
             {vehicle.isDefault && (
               <Badge className="bg-primary/10 text-primary border-primary/20"><Star className="h-3 w-3 mr-1 fill-primary" />Active</Badge>
             )}

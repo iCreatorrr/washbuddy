@@ -17,7 +17,7 @@ import { useActiveVehicle, type ActiveVehicleRow } from "@/contexts/activeVehicl
 import {
   BODY_TYPE_ICON,
   BODY_TYPE_LABEL,
-  BODY_TYPE_STYLE,
+  bodyTypeStyleFor,
   deriveSizeClassFromLengthInches,
   inchesToFeet,
   normalizeBodyType,
@@ -68,7 +68,7 @@ export function ActiveVehiclePill({ className }: { className?: string }) {
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        {activeVehicle ? <PillContent vehicle={activeVehicle} /> : <span className="text-sm text-slate-500">No active vehicle</span>}
+        {activeVehicle ? <PillContent vehicle={activeVehicle} active /> : <span className="text-sm text-slate-500">No active vehicle</span>}
         <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
 
@@ -85,7 +85,7 @@ export function ActiveVehiclePill({ className }: { className?: string }) {
                   onClick={async () => { await setActive(v.id); setOpen(false); }}
                   className={`w-full text-left px-4 py-2.5 hover:bg-slate-50 transition-colors flex items-center gap-3 ${v.isDefault ? "bg-primary/5" : ""}`}
                 >
-                  <PillContent vehicle={v} compact />
+                  <PillContent vehicle={v} compact active={v.isDefault} />
                   {v.isDefault && <Star className="h-4 w-4 text-primary fill-primary ml-auto" />}
                 </button>
               </li>
@@ -104,9 +104,9 @@ export function ActiveVehiclePill({ className }: { className?: string }) {
   );
 }
 
-function PillContent({ vehicle, compact }: { vehicle: ActiveVehicleRow; compact?: boolean }) {
+function PillContent({ vehicle, compact, active }: { vehicle: ActiveVehicleRow; compact?: boolean; active?: boolean }) {
   const bt = normalizeBodyType(vehicle.bodyType);
-  const style = BODY_TYPE_STYLE[bt];
+  const style = bodyTypeStyleFor(bt, !!active);
   const Icon = BODY_TYPE_ICON[bt];
   const sizeClass = deriveSizeClassFromLengthInches(vehicle.lengthInches);
   const lengthFeet = inchesToFeet(vehicle.lengthInches);
