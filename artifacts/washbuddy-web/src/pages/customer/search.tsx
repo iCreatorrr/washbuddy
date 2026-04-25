@@ -7,6 +7,8 @@ import { formatCurrency } from "@/lib/utils";
 import { motion } from "framer-motion";
 import LocationMap from "@/components/location-map";
 import { useAuth } from "@/contexts/auth";
+import { ActiveVehiclePill } from "@/components/customer/active-vehicle-pill";
+import { useActiveVehicle } from "@/contexts/activeVehicle";
 
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 3959;
@@ -307,7 +309,10 @@ export default function CustomerSearch() {
   );
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <ActiveVehiclePill />
+      </div>
       <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-slate-900 via-blue-900 to-cyan-900 text-white p-8 sm:p-12">
         <div
           className="absolute inset-0 opacity-30"

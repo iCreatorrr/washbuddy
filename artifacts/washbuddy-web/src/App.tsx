@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider, useAuth } from "./contexts/auth";
+import { ActiveVehicleProvider } from "./contexts/activeVehicle";
 import { AppLayout } from "./components/layout";
 import { Toaster } from "sonner";
 
@@ -243,8 +244,10 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
         <AuthProvider>
-          <Toaster position="top-right" richColors />
-          <Router />
+          <ActiveVehicleProvider>
+            <Toaster position="top-right" richColors />
+            <Router />
+          </ActiveVehicleProvider>
         </AuthProvider>
       </WouterRouter>
     </QueryClientProvider>

@@ -7,6 +7,7 @@ import { formatCurrency } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { ActiveVehiclePill } from "@/components/customer/active-vehicle-pill";
 
 interface CityOption {
   name: string;
@@ -822,6 +823,9 @@ export default function RoutePlanner() {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <ActiveVehiclePill />
+      </div>
       <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-indigo-900 via-purple-900 to-blue-900 text-white p-8 sm:p-10">
         <div
           className="absolute inset-0 opacity-30"
