@@ -16,6 +16,19 @@ function formatSlotTime(t: string): string {
   return `${hr}:${String(m).padStart(2, "0")} ${ampm}`;
 }
 
+/** Short timezone label (e.g. "EST" / "EDT") for the given IANA tz on the
+ * specified date, so the booking form can disambiguate which clock the
+ * provider is selecting in. Falls back to the raw zone if formatting fails. */
+function shortTimezoneAbbr(dateStr: string, timezone: string): string {
+  try {
+    const ref = new Date(`${dateStr}T12:00:00Z`);
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: timezone, timeZoneName: "short" }).formatToParts(ref);
+    return parts.find((p) => p.type === "timeZoneName")?.value || timezone;
+  } catch {
+    return timezone;
+  }
+}
+
 function DynamicIcon({ name, className }: { name: string; className?: string }) {
   const Icon = (Icons as any)[name] || Icons.Package;
   return <Icon className={className} />;
@@ -345,7 +358,7 @@ export function QuickAddBooking({ providerId, locationId, locationTimezone, onCl
               <div className="grid grid-cols-2 gap-3">
                 <div><Label>Date</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} min={new Date().toISOString().split("T")[0]} /></div>
                 <div>
-                  <Label>Start Time</Label>
+                  <Label>Start Time <span className="text-xs font-normal text-slate-500">({shortTimezoneAbbr(date, locationTimezone)})</span></Label>
                   <select value={startTime} onChange={(e) => setStartTime(e.target.value)}
                     className="w-full h-12 px-3 border-2 border-slate-200 rounded-xl text-sm bg-white">
                     {availableSlots.map((slot) => (
