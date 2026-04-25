@@ -4,10 +4,12 @@ import { Card, Badge, Button, ErrorState } from "@/components/ui";
 import { getStatusColor, getStatusLabel, formatCurrency, formatDate } from "@/lib/utils";
 import { formatLocationDisplay } from "@/lib/format-location";
 import { Link, useLocation } from "wouter";
-import { Calendar, MapPin, Truck, Search, Star, XCircle, AlertTriangle } from "lucide-react";
+import { Calendar, MapPin, Truck, Search, Star, XCircle, AlertTriangle, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast, Toaster } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
+import { useActiveVehicle, type ActiveVehicleRow } from "@/contexts/activeVehicle";
+import { BODY_TYPE_ICON, BODY_TYPE_STYLE, normalizeBodyType, vehicleDisplayName } from "@/lib/vehicleBodyType";
 
 type TabKey = "upcoming" | "progress" | "completed" | "cancelled";
 
@@ -23,6 +25,14 @@ export default function MyBookings() {
   const [activeTab, setActiveTab] = useState<TabKey>("upcoming");
   const [cancelTarget, setCancelTarget] = useState<{ id: string; name: string; date: string } | null>(null);
 
+  // ?vehicleId=… deep-link from the My Vehicles delete-flow filters this
+  // page to a single vehicle. Read at render time so wouter navigations
+  // refresh the filter without a manual reload.
+  const urlParams = new URLSearchParams(window.location.search);
+  const filterVehicleId = urlParams.get("vehicleId") || null;
+
+  const { allVehicles } = useActiveVehicle();
+
   const { data, isLoading, isError, refetch } = useListBookings(
     { limit: 100 },
     { request: { credentials: "include" } },
@@ -30,15 +40,37 @@ export default function MyBookings() {
   const cancelMutation = useCancelBooking({ request: { credentials: "include" } });
 
   const bookings = data?.bookings || [];
+  const filteredBookings = filterVehicleId
+    ? bookings.filter((b: any) => b.vehicle?.id === filterVehicleId || b.vehicleId === filterVehicleId)
+    : bookings;
 
   const grouped = useMemo(() => ({
-    upcoming: bookings.filter((b: any) => UPCOMING_STATUSES.includes(b.status)),
-    progress: bookings.filter((b: any) => PROGRESS_STATUSES.includes(b.status)),
-    completed: bookings.filter((b: any) => COMPLETED_STATUSES.includes(b.status)),
-    cancelled: bookings.filter((b: any) => CANCELLED_STATUSES.includes(b.status)),
-  }), [bookings]);
+    upcoming: filteredBookings.filter((b: any) => UPCOMING_STATUSES.includes(b.status)),
+    progress: filteredBookings.filter((b: any) => PROGRESS_STATUSES.includes(b.status)),
+    completed: filteredBookings.filter((b: any) => COMPLETED_STATUSES.includes(b.status)),
+    cancelled: filteredBookings.filter((b: any) => CANCELLED_STATUSES.includes(b.status)),
+  }), [filteredBookings]);
 
   const currentBookings = grouped[activeTab];
+
+  // Distinct vehicles represented in the current tab's bookings. Drives
+  // segmentation when the user has 2+ vehicles. Bookings without a
+  // vehicle (legacy / fleet-placeholder) get grouped under a sentinel.
+  const segmentByVehicle = useMemo(() => {
+    if (filterVehicleId) return null; // already filtered to one
+    const ownEligibleCount = allVehicles.filter((v) => v.isEligibleForDefault).length;
+    if (ownEligibleCount < 2) return null;
+    const buckets = new Map<string, { vehicle: ActiveVehicleRow | null; bookings: any[] }>();
+    for (const b of currentBookings) {
+      const id = b.vehicle?.id || b.vehicleId || "__no_vehicle__";
+      if (!buckets.has(id)) {
+        const vehicle = allVehicles.find((v) => v.id === id) || null;
+        buckets.set(id, { vehicle, bookings: [] });
+      }
+      buckets.get(id)!.bookings.push(b);
+    }
+    return Array.from(buckets.values());
+  }, [currentBookings, allVehicles, filterVehicleId]);
 
   const handleCancel = async () => {
     if (!cancelTarget) return;
@@ -108,6 +140,24 @@ export default function MyBookings() {
         <p className="text-slate-500 mt-2">Track and manage your wash bookings.</p>
       </div>
 
+      {filterVehicleId && (() => {
+        const v = allVehicles.find((x) => x.id === filterVehicleId);
+        return (
+          <div className="flex items-center gap-3 p-3 bg-slate-100 rounded-xl">
+            <span className="text-sm text-slate-700">
+              Showing bookings for <span className="font-semibold">{v ? vehicleDisplayName(v) : "selected vehicle"}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setNav("/bookings")}
+              className="ml-auto text-sm font-semibold text-slate-700 hover:text-slate-900 inline-flex items-center gap-1"
+            >
+              <X className="h-4 w-4" /> Clear filter
+            </button>
+          </div>
+        );
+      })()}
+
       {/* Tab navigation */}
       <div className="flex bg-slate-100 rounded-xl p-1 gap-1 overflow-x-auto">
         {tabs.map((tab) => (
@@ -150,86 +200,150 @@ export default function MyBookings() {
             </Link>
           )}
         </div>
+      ) : segmentByVehicle ? (
+        <div className="space-y-8">
+          {segmentByVehicle.map((group, gIdx) => (
+            <div key={gIdx} className="space-y-4">
+              <VehicleSectionHeader vehicle={group.vehicle} count={group.bookings.length} />
+              <div className="grid grid-cols-1 gap-4">
+                {group.bookings.map((booking: any, idx: number) => (
+                  <BookingRow
+                    key={booking.id}
+                    booking={booking}
+                    idx={idx}
+                    activeTab={activeTab}
+                    onOpen={() => setNav(`/bookings/${booking.id}`)}
+                    onCancel={(b) => setCancelTarget({
+                      id: b.id,
+                      name: b.serviceNameSnapshot,
+                      date: formatDate(b.scheduledStartAtUtc, "MMM d, yyyy", b.locationTimezone) || "",
+                    })}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="grid grid-cols-1 gap-4">
           {currentBookings.map((booking: any, idx: number) => (
-            <motion.div key={booking.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}>
-              <Card className="flex flex-col md:flex-row gap-4 md:gap-6 items-start md:items-center justify-between group cursor-pointer hover:border-primary/40 border-2 overflow-hidden">
-                {/* Main content — clickable to detail */}
-                <div
-                  className="flex-1 p-6 space-y-3 w-full"
-                  onClick={() => setNav(`/bookings/${booking.id}`)}
-                >
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <Badge className={getStatusColor(booking.status)}>{getStatusLabel(booking.status)}</Badge>
-                    <span className="text-sm font-bold text-slate-400">ID: {booking.id.split("-")[0].toUpperCase()}</span>
-                  </div>
-                  <h3 className="text-xl font-bold text-slate-900 group-hover:text-primary transition-colors">
-                    {booking.serviceNameSnapshot}
-                  </h3>
-                  <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm font-medium text-slate-500">
-                    <span className="flex items-center gap-1.5">
-                      <Calendar className="h-4 w-4 text-slate-400" />
-                      {formatDate(booking.scheduledStartAtUtc, "EEE, MMM d · h:mm a", booking.locationTimezone)}
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <MapPin className="h-4 w-4 text-slate-400" />
-                      {formatLocationDisplay(booking.location?.provider?.name, booking.location?.name)}
-                    </span>
-                    {booking.vehicle && (
-                      <span className="flex items-center gap-1.5">
-                        <Truck className="h-4 w-4 text-slate-400" />
-                        Unit {booking.vehicle.unitNumber}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Price + actions */}
-                <div className="flex flex-row md:flex-col items-center md:items-end gap-3 px-6 pb-6 md:p-6 md:pl-0 shrink-0 w-full md:w-auto">
-                  <div className="text-2xl font-display font-bold text-slate-900">
-                    {formatCurrency(booking.totalPriceMinor, booking.currencyCode)}
-                  </div>
-
-                  {/* Cancel button for upcoming bookings */}
-                  {activeTab === "upcoming" && CANCELLABLE_STATUSES.includes(booking.status) && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300 gap-1"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCancelTarget({
-                          id: booking.id,
-                          name: booking.serviceNameSnapshot,
-                          date: formatDate(booking.scheduledStartAtUtc, "MMM d, yyyy", booking.locationTimezone) || "",
-                        });
-                      }}
-                    >
-                      <XCircle className="h-3.5 w-3.5" /> Cancel
-                    </Button>
-                  )}
-
-                  {/* Leave review for completed bookings */}
-                  {activeTab === "completed" && COMPLETED_STATUSES.includes(booking.status) && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-amber-600 border-amber-200 hover:bg-amber-50 hover:border-amber-300 gap-1"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setNav(`/bookings/${booking.id}`);
-                      }}
-                    >
-                      <Star className="h-3.5 w-3.5" /> Leave Review
-                    </Button>
-                  )}
-                </div>
-              </Card>
-            </motion.div>
+            <BookingRow
+              key={booking.id}
+              booking={booking}
+              idx={idx}
+              activeTab={activeTab}
+              onOpen={() => setNav(`/bookings/${booking.id}`)}
+              onCancel={(b) => setCancelTarget({
+                id: b.id,
+                name: b.serviceNameSnapshot,
+                date: formatDate(b.scheduledStartAtUtc, "MMM d, yyyy", b.locationTimezone) || "",
+              })}
+            />
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+function VehicleSectionHeader({ vehicle, count }: { vehicle: ActiveVehicleRow | null; count: number }) {
+  if (!vehicle) {
+    return (
+      <div className="flex items-center gap-3 px-1">
+        <div className="h-8 w-8 bg-slate-100 rounded-lg flex items-center justify-center"><Truck className="h-4 w-4 text-slate-400" /></div>
+        <div>
+          <h3 className="text-sm font-bold text-slate-900">No assigned vehicle</h3>
+          <p className="text-xs text-slate-500">{count} booking{count === 1 ? "" : "s"}</p>
+        </div>
+      </div>
+    );
+  }
+  const bt = normalizeBodyType(vehicle.bodyType);
+  const style = BODY_TYPE_STYLE[bt];
+  const Icon = BODY_TYPE_ICON[bt];
+  return (
+    <div className="flex items-center gap-3 px-1">
+      <div className={`h-8 w-8 ${style.chipBg} rounded-lg flex items-center justify-center`}>
+        <Icon className={`h-4 w-4 ${style.chipFg}`} />
+      </div>
+      <div>
+        <h3 className="text-sm font-bold text-slate-900">{vehicleDisplayName(vehicle)}</h3>
+        <p className="text-xs text-slate-500">{count} booking{count === 1 ? "" : "s"}</p>
+      </div>
+    </div>
+  );
+}
+
+function BookingRow({
+  booking,
+  idx,
+  activeTab,
+  onOpen,
+  onCancel,
+}: {
+  booking: any;
+  idx: number;
+  activeTab: TabKey;
+  onOpen: () => void;
+  onCancel: (b: any) => void;
+}) {
+  const bt = booking.vehicle?.bodyType ? normalizeBodyType(booking.vehicle.bodyType) : null;
+  const stripe = bt ? BODY_TYPE_STYLE[bt].stripe : null;
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}>
+      <Card className="relative flex flex-col md:flex-row gap-4 md:gap-6 items-start md:items-center justify-between group cursor-pointer hover:border-primary/40 border-2 overflow-hidden">
+        {stripe && <div className={`absolute left-0 top-0 bottom-0 w-1 ${stripe}`} aria-hidden />}
+        <div className="flex-1 p-6 pl-7 space-y-3 w-full" onClick={onOpen}>
+          <div className="flex items-center gap-3 flex-wrap">
+            <Badge className={getStatusColor(booking.status)}>{getStatusLabel(booking.status)}</Badge>
+            <span className="text-sm font-bold text-slate-400">ID: {booking.id.split("-")[0].toUpperCase()}</span>
+          </div>
+          <h3 className="text-xl font-bold text-slate-900 group-hover:text-primary transition-colors">
+            {booking.serviceNameSnapshot}
+          </h3>
+          <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm font-medium text-slate-500">
+            <span className="flex items-center gap-1.5">
+              <Calendar className="h-4 w-4 text-slate-400" />
+              {formatDate(booking.scheduledStartAtUtc, "EEE, MMM d · h:mm a", booking.locationTimezone)}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <MapPin className="h-4 w-4 text-slate-400" />
+              {formatLocationDisplay(booking.location?.provider?.name, booking.location?.name)}
+            </span>
+            {booking.vehicle && (
+              <span className="flex items-center gap-1.5">
+                <Truck className="h-4 w-4 text-slate-400" />
+                {booking.vehicle.nickname?.trim() || `Unit ${booking.vehicle.unitNumber}`}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-row md:flex-col items-center md:items-end gap-3 px-6 pb-6 md:p-6 md:pl-0 shrink-0 w-full md:w-auto">
+          <div className="text-2xl font-display font-bold text-slate-900">
+            {formatCurrency(booking.totalPriceMinor, booking.currencyCode)}
+          </div>
+          {activeTab === "upcoming" && CANCELLABLE_STATUSES.includes(booking.status) && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300 gap-1"
+              onClick={(e) => { e.stopPropagation(); onCancel(booking); }}
+            >
+              <XCircle className="h-3.5 w-3.5" /> Cancel
+            </Button>
+          )}
+          {activeTab === "completed" && COMPLETED_STATUSES.includes(booking.status) && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-amber-600 border-amber-200 hover:bg-amber-50 hover:border-amber-300 gap-1"
+              onClick={(e) => { e.stopPropagation(); onOpen(); }}
+            >
+              <Star className="h-3.5 w-3.5" /> Leave Review
+            </Button>
+          )}
+        </div>
+      </Card>
+    </motion.div>
   );
 }
