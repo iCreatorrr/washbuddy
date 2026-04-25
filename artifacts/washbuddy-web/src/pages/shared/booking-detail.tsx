@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useRoute, useLocation, Link } from "wouter";
+import { useRoute, useLocation } from "wouter";
 import { useGetBooking, useConfirmBooking, useCheckinBooking, useStartService, useCompleteBooking, useCancelBooking } from "@workspace/api-client-react";
 import { useAuth } from "@/contexts/auth";
 import { Card, Badge, Button } from "@/components/ui";
@@ -17,6 +17,7 @@ const ALL_STATUSES = ["REQUESTED","HELD","PROVIDER_CONFIRMED","PROVIDER_DECLINED
 
 export default function BookingDetail() {
   const [, params] = useRoute("/bookings/:id");
+  const [, setNav] = useLocation();
   const bookingId = params?.id || "";
   const { user, hasRole } = useAuth();
   const queryClient = useQueryClient();
@@ -96,21 +97,24 @@ export default function BookingDetail() {
   const isCompleted = b.status === "COMPLETED" || b.status === "COMPLETED_PENDING_WINDOW" || b.status === "SETTLED";
   const showReviewForm = isCustomer && isCompleted && !reviewSubmitted;
 
-  const getBack = () => {
-    if (hasRole("PLATFORM_SUPER_ADMIN")) return { path: "/admin/bookings", label: "Back to All Bookings" };
-    if (hasRole("PROVIDER_ADMIN") || hasRole("PROVIDER_STAFF")) return { path: "/provider", label: "Back to Dashboard" };
-    if (hasRole("FLEET_ADMIN") || hasRole("DISPATCHER") || hasRole("MAINTENANCE_MANAGER") || hasRole("READ_ONLY_ANALYST")) return { path: "/fleet", label: "Back to Fleet" };
-    return { path: "/bookings", label: "Back to My Bookings" };
+  // Role-based fallback when there's no in-app history (deep-link, fresh
+  // tab). When there *is* history we just pop it, which gets users back to
+  // wherever they came from (Bay Timeline, Daily Board, My Bookings, ...).
+  const fallbackPath = hasRole("PLATFORM_SUPER_ADMIN") ? "/admin/bookings"
+    : (hasRole("PROVIDER_ADMIN") || hasRole("PROVIDER_STAFF")) ? "/provider/daily-board"
+    : (hasRole("FLEET_ADMIN") || hasRole("DISPATCHER") || hasRole("MAINTENANCE_MANAGER") || hasRole("READ_ONLY_ANALYST")) ? "/fleet"
+    : "/bookings";
+  const goBack = () => {
+    if (window.history.length > 1) window.history.back();
+    else setNav(fallbackPath);
   };
-
-  const back = getBack();
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       <Toaster position="top-right" richColors />
-      <Link href={back.path} className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900 transition-colors">
-        <ArrowLeft className="h-4 w-4" /> {back.label}
-      </Link>
+      <button onClick={goBack} className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900 transition-colors">
+        <ArrowLeft className="h-4 w-4" /> Back
+      </button>
 
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
