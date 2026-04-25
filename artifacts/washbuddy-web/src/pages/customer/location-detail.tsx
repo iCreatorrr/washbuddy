@@ -577,30 +577,15 @@ export default function LocationDetail() {
               </div>
             </Card>
           ) : (
-            /* Booking Confirmation Screen */
-            <Card className="border-2 border-green-200 bg-green-50/30">
-              <div className="p-8 text-center">
-                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <CheckCircle2 className="h-8 w-8 text-green-600" />
-                </div>
-                <h2 className="text-2xl font-display font-bold text-slate-900 mb-2">
-                  {bookingResult.status === "PROVIDER_CONFIRMED" ? "Booking Confirmed!" : "Request Submitted!"}
-                </h2>
-                <p className="text-slate-600 mb-6">
-                  {bookingResult.status === "PROVIDER_CONFIRMED"
-                    ? "Your wash has been confirmed. Show up at the scheduled time and you're all set."
-                    : "Your booking request has been sent to the provider. You'll be notified when they respond."}
-                </p>
-                <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                  <Button onClick={() => setNav(`/bookings/${bookingResult.id}`)} className="gap-2">
-                    View Booking Details <ArrowRight className="h-4 w-4" />
-                  </Button>
-                  <Button variant="outline" onClick={() => setNav("/my-bookings")}>
-                    My Bookings
-                  </Button>
-                </div>
-              </div>
-            </Card>
+            <BookingReceipt
+              bookingResult={bookingResult}
+              locData={locData}
+              service={selectedSvc}
+              slotUtc={selectedSlot}
+              vehicle={activeVehicle}
+              totalPrice={totalPrice}
+              onDone={() => setNav("/bookings")}
+            />
           )}
           </>)}
         </div>
@@ -716,6 +701,131 @@ export default function LocationDetail() {
       )}
     </div>
   );
+}
+
+/** Inline receipt-style success state. Replaces the older two-button
+ * "Booking Confirmed!" / "View Booking Details" intermediate screen —
+ * the success page IS the receipt now. Photo placeholder slot will be
+ * wired to real provider photos in a later prompt. */
+function BookingReceipt({
+  bookingResult,
+  locData,
+  service,
+  slotUtc,
+  vehicle,
+  totalPrice,
+  onDone,
+}: {
+  bookingResult: { id: string; status: string };
+  locData: any;
+  service: any;
+  slotUtc: string | null;
+  vehicle: ReturnType<typeof useActiveVehicle>["activeVehicle"];
+  totalPrice: number;
+  onDone: () => void;
+}) {
+  const tz: string | undefined = locData?.timezone || undefined;
+  const isInstant = bookingResult.status === "PROVIDER_CONFIRMED";
+  const bt = vehicle ? normalizeBodyType(vehicle.bodyType) : null;
+  const VehicleIcon = bt ? BODY_TYPE_ICON[bt] : null;
+  const vehicleStyle = bt ? BODY_TYPE_STYLE[bt] : null;
+
+  // Render the slot in the location's local timezone with the (EST/EDT)
+  // suffix so drivers can't mistake it for their own clock when they're
+  // travelling. Falls back gracefully if Intl can't resolve the zone.
+  const dateLine = slotUtc ? formatDate(slotUtc, "EEEE, MMM d, yyyy", tz) : "—";
+  const timeLine = slotUtc ? renderTimeWithZone(slotUtc, tz) : "—";
+
+  return (
+    <Card className="border-2 border-emerald-200 bg-white overflow-hidden">
+      <div className="p-6 pb-4 border-b border-emerald-100 flex items-start gap-4">
+        <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center shrink-0">
+          <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-xl font-display font-bold text-slate-900">
+            {isInstant ? "Booking confirmed" : "Request submitted"}
+          </h2>
+          <p className="text-sm text-slate-500 mt-0.5">
+            {isInstant
+              ? "Show up at the scheduled time — your bay is reserved."
+              : "The provider will review and respond shortly."}
+          </p>
+        </div>
+        <span className="font-mono text-[11px] text-slate-400 shrink-0 hidden sm:inline">#{bookingResult.id.split("-")[0].toUpperCase()}</span>
+      </div>
+
+      <div className="p-6 grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-5">
+        <div className="aspect-square w-full sm:w-30 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400">
+          <MapPin className="h-7 w-7" />
+        </div>
+        <div className="space-y-4 min-w-0">
+          <div>
+            <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Provider</p>
+            <p className="font-bold text-slate-900 truncate">{locData?.name || "—"}</p>
+            <p className="text-sm text-slate-500 truncate">
+              {[locData?.addressLine1, locData?.city, locData?.stateCode].filter(Boolean).join(", ")}
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">When</p>
+              <p className="font-semibold text-slate-900">{dateLine}</p>
+              <p className="text-sm text-slate-500">{timeLine}</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Vehicle</p>
+              {vehicle && VehicleIcon && vehicleStyle ? (
+                <div className="flex items-center gap-2 mt-0.5">
+                  <div className={`h-7 w-7 ${vehicleStyle.chipBg} rounded-lg flex items-center justify-center shrink-0`}>
+                    <VehicleIcon className={`h-4 w-4 ${vehicleStyle.chipFg}`} />
+                  </div>
+                  <span className="font-semibold text-slate-900 truncate">{vehicleDisplayName(vehicle)}</span>
+                </div>
+              ) : (
+                <p className="font-semibold text-slate-900">—</p>
+              )}
+            </div>
+          </div>
+          <div>
+            <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Service</p>
+            <p className="font-semibold text-slate-900">{service?.name || "—"}</p>
+            {service?.durationMins != null && (
+              <p className="text-sm text-slate-500">{service.durationMins} min</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
+        <span className="text-sm text-slate-500">Total</span>
+        <span className="font-display font-bold text-2xl text-slate-900">{formatCurrency(totalPrice)}</span>
+      </div>
+
+      <div className="px-6 pb-6">
+        <Button className="w-full h-12" onClick={onDone}>View My Bookings</Button>
+      </div>
+    </Card>
+  );
+}
+
+/** "10:30 AM (EDT)" — always show the location's wall-clock time with
+ * its current zone abbreviation so a driver in another tz isn't tricked
+ * into reading the time as their local. */
+function renderTimeWithZone(slotUtc: string, timezone?: string): string {
+  try {
+    const formatted = new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: timezone,
+      timeZoneName: "short",
+    }).format(new Date(slotUtc));
+    // "10:30 AM EDT" → "10:30 AM (EDT)"
+    return formatted.replace(/\s+([A-Z]{2,5})$/, " ($1)");
+  } catch {
+    return formatDate(slotUtc, "h:mm a", timezone);
+  }
 }
 
 /** Top-of-flow context card showing the driver's active vehicle. The
