@@ -45,9 +45,6 @@ export async function findNextAvailableSlot(
   });
   if (!location || location.operatingWindows.length === 0) return null;
 
-  const service = await tx.service.findUnique({ where: { id: params.serviceId }, select: { leadTimeMins: true } });
-  const leadTimeMins = service?.leadTimeMins ?? 0;
-
   const tz = location.timezone;
   const now = new Date();
 
@@ -78,7 +75,7 @@ export async function findNextAvailableSlot(
         const endUtc = localTimeToUtc(dateStr, endTime, tz);
 
         if (startUtc.getTime() <= afterUtc.getTime()) continue;
-        if (startUtc.getTime() < now.getTime() + leadTimeMins * 60 * 1000) continue;
+        if (startUtc.getTime() <= now.getTime()) continue;
 
         const bay = await findAvailableBayTx(tx, { locationId, vehicleClass, startUtc, durationMins });
         if (bay) {

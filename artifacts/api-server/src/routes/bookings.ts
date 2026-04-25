@@ -127,9 +127,11 @@ router.post("/bookings/hold", requireAuth, async (req, res) => {
     const slotEnd = new Date(slotStart.getTime() + durationMins * 60 * 1000);
     const now = new Date();
 
-    const leadTimeDeadline = new Date(slotStart.getTime() - service.leadTimeMins * 60 * 1000);
-    if (now > leadTimeDeadline) {
-      res.status(409).json({ errorCode: "PAST_LEAD_TIME", message: "Slot is past the lead time cutoff" });
+    // Driver bookings have no hard lead-time block — only a past-time guard.
+    // Slots within SHORT_NOTICE_THRESHOLD_MINUTES of `now` are confirmed
+    // explicitly by the client (modal) before this endpoint is called.
+    if (slotStart.getTime() <= now.getTime()) {
+      res.status(409).json({ errorCode: "SLOT_IN_PAST", message: "Slot start time has already passed" });
       return;
     }
 

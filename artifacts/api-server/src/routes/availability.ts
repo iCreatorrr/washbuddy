@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { prisma } from "@workspace/db";
 import { getLocalTimeInfo, localTimeToUtc } from "../lib/timezone";
+import { SHORT_NOTICE_THRESHOLD_MINUTES } from "../lib/bookingPolicy";
 import {
   findAvailableBayTx,
   normalizeVehicleClass,
@@ -75,9 +76,11 @@ router.get("/locations/:locationId/availability", async (req, res) => {
       startUtc: string;
       endUtc: string;
       available: boolean;
+      shortNotice?: boolean;
       reason?: string;
     }> = [];
     const now = new Date();
+    const shortNoticeCutoff = now.getTime() + SHORT_NOTICE_THRESHOLD_MINUTES * 60 * 1000;
 
     for (const window of windows) {
       const [openH, openM] = window.openTime.split(":").map(Number);
@@ -98,11 +101,15 @@ router.get("/locations/:locationId/availability", async (req, res) => {
         const slotStartUtc = localTimeToUtc(dateStr, startTime, tz);
         const slotEndUtc = localTimeToUtc(dateStr, endTime, tz);
 
-        const leadTimeDeadline = new Date(slotStartUtc.getTime() - service.leadTimeMins * 60 * 1000);
-        if (now > leadTimeDeadline) {
-          slots.push({ startTime, endTime, startUtc: slotStartUtc.toISOString(), endUtc: slotEndUtc.toISOString(), available: false, reason: "LEAD_TIME_PASSED" });
+        // Past slots are not bookable. There is no hard lead-time block: any
+        // future slot is bookable. Slots that start within
+        // SHORT_NOTICE_THRESHOLD_MINUTES are flagged so the UI prompts a
+        // confirmation, but the server never refuses on lead-time alone.
+        if (slotStartUtc.getTime() <= now.getTime()) {
+          slots.push({ startTime, endTime, startUtc: slotStartUtc.toISOString(), endUtc: slotEndUtc.toISOString(), available: false, reason: "PAST" });
           continue;
         }
+        const isShortNotice = slotStartUtc.getTime() < shortNoticeCutoff;
 
         // Drive slot availability off bay occupancy, not per-service capacity.
         // When the caller supplies a vehicleClass we filter precisely; when
@@ -135,6 +142,7 @@ router.get("/locations/:locationId/availability", async (req, res) => {
           startUtc: slotStartUtc.toISOString(),
           endUtc: slotEndUtc.toISOString(),
           available: !!bayFree,
+          shortNotice: bayFree ? isShortNotice : undefined,
           reason: bayFree ? undefined : "NO_BAY_AVAILABLE",
         });
       }

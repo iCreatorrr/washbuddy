@@ -58,6 +58,9 @@ export default function LocationDetail() {
   const [bookingResult, setBookingResult] = useState<{ id: string; status: string } | null>(null);
   const [holdExpiresAt, setHoldExpiresAt] = useState<Date | null>(null);
   const [holdTimeLeft, setHoldTimeLeft] = useState<number | null>(null);
+  const [shortNoticePending, setShortNoticePending] = useState<{ slotUtc: string; minutes: number } | null>(null);
+
+  const SHORT_NOTICE_THRESHOLD_MINUTES = 30;
 
   const [locData, setLocData] = useState<any>(null);
   const [isSearchLoading, setIsSearchLoading] = useState(true);
@@ -212,7 +215,7 @@ export default function LocationDetail() {
   if (isSearchLoading) return <div className="p-12 text-center text-slate-500"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto" /></div>;
   if (!locData) return <div className="max-w-5xl mx-auto py-8"><ErrorState message="Location not found. It may have been removed." /></div>;
 
-  const handleCreateHold = async () => {
+  const proceedWithHold = async () => {
     if (!selectedService || !selectedSlot) return;
     setBookingError(null);
     try {
@@ -225,6 +228,26 @@ export default function LocationDetail() {
     } catch (err: any) {
       setBookingError(err?.message || "This slot is no longer available. Please select another time.");
     }
+  };
+
+  const handleCreateHold = async () => {
+    if (!selectedService || !selectedSlot) return;
+    const minutesUntilSlot = Math.round((new Date(selectedSlot).getTime() - Date.now()) / 60000);
+    if (minutesUntilSlot >= 0 && minutesUntilSlot < SHORT_NOTICE_THRESHOLD_MINUTES) {
+      setShortNoticePending({ slotUtc: selectedSlot, minutes: minutesUntilSlot });
+      return;
+    }
+    await proceedWithHold();
+  };
+
+  const confirmShortNotice = async () => {
+    setShortNoticePending(null);
+    await proceedWithHold();
+  };
+
+  const cancelShortNotice = () => {
+    setShortNoticePending(null);
+    setSelectedSlot(null);
   };
 
   const handleConfirmBooking = async () => {
@@ -686,6 +709,30 @@ export default function LocationDetail() {
         </h2>
         <LocationReviews locationId={locationId} />
       </div>
+
+      {shortNoticePending && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={cancelShortNotice}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-3 mb-4">
+              <div className="p-2 bg-amber-100 rounded-xl"><AlertTriangle className="h-6 w-6 text-amber-600" /></div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Confirm short-notice booking</h3>
+                <p className="text-sm text-slate-600 mt-1">
+                  You're booking a wash starting at{" "}
+                  <span className="font-semibold text-slate-900">
+                    {formatDate(shortNoticePending.slotUtc, "h:mm a", (locData as any)?.timezone)}
+                  </span>{" "}
+                  — that's in <span className="font-semibold text-slate-900">{shortNoticePending.minutes} minute{shortNoticePending.minutes === 1 ? "" : "s"}</span>. Please make sure you can arrive on time. The bay will be reserved for you.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-6">
+              <Button variant="outline" className="flex-1" onClick={cancelShortNotice}>Pick Another Time</Button>
+              <Button className="flex-1" onClick={confirmShortNotice} isLoading={holdMutation.isPending}>Confirm Booking</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
