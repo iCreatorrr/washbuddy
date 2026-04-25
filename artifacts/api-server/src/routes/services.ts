@@ -58,7 +58,7 @@ router.post("/providers/:providerId/locations/:locationId/services", requireAuth
         platformFeeMinor,
         capacityPerSlot: capacityPerSlot ?? 1,
         leadTimeMins: leadTimeMins ?? 60,
-        requiresConfirmation: requiresConfirmation ?? true,
+        requiresConfirmation: requiresConfirmation ?? false,
         isVisible: isVisible ?? false,
         compatibilityRules: compatibilityRules?.length
           ? {

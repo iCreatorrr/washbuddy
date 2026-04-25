@@ -643,7 +643,7 @@ model Service {
   platformFeeMinor     Int      @map("platform_fee_minor")
   capacityPerSlot      Int      @default(1) @map("capacity_per_slot")
   leadTimeMins         Int      @default(60) @map("lead_time_mins")
-  requiresConfirmation Boolean  @default(true) @map("requires_confirmation")
+  requiresConfirmation Boolean  @default(false) @map("requires_confirmation")
   isVisible            Boolean  @default(false) @map("is_visible")
   createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz

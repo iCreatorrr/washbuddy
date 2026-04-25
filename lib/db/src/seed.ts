@@ -333,7 +333,7 @@ async function main() {
       platformFeeMinor: 2500,
       capacityPerSlot: 2,
       leadTimeMins: 60,
-      requiresConfirmation: true,
+      requiresConfirmation: false,
       isVisible: true,
     },
   });
@@ -352,7 +352,7 @@ async function main() {
       platformFeeMinor: 5000,
       capacityPerSlot: 1,
       leadTimeMins: 120,
-      requiresConfirmation: true,
+      requiresConfirmation: false,
       isVisible: true,
     },
   });
@@ -371,7 +371,7 @@ async function main() {
       platformFeeMinor: 2000,
       capacityPerSlot: 3,
       leadTimeMins: 30,
-      requiresConfirmation: true,
+      requiresConfirmation: false,
       isVisible: true,
     },
   });
@@ -390,7 +390,7 @@ async function main() {
       platformFeeMinor: 2500,
       capacityPerSlot: 1,
       leadTimeMins: 60,
-      requiresConfirmation: true,
+      requiresConfirmation: false,
       isVisible: true,
     },
   });
