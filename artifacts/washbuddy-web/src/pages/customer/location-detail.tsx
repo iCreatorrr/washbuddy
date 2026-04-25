@@ -141,6 +141,29 @@ export default function LocationDetail() {
   const { activeVehicle, hasAnyVehicle, loading: vehicleLoading } = useActiveVehicle();
   const activeVehicleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
 
+  // Swapping the active vehicle mid-booking can change bay compatibility
+  // and slot pricing, so reset the in-flight selection back to step 1
+  // whenever the underlying vehicle changes. Skip the very first render
+  // (initial pickup of activeVehicle on mount) by tracking the last
+  // observed id.
+  const lastVehicleIdRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    const id = activeVehicle?.id ?? null;
+    if (lastVehicleIdRef.current === null) {
+      lastVehicleIdRef.current = id;
+      return;
+    }
+    if (lastVehicleIdRef.current !== id) {
+      lastVehicleIdRef.current = id;
+      setSelectedService(null);
+      setSelectedSlot(null);
+      setHoldId(null);
+      setHoldExpiresAt(null);
+      setBookingResult(null);
+      setBookingStep(1);
+    }
+  }, [activeVehicle?.id]);
+
   // Availability is class-aware: passing the active vehicle's size class
   // filters slots to those a compatible bay can host. Without an active
   // vehicle the booking column is gated, so we don't even fire the query.
