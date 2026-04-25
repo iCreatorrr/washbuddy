@@ -69,6 +69,7 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
 
   const b = booking;
   const vc = classBadgeFor(b);
+  const accent = bodyAccentFor(b);
   const src = SOURCE_BADGE[b.bookingSource] || SOURCE_BADGE.PLATFORM;
   const st = STATUS_BADGE[b.status] || STATUS_BADGE.PROVIDER_CONFIRMED;
   const clientName = b.customer ? `${b.customer.firstName} ${b.customer.lastName}` : b.offPlatformClientName || "Unknown";
@@ -87,9 +88,12 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
   };
 
   return (
-    <Card className="border hover:border-primary/30 transition-colors overflow-hidden">
+    <Card className="relative border hover:border-primary/30 transition-colors overflow-hidden">
+      {/* Body-type stripe — single accent per row, complements the size class
+          badge without competing with it. Stripe color keys on bodyType only. */}
+      {b.vehicle?.bodyType && <div className={`absolute left-0 top-0 bottom-0 w-1 ${accent.style.stripe}`} aria-hidden />}
       {/* Collapsed row */}
-      <div className="flex items-center gap-2 px-4 py-3 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+      <div className={`flex items-center gap-2 px-4 py-3 cursor-pointer ${b.vehicle?.bodyType ? "pl-5" : ""}`} onClick={() => setExpanded(!expanded)}>
         <span className="text-sm font-medium text-slate-600 w-[70px] shrink-0">{time}</span>
         <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${vc.color}`}>
           <span className="text-xs font-bold">{vc.label}</span>

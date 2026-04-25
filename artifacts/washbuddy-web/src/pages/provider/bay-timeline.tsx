@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { getTimelineBlockColors } from "@/lib/service-colors";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { BODY_TYPE_STYLE, normalizeBodyType } from "@/lib/vehicleBodyType";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -308,6 +309,7 @@ export default function BayTimeline() {
                       const blockTop = 4 + slot.slotIndex * blockHeight;
                       const clientName = b.driverFirstName || b.offPlatformClientName || "";
                       const originalBayId = bay.id;
+                      const bodyTypeStyle = b.vehicle?.bodyType ? BODY_TYPE_STYLE[normalizeBodyType(b.vehicle.bodyType)] : null;
 
                       return (
                         <div
@@ -330,9 +332,10 @@ export default function BayTimeline() {
                           title={`${b.serviceNameSnapshot} — ${clientName}\n${b.vehicleUnitNumber || b.fleetPlaceholderClass || ""}`}
                           onClick={() => navigate(`/bookings/${b.id}`)}
                         >
-                          <p className="text-xs font-bold truncate leading-tight">{b.serviceNameSnapshot}</p>
+                          {bodyTypeStyle && <div className={`absolute left-0 top-0 bottom-0 w-1 ${bodyTypeStyle.stripe}`} aria-hidden />}
+                          <p className={cn("text-xs font-bold truncate leading-tight", bodyTypeStyle ? "pl-1.5" : "")}>{b.serviceNameSnapshot}</p>
                           {blockHeight > 28 && (
-                            <p className="text-[10px] truncate leading-tight opacity-80">
+                            <p className={cn("text-[10px] truncate leading-tight opacity-80", bodyTypeStyle ? "pl-1.5" : "")}>
                               {clientName}{b.vehicleUnitNumber ? ` · ${b.vehicleUnitNumber}` : ""}
                             </p>
                           )}

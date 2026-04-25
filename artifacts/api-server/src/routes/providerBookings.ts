@@ -155,7 +155,7 @@ router.get("/providers/:providerId/locations/:locationId/daily-board", requireAu
         status: { in: ACTIVE_STATUSES as any },
       },
       include: {
-        vehicle: { select: { id: true, unitNumber: true, subtypeCode: true, lengthInches: true, heightInches: true, licensePlate: true, fleet: { select: { name: true } } } },
+        vehicle: { select: { id: true, unitNumber: true, subtypeCode: true, bodyType: true, nickname: true, lengthInches: true, heightInches: true, licensePlate: true, fleet: { select: { name: true } } } },
         customer: { select: { id: true, firstName: true, lastName: true } },
         service: { select: { name: true } },
         washBay: { select: { id: true, name: true } },
@@ -193,6 +193,7 @@ router.get("/providers/:providerId/locations/:locationId/daily-board", requireAu
         discountAmountMinor: b.discountAmountMinor,
         vehicle: b.vehicle ? {
           id: b.vehicle.id, unitNumber: b.vehicle.unitNumber, subtypeCode: b.vehicle.subtypeCode,
+          bodyType: b.vehicle.bodyType, nickname: b.vehicle.nickname,
           lengthInches: b.vehicle.lengthInches, heightInches: b.vehicle.heightInches, licensePlate: b.vehicle.licensePlate,
         } : null,
         fleetPlaceholderClass: b.fleetPlaceholderClass,
@@ -276,7 +277,7 @@ router.get("/providers/:providerId/locations/:locationId/bay-timeline", requireA
         status: { in: ACTIVE_STATUSES as any },
       },
       include: {
-        vehicle: { select: { unitNumber: true, subtypeCode: true } },
+        vehicle: { select: { unitNumber: true, subtypeCode: true, bodyType: true, nickname: true } },
         customer: { select: { firstName: true } },
         assignedOperator: { select: { firstName: true } },
       },
@@ -292,6 +293,7 @@ router.get("/providers/:providerId/locations/:locationId/bay-timeline", requireA
         status: b.status,
         bookingSource: b.bookingSource,
         serviceNameSnapshot: b.serviceNameSnapshot,
+        vehicle: b.vehicle ? { unitNumber: b.vehicle.unitNumber, bodyType: b.vehicle.bodyType, nickname: b.vehicle.nickname } : null,
         vehicleUnitNumber: b.vehicle?.unitNumber || null,
         vehicleSubtypeCode: b.vehicle?.subtypeCode || null,
         fleetPlaceholderClass: b.fleetPlaceholderClass,

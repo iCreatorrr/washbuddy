@@ -9,6 +9,7 @@ import { motion } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
 import { ReviewForm } from "@/components/review-form";
 import { toast, Toaster } from "sonner";
+import { BODY_TYPE_ICON, BODY_TYPE_LABEL, BODY_TYPE_STYLE, normalizeBodyType, vehicleDisplayName } from "@/lib/vehicleBodyType";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -239,11 +240,22 @@ export default function BookingDetail() {
           </div>
 
           <div className="flex gap-4 items-start">
-            <div className="bg-slate-100 p-3 rounded-xl text-slate-500"><Truck className="h-5 w-5" /></div>
+            {(() => {
+              const bt = b.vehicle?.bodyType ? normalizeBodyType(b.vehicle.bodyType) : null;
+              const style = bt ? BODY_TYPE_STYLE[bt] : null;
+              const Icon = bt ? BODY_TYPE_ICON[bt] : Truck;
+              return (
+                <div className={`p-3 rounded-xl ${style ? style.chipBg : "bg-slate-100"} ${style ? style.chipFg : "text-slate-500"}`}>
+                  <Icon className="h-5 w-5" />
+                </div>
+              );
+            })()}
             <div>
               <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Vehicle</p>
-              <p className="font-bold text-slate-900">{b.vehicle?.unitNumber || "Not specified"}</p>
-              <p className="text-sm text-slate-500">{b.vehicle?.categoryCode}</p>
+              <p className="font-bold text-slate-900">{b.vehicle ? vehicleDisplayName(b.vehicle) : "Not specified"}</p>
+              <p className="text-sm text-slate-500">
+                {b.vehicle?.bodyType ? BODY_TYPE_LABEL[normalizeBodyType(b.vehicle.bodyType)] : (b.vehicle?.categoryCode || "")}
+              </p>
             </div>
           </div>
 
