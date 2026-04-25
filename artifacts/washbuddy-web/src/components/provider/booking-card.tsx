@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { Card, Badge, Button } from "@/components/ui";
-import { Bus, Star, AlertTriangle, Sparkles, ChevronDown, MessageSquare, Camera, StickyNote } from "lucide-react";
+import { Star, AlertTriangle, Sparkles, ChevronDown, MessageSquare, Camera, StickyNote } from "lucide-react";
 import { formatCurrency, formatVehicleClass } from "@/lib/utils";
 import { toast } from "sonner";
 import { PhotoPrompt } from "./photo-prompt";
+import { BODY_TYPE_ICON, BODY_TYPE_STYLE, deriveSizeClassFromLengthInches, normalizeBodyType, type BodyType } from "@/lib/vehicleBodyType";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -14,18 +15,19 @@ const VEHICLE_CLASS_BADGE: Record<string, { label: string; color: string }> = {
   EXTRA_LARGE: { label: "XL", color: "bg-purple-200 text-purple-700" },
 };
 
-function deriveVehicleClass(lengthInches: number | null | undefined): keyof typeof VEHICLE_CLASS_BADGE | null {
-  if (typeof lengthInches !== "number" || !Number.isFinite(lengthInches) || lengthInches <= 0) return null;
-  if (lengthInches < 300) return "SMALL";
-  if (lengthInches < 420) return "MEDIUM";
-  if (lengthInches < 540) return "LARGE";
-  return "EXTRA_LARGE";
-}
-
 function classBadgeFor(booking: any): { label: string; color: string } {
-  const fromVehicle = booking.vehicle?.lengthInches != null ? deriveVehicleClass(booking.vehicle.lengthInches) : null;
+  const fromVehicle = booking.vehicle?.lengthInches != null ? deriveSizeClassFromLengthInches(booking.vehicle.lengthInches) : null;
   const key = fromVehicle || booking.fleetPlaceholderClass || "MEDIUM";
   return VEHICLE_CLASS_BADGE[key] || VEHICLE_CLASS_BADGE.MEDIUM;
+}
+
+/** Resolve the body type for a booking: prefers vehicle.bodyType, falls
+ * back to OTHER for bookings without a vehicle (fleet-placeholder rows).
+ * Returns the type plus its style + icon so callers can render the accent
+ * (small left stripe / chip) without re-deriving. */
+function bodyAccentFor(booking: any): { type: BodyType; style: typeof BODY_TYPE_STYLE[BodyType]; Icon: typeof BODY_TYPE_ICON[BodyType] } {
+  const type = normalizeBodyType(booking.vehicle?.bodyType ?? null);
+  return { type, style: BODY_TYPE_STYLE[type], Icon: BODY_TYPE_ICON[type] };
 }
 
 const SOURCE_BADGE: Record<string, { label: string; variant: string; className?: string }> = {
