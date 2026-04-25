@@ -76,7 +76,9 @@ export function ActiveVehicleProvider({ children }: { children: React.ReactNode 
   useEffect(() => { refresh(); }, [refresh]);
 
   const setActive = useCallback(async (vehicleId: string) => {
-    // Optimistic flip — revert on failure.
+    // Optimistic flip — revert on failure, then re-sync from server so
+    // every consumer (pills on Find a Wash / Route Planner, booking-flow
+    // card, My Vehicles cards) reflects the same truth.
     const prev = vehicles;
     setVehicles((vs) => vs.map((v) => ({ ...v, isDefault: v.id === vehicleId })));
     try {
@@ -90,11 +92,12 @@ export function ActiveVehicleProvider({ children }: { children: React.ReactNode 
         const d = await r.json().catch(() => ({}));
         throw new Error(d.message || "Failed to set active vehicle");
       }
+      await refresh();
     } catch (err: any) {
       setVehicles(prev);
       toast.error(err?.message || "Could not switch active vehicle");
     }
-  }, [vehicles]);
+  }, [vehicles, refresh]);
 
   const value = useMemo<ActiveVehicleState>(() => {
     const eligible = vehicles.filter((v) => v.isEligibleForDefault);

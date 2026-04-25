@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from "react";
-import { useLocation, Link } from "wouter";
+import React, { useState } from "react";
+import { useLocation } from "wouter";
 import { Card, Button, Input, Label, Badge } from "@/components/ui";
 import { Plus, Star, Trash2, X, AlertTriangle, Lock } from "lucide-react";
 import { toast } from "sonner";
+import { useActiveVehicle, type ActiveVehicleRow } from "@/contexts/activeVehicle";
 import {
   BODY_TYPE_ICON,
   BODY_TYPE_LABEL,
@@ -20,24 +21,7 @@ import {
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
-interface VehicleRow {
-  id: string;
-  unitNumber: string;
-  nickname: string | null;
-  bodyType: string;
-  lengthInches: number;
-  fleetId: string | null;
-  ownerUserId: string | null;
-  fleet: { id: string; name: string } | null;
-  isDefault: boolean;
-  isEligibleForDefault: boolean;
-  isOwnedByUser: boolean;
-}
-
-interface VehicleListResponse {
-  vehicles: VehicleRow[];
-  defaultVehicleId: string | null;
-}
+type VehicleRow = ActiveVehicleRow;
 
 interface FutureBookingsResp {
   count: number;
@@ -59,42 +43,16 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export default function MyVehicles() {
   const [, setNav] = useLocation();
-  const [data, setData] = useState<VehicleListResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { allVehicles: vehicles, loading, refresh, setActive } = useActiveVehicle();
   const [showForm, setShowForm] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{ vehicle: VehicleRow; future: FutureBookingsResp } | null>(null);
 
-  const refresh = async () => {
-    setLoading(true);
-    try {
-      const d = await api<VehicleListResponse>("/api/vehicles");
-      setData(d);
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to load vehicles");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { refresh(); }, []);
-
   const setDefault = async (vehicleId: string) => {
-    try {
-      await api<{ defaultVehicleId: string }>("/api/users/me/default-vehicle", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vehicleId }),
-      });
-      // Optimistic local update
-      setData((prev) => prev && {
-        ...prev,
-        defaultVehicleId: vehicleId,
-        vehicles: prev.vehicles.map((v) => ({ ...v, isDefault: v.id === vehicleId })),
-      });
-      toast.success("Active vehicle updated");
-    } catch (e: any) {
-      toast.error(e?.message || "Could not set as active");
-    }
+    // setActive performs the PATCH, then refresh()es the shared context.
+    // Every consumer (pills on Find a Wash, Route Planner, location-detail,
+    // booking summary) sees the new active vehicle without a page reload.
+    await setActive(vehicleId);
+    toast.success("Active vehicle updated");
   };
 
   const requestDelete = async (v: VehicleRow) => {
@@ -113,7 +71,7 @@ export default function MyVehicles() {
       await api(`/api/vehicles/${vehicle.id}`, { method: "DELETE" });
       toast.success(`Removed ${vehicleDisplayName(vehicle)}`);
       setPendingDelete(null);
-      refresh();
+      await refresh();
     } catch (e: any) {
       if (e?.errorCode === "DEFAULT_VEHICLE_DELETE_BLOCKED") {
         toast.error(e.message);
@@ -124,7 +82,6 @@ export default function MyVehicles() {
     }
   };
 
-  const vehicles = data?.vehicles ?? [];
   const ownedVehicles = vehicles.filter((v) => v.isOwnedByUser);
   const fleetVehicles = vehicles.filter((v) => !v.isOwnedByUser);
 
@@ -162,7 +119,7 @@ export default function MyVehicles() {
       {showForm && (
         <AddVehicleModal
           onClose={() => setShowForm(false)}
-          onCreated={() => { setShowForm(false); refresh(); }}
+          onCreated={() => { setShowForm(false); void refresh(); }}
         />
       )}
 
