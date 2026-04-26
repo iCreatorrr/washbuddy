@@ -173,11 +173,15 @@ export default function BayTimeline() {
   if (!providerId) return <div className="p-8 text-center text-slate-500">No provider access.</div>;
 
   return (
-    <div className="space-y-6">
+    // overflow-x-hidden on the page wrapper so the timeline Card's
+    // intrinsic min-width can't bleed outward and drag the page-level
+    // sticky header (with the mobile hamburger) off-screen. The Card
+    // itself owns horizontal scroll via its own overflow-x-auto.
+    <div className="space-y-6 overflow-x-hidden">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-display font-bold text-slate-900">Bay Timeline</h1>
-          <p className="text-slate-500 mt-1">Visual schedule across all wash bays.</p>
+          <h1 className="text-2xl md:text-3xl font-display font-bold text-slate-900">Bay Timeline</h1>
+          <p className="text-slate-500 mt-1 hidden sm:block">Visual schedule across all wash bays.</p>
         </div>
       </div>
 

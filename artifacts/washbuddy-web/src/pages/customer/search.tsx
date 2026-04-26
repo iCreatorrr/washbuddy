@@ -373,8 +373,13 @@ export default function CustomerSearch() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <ActiveVehiclePill />
+      {/* Pill wrapper allows the trigger to shrink on narrow screens
+          and the dropdown (right-anchored, z-50) to stay reachable
+          without horizontal overflow on the page. */}
+      <div className="flex items-center gap-3 max-w-full">
+        <div className="min-w-0 max-w-full">
+          <ActiveVehiclePill />
+        </div>
       </div>
       {/* When at least one visible card is grayed out as incompatible,
           surface a small helper that points the driver at the pill —
@@ -398,28 +403,26 @@ export default function CustomerSearch() {
           <h1 className="text-4xl sm:text-5xl font-display font-bold mb-4">Find your next wash</h1>
           <p className="text-lg text-slate-300 mb-8">Search our network of premium commercial bus washing facilities.</p>
 
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1">
+          <div className="flex gap-3">
+            <div className="relative flex-1 min-w-0">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
               <Input
                 placeholder="Search by facility name or city..."
-                className="pl-12 h-14 text-lg bg-white/10 border-white/20 text-white placeholder:text-slate-400 focus-visible:bg-white focus-visible:text-slate-900 transition-all rounded-2xl"
+                className="pl-12 h-14 text-base sm:text-lg bg-white/10 border-white/20 text-white placeholder:text-slate-400 focus-visible:bg-white focus-visible:text-slate-900 transition-all rounded-2xl"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
             <Button
               size="lg"
-              className="h-14 rounded-2xl px-8 shadow-blue-500/25"
+              className="h-14 rounded-2xl px-4 sm:px-8 shadow-blue-500/25 shrink-0"
               onClick={() => refetch()}
+              aria-label="Search"
             >
-              Search
+              <Search className="h-5 w-5 sm:hidden" />
+              <span className="hidden sm:inline">Search</span>
             </Button>
           </div>
-          <Button size="lg" className="w-full sm:w-auto mt-4 bg-orange-500 hover:bg-orange-600 text-white gap-2 h-12"
-            onClick={() => { setFilterOpenNow(true); setFilterTopRated(false); }}>
-            <Zap className="h-5 w-5" /> Find a Wash Now
-          </Button>
         </div>
       </div>
 

@@ -145,14 +145,16 @@ export default function DailyBoard() {
         />
       )}
 
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-display font-bold text-slate-900">Daily Wash Board</h1>
-          <p className="text-slate-500 mt-1">Manage today's washes and track progress.</p>
+      {/* Header — on mobile the title gets a smaller hierarchy and the
+          Add Booking button collapses to icon-plus-text "Add" so it
+          doesn't dominate the row. */}
+      <div className="flex items-center md:items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl md:text-3xl font-display font-bold text-slate-900 truncate">Daily Wash Board</h1>
+          <p className="text-slate-500 mt-1 hidden sm:block">Manage today's washes and track progress.</p>
         </div>
-        <Button className="gap-2" onClick={() => setIsQuickAddOpen(true)} disabled={locationBayCount === 0}>
-          <Plus className="h-4 w-4" /> Add Booking
+        <Button className="gap-2 shrink-0" onClick={() => setIsQuickAddOpen(true)} disabled={locationBayCount === 0}>
+          <Plus className="h-4 w-4" /> <span className="hidden sm:inline">Add Booking</span><span className="sm:hidden">Add</span>
         </Button>
       </div>
 
@@ -208,10 +210,10 @@ export default function DailyBoard() {
             {locations.map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
 
-          <div className="flex gap-1 ml-auto">
+          <div className="flex gap-1 ml-auto overflow-x-auto -mx-1 px-1 max-w-full">
             {[{ value: "all", label: "All" }, { value: "PLATFORM", label: "WashBuddy" }, { value: "DIRECT", label: "Direct" }, { value: "WALK_IN", label: "Walk-in" }].map((f) => (
               <button key={f.value} onClick={() => setFilterSource(f.value)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${filterSource === f.value ? "bg-primary text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+                className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${filterSource === f.value ? "bg-primary text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
                 {f.label}
               </button>
             ))}
