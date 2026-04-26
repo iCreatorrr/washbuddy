@@ -114,13 +114,19 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
         <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${vc.color}`}>
           <span className="text-xs font-bold">{vc.label}</span>
         </div>
-        <div className="flex-1 min-w-0 flex items-center gap-1.5">
-          {b.vehicle?.bodyType && (
-            <BodyIcon className={`h-3.5 w-3.5 shrink-0 ${accent.style.text}`} aria-hidden />
-          )}
-          <p className="text-sm font-medium text-slate-900 truncate">{displayName}</p>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            {b.vehicle?.bodyType && (
+              <BodyIcon className={`h-3.5 w-3.5 shrink-0 ${accent.style.text}`} aria-hidden />
+            )}
+            <p className="text-sm font-medium text-slate-900 truncate">{displayName}</p>
+          </div>
+          {(() => {
+            const parts = [b.fleetName, b.vehicle?.unitNumber].filter(Boolean) as string[];
+            if (parts.length === 0) return null;
+            return <p className="text-xs text-slate-500 truncate">{parts.join(" · ")}</p>;
+          })()}
         </div>
-        <span className="text-xs text-slate-500 truncate hidden sm:block max-w-[120px]">{b.fleetName || ""}</span>
         <span className="text-xs w-[80px] truncate hidden md:block" title={b.washBay?.name ? `Bay: ${b.washBay.name}` : "No bay assigned"}>
           {b.washBay?.name
             ? <span className="text-slate-600 font-medium">{b.washBay.name}</span>
@@ -172,6 +178,17 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
             <span>Price: {formatCurrency(b.totalPriceMinor, b.currencyCode)}</span>
             {b.discountAmountMinor > 0 && <span className="text-green-600">Discount: -{formatCurrency(b.discountAmountMinor)}</span>}
           </div>
+
+          {/* "Booked by" line — only for off-platform bookings, since
+              for platform bookings the customer name in the primary
+              label already attributes the booking. Walk-in / direct
+              bookings hide who actually entered the booking otherwise. */}
+          {(b.isOffPlatform || b.bookingSource === "WALK_IN" || b.bookingSource === "DIRECT") && b.assignedOperator && (
+            <p className="text-xs text-slate-400">
+              Booked by {[b.assignedOperator.firstName, b.assignedOperator.lastName].filter(Boolean).join(" ") || "operator"}
+              {" · "}{b.bookingSource === "WALK_IN" ? "Walk-in" : b.bookingSource === "DIRECT" ? "Direct" : "Off-platform"}
+            </p>
+          )}
 
           {Array.isArray(b.washNotes) && b.washNotes.length > 0 && (
             <div className="space-y-2">

@@ -343,11 +343,20 @@ export default function BayTimeline() {
                             {BodyIcon && bodyTypeStyle && <BodyIcon className={cn("h-3 w-3 shrink-0", bodyTypeStyle.text)} aria-hidden />}
                             <p className="text-xs font-bold truncate">{displayName}</p>
                           </div>
-                          {blockHeight > 28 && (
-                            <p className={cn("text-[10px] truncate leading-tight opacity-70", bodyTypeStyle ? "pl-1.5" : "")}>
-                              {b.vehicleUnitNumber || b.fleetPlaceholderClass || ""}
-                            </p>
-                          )}
+                          {blockHeight > 28 && (() => {
+                            // Secondary line: "[fleet] · [unit]" when both
+                            // are known; just unit (or just fleet) when one
+                            // is missing; nothing for walk-ins with no
+                            // vehicle.
+                            const parts = [b.fleetName, b.vehicleUnitNumber || b.fleetPlaceholderClass]
+                              .filter(Boolean) as string[];
+                            if (parts.length === 0) return null;
+                            return (
+                              <p className={cn("text-[10px] truncate leading-tight opacity-70", bodyTypeStyle ? "pl-1.5" : "")}>
+                                {parts.join(" · ")}
+                              </p>
+                            );
+                          })()}
                         </div>
                       );
                     })}
