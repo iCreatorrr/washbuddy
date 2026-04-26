@@ -23,7 +23,26 @@ export default function BayTimeline() {
   const providerId = getProviderId(user);
   const [, navigate] = useLocation();
 
-  const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  // Persist the selected date in the URL so back-from-booking-detail
+  // restores Monday's view instead of snapping to today. The URL is
+  // also shareable — paste a teammate the link and they land on the
+  // same day's grid.
+  const initialDateFromUrl = (() => {
+    if (typeof window === "undefined") return null;
+    const raw = new URLSearchParams(window.location.search).get("date");
+    if (!raw) return null;
+    return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+  })();
+  const [selectedDate, setSelectedDateState] = useState(initialDateFromUrl || format(new Date(), "yyyy-MM-dd"));
+  const setSelectedDate = (next: string) => {
+    setSelectedDateState(next);
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      params.set("date", next);
+      const qs = params.toString();
+      window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+    }
+  };
   const [selectedLocation, setSelectedLocation] = useState("");
   const [locations, setLocations] = useState<any[]>([]);
   const [data, setData] = useState<any>(null);
