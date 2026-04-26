@@ -645,6 +645,11 @@ model Service {
   leadTimeMins         Int      @default(60) @map("lead_time_mins")
   requiresConfirmation Boolean  @default(false) @map("requires_confirmation")
   isVisible            Boolean  @default(false) @map("is_visible")
+  // Largest vehicle class this service can host. Length-only gate that
+  // replaces the per-subtype ServiceCompatibility lookup for the driver
+  // booking flow — body type is now visual only. SMALL < MEDIUM < LARGE
+  // < EXTRA_LARGE; default EXTRA_LARGE = no length restriction.
+  maxVehicleClass      String   @default("EXTRA_LARGE") @map("max_vehicle_class")
   createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
 

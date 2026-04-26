@@ -335,6 +335,7 @@ async function main() {
       leadTimeMins: 60,
       requiresConfirmation: false,
       isVisible: true,
+      maxVehicleClass: "EXTRA_LARGE",
     },
   });
 

@@ -27,7 +27,7 @@ router.post("/providers/:providerId/locations/:locationId/services", requireAuth
     const {
       name, description, durationMins, basePriceMinor, currencyCode,
       platformFeeMinor, capacityPerSlot, leadTimeMins, requiresConfirmation,
-      isVisible, compatibilityRules,
+      isVisible, compatibilityRules, maxVehicleClass,
     } = req.body;
 
     if (!name || !durationMins || basePriceMinor === undefined || !currencyCode || platformFeeMinor === undefined) {
@@ -60,6 +60,7 @@ router.post("/providers/:providerId/locations/:locationId/services", requireAuth
         leadTimeMins: leadTimeMins ?? 60,
         requiresConfirmation: requiresConfirmation ?? false,
         isVisible: isVisible ?? false,
+        maxVehicleClass: maxVehicleClass || "EXTRA_LARGE",
         compatibilityRules: compatibilityRules?.length
           ? {
               createMany: {
@@ -101,7 +102,7 @@ router.patch("/providers/:providerId/locations/:locationId/services/:serviceId",
     const {
       name, description, durationMins, basePriceMinor, currencyCode,
       platformFeeMinor, capacityPerSlot, leadTimeMins, requiresConfirmation,
-      isVisible,
+      isVisible, maxVehicleClass,
     } = req.body;
 
     const data: Record<string, unknown> = {};
@@ -115,6 +116,7 @@ router.patch("/providers/:providerId/locations/:locationId/services/:serviceId",
     if (leadTimeMins !== undefined) data.leadTimeMins = leadTimeMins;
     if (requiresConfirmation !== undefined) data.requiresConfirmation = requiresConfirmation;
     if (isVisible !== undefined) data.isVisible = isVisible;
+    if (maxVehicleClass !== undefined) data.maxVehicleClass = maxVehicleClass;
 
     const service = await prisma.service.update({
       where: { id: req.params.serviceId },

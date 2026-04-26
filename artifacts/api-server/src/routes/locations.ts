@@ -139,14 +139,10 @@ router.get("/locations/search", async (req, res) => {
             capacityPerSlot: true,
             leadTimeMins: true,
             requiresConfirmation: true,
-            compatibilityRules: {
-              select: {
-                categoryCode: true,
-                subtypeCode: true,
-                maxLengthInches: true,
-                maxHeightInches: true,
-              },
-            },
+            // maxVehicleClass is the length-only cap that drives the
+            // driver-side "your bus fits" check. ServiceCompatibility is
+            // kept for legacy data only — clients should ignore it.
+            maxVehicleClass: true,
           },
         },
         // Surface bay supportedClasses so the driver-side list can filter
@@ -230,7 +226,7 @@ router.get("/locations/:locationId", async (req, res) => {
             id: true, name: true, description: true, durationMins: true,
             basePriceMinor: true, currencyCode: true, platformFeeMinor: true,
             capacityPerSlot: true, leadTimeMins: true, requiresConfirmation: true,
-            compatibilityRules: { select: { categoryCode: true, subtypeCode: true, maxLengthInches: true, maxHeightInches: true } },
+            maxVehicleClass: true,
           },
         },
         washBays: {

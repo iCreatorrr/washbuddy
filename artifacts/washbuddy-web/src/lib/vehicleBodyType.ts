@@ -115,6 +115,44 @@ export function deriveSizeClassFromLengthInches(lengthInches: number | null | un
   return "EXTRA_LARGE";
 }
 
+/** Total ordering on size class. Used wherever we ask "does this fit?":
+ * vehicle's class index must be ≤ the cap (bay's class, service's max). */
+const SIZE_CLASS_ORDER: Record<SizeClass, number> = {
+  SMALL: 0,
+  MEDIUM: 1,
+  LARGE: 2,
+  EXTRA_LARGE: 3,
+};
+
+export function sizeClassRank(c: SizeClass | null | undefined): number {
+  if (!c) return -1;
+  return SIZE_CLASS_ORDER[c] ?? -1;
+}
+
+/** True if the vehicle's class fits within the service-imposed cap.
+ * Body type / subtype no longer enter this decision — pure length math. */
+export function vehicleFitsService(
+  vehicleLengthInches: number | null | undefined,
+  serviceMaxClass: SizeClass | string | null | undefined,
+): boolean {
+  const v = deriveSizeClassFromLengthInches(vehicleLengthInches);
+  if (!v) return true; // unknown length — be permissive, the bay check still gates
+  const max = (typeof serviceMaxClass === "string" ? serviceMaxClass.toUpperCase() : serviceMaxClass) as SizeClass | null;
+  if (!max || !(max in SIZE_CLASS_ORDER)) return true; // no cap on service
+  return SIZE_CLASS_ORDER[v] <= SIZE_CLASS_ORDER[max as SizeClass];
+}
+
+/** True if the vehicle's class is one a bay supports. */
+export function vehicleFitsBay(
+  vehicleLengthInches: number | null | undefined,
+  baySupportedClasses: string[] | null | undefined,
+): boolean {
+  const v = deriveSizeClassFromLengthInches(vehicleLengthInches);
+  if (!v) return true;
+  if (!baySupportedClasses || baySupportedClasses.length === 0) return true;
+  return baySupportedClasses.includes(v);
+}
+
 export function inchesToFeet(inches: number | null | undefined): number | null {
   if (typeof inches !== "number" || !Number.isFinite(inches) || inches <= 0) return null;
   return Math.round(inches * FEET_PER_INCH);

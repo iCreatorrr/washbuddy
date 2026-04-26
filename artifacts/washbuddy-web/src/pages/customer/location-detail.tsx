@@ -18,6 +18,7 @@ import {
   normalizeBodyType,
   SIZE_CLASS_LABEL,
   vehicleDisplayName,
+  vehicleFitsService,
 } from "@/lib/vehicleBodyType";
 
 async function fetchSingleETA(
@@ -243,23 +244,13 @@ export default function LocationDetail() {
     return () => clearInterval(interval);
   }, [holdExpiresAt]);
 
-  // Service-vs-vehicle compatibility. The compatibility rules are seeded
-  // per (categoryCode, subtypeCode) — but driver-added personal vehicles
-  // default to subtypeCode="STANDARD" regardless of bodyType, so a strict
-  // subtype match would falsely reject a 44ft Coach that the driver added
-  // through the simplified driver form. Treat subtype as advisory: a
-  // vehicle is compatible if ANY rule for the same category has size
-  // headroom for it. Bay-class matching (handled by the availability API)
-  // is the real gate.
+  // Pure length-based service compatibility. Body type / subtype is
+  // visual only now: a service has a single maxVehicleClass cap, and a
+  // vehicle's length-derived class must fit under it. The legacy
+  // ServiceCompatibility table still exists in the schema but is no
+  // longer consulted by the driver flow.
   const isVehicleCompatible = (vehicle: any, service: any): boolean => {
-    const rules = (service as any).compatibilityRules;
-    if (!rules || rules.length === 0) return true;
-    return rules.some((rule: any) => {
-      if (rule.categoryCode !== vehicle.categoryCode) return false;
-      if (rule.maxLengthInches && vehicle.lengthInches > rule.maxLengthInches) return false;
-      if (rule.maxHeightInches && vehicle.heightInches > rule.maxHeightInches) return false;
-      return true;
-    });
+    return vehicleFitsService(vehicle?.lengthInches, service?.maxVehicleClass);
   };
 
   // After hold succeeds, drivers go straight to confirm — vehicle is the
@@ -475,7 +466,15 @@ export default function LocationDetail() {
                           {!compatible && activeVehicle && (
                             <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 px-3 py-1.5 rounded-lg">
                               <AlertTriangle className="h-3.5 w-3.5" />
-                              Your vehicle ({vehicleDisplayName(activeVehicle)}) exceeds this service's size limit
+                              {(() => {
+                                const cls = deriveSizeClassFromLengthInches(activeVehicle.lengthInches);
+                                const cap = (svc as any).maxVehicleClass;
+                                const capLabel = cap && SIZE_CLASS_LABEL[cap as keyof typeof SIZE_CLASS_LABEL];
+                                const myLabel = cls && SIZE_CLASS_LABEL[cls];
+                                return capLabel
+                                  ? `This service supports up to ${capLabel} vehicles${myLabel ? `; your ${myLabel} bus exceeds it` : ""}.`
+                                  : `Your vehicle exceeds this service's size limit.`;
+                              })()}
                             </div>
                           )}
                         </div>
