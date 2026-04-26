@@ -216,10 +216,10 @@ router.get("/providers/:providerId/locations/:locationId/daily-board", requireAu
         // Client-side resolver needs both offPlatformClientName AND
         // isOffPlatform to know which one to prefer; otherwise walk-in
         // bookings show the operator's name (Booking.customerId points
-        // at the operator on off-platform creation).
+        // at the operator on off-platform creation). bookingSource is
+        // already projected above; don't duplicate.
         offPlatformClientName: b.offPlatformClientName,
         isOffPlatform: b.isOffPlatform,
-        bookingSource: b.bookingSource,
         fleetName: b.vehicle?.fleet?.name || null,
         assignedOperator: b.assignedOperator ? { id: b.assignedOperator.id, firstName: b.assignedOperator.firstName, lastName: b.assignedOperator.lastName } : null,
         washBay: b.washBay ? { id: b.washBay.id, name: b.washBay.name } : null,

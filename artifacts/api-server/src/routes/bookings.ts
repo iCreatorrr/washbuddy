@@ -643,7 +643,7 @@ router.patch("/notes/:noteId", requireAuth, async (req, res) => {
       return;
     }
 
-    const auth = await authorizeProviderNoteMutation(user, req.params.noteId);
+    const auth = await authorizeProviderNoteMutation(user, req.params.noteId as string);
     if (!auth.ok) { res.status(auth.status).json(auth.error); return; }
 
     const note = await prisma.washNote.update({
@@ -665,7 +665,7 @@ router.patch("/notes/:noteId", requireAuth, async (req, res) => {
 router.delete("/notes/:noteId", requireAuth, async (req, res) => {
   try {
     const user = req.user as SessionUser;
-    const auth = await authorizeProviderNoteMutation(user, req.params.noteId);
+    const auth = await authorizeProviderNoteMutation(user, req.params.noteId as string);
     if (!auth.ok) { res.status(auth.status).json(auth.error); return; }
 
     await prisma.washNote.delete({ where: { id: auth.note.id } });
