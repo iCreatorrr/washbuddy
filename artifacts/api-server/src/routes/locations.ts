@@ -149,6 +149,14 @@ router.get("/locations/search", async (req, res) => {
             },
           },
         },
+        // Surface bay supportedClasses so the driver-side list can filter
+        // locations to those with at least one bay compatible with the
+        // active vehicle's class. Active-only — out-of-service bays don't
+        // count toward "this location can host my bus".
+        washBays: {
+          where: { isActive: true },
+          select: { id: true, supportedClasses: true },
+        },
         operatingWindows: {
           select: { dayOfWeek: true, openTime: true, closeTime: true },
           orderBy: [{ dayOfWeek: "asc" }, { openTime: "asc" }],
@@ -224,6 +232,10 @@ router.get("/locations/:locationId", async (req, res) => {
             capacityPerSlot: true, leadTimeMins: true, requiresConfirmation: true,
             compatibilityRules: { select: { categoryCode: true, subtypeCode: true, maxLengthInches: true, maxHeightInches: true } },
           },
+        },
+        washBays: {
+          where: { isActive: true },
+          select: { id: true, supportedClasses: true },
         },
         operatingWindows: {
           select: { dayOfWeek: true, openTime: true, closeTime: true },

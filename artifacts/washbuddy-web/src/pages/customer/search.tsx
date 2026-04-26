@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useSearchLocations, useListBookings, useGetAvailableNowLocations } from "@workspace/api-client-react";
 import { Card, Input, Button, Badge, ErrorState } from "@/components/ui";
-import { MapPin, Search, Navigation, Map, List, Clock, Filter, X, Zap, Star } from "lucide-react";
+import { MapPin, Search, Navigation, Map, List, Clock, Filter, X, Zap, Star, Truck } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { formatCurrency } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -9,6 +9,7 @@ import LocationMap from "@/components/location-map";
 import { useAuth } from "@/contexts/auth";
 import { ActiveVehiclePill } from "@/components/customer/active-vehicle-pill";
 import { useActiveVehicle } from "@/contexts/activeVehicle";
+import { deriveSizeClassFromLengthInches } from "@/lib/vehicleBodyType";
 
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 3959;
@@ -106,6 +107,7 @@ type LocationWithMeta = {
   longitude?: number | null;
   provider?: { id: string; name: string };
   services?: Array<{ id: string; name: string; basePriceMinor: number; allInPriceMinor?: number; durationMins: number }>;
+  washBays?: Array<{ id: string; supportedClasses: string[] }>;
   operatingWindows?: Array<{ dayOfWeek: number; openTime: string; closeTime: string }>;
   isOpenNow?: boolean;
   nextOpenAt?: string | null;
@@ -113,7 +115,18 @@ type LocationWithMeta = {
   reviewCount?: number;
   distance?: number;
   isOpen: boolean;
+  fitsActiveVehicle?: boolean;
 };
+
+/** True if at least one active bay at the location supports the given
+ * vehicle class. Used to dim or hide locations that physically can't
+ * host the driver's active bus. */
+function locationFitsClass(loc: LocationWithMeta, vehicleClass: string | null): boolean {
+  if (!vehicleClass) return true;
+  const bays = loc.washBays || [];
+  if (bays.length === 0) return true; // Unknown — be permissive, don't hide it
+  return bays.some((b) => (b.supportedClasses || []).includes(vehicleClass));
+}
 
 export default function CustomerSearch() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -121,6 +134,11 @@ export default function CustomerSearch() {
   const [filterOpenNow, setFilterOpenNow] = useState(false);
   const [filterAvailNow, setFilterAvailNow] = useState(false);
   const [filterTopRated, setFilterTopRated] = useState(false);
+  // Default ON: hide locations the active vehicle physically can't fit.
+  // Off-state shows all locations (with a "won't fit your bus" hint).
+  const [filterCompatible, setFilterCompatible] = useState(true);
+  const { activeVehicle } = useActiveVehicle();
+  const activeVehicleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
   const [userLat, setUserLat] = useState<number | null>(null);
   const [userLng, setUserLng] = useState<number | null>(null);
   const [geoStatus, setGeoStatus] = useState<"pending" | "granted" | "denied">("pending");
@@ -171,9 +189,10 @@ export default function CustomerSearch() {
         ...loc,
         distance: dist,
         isOpen: loc.isOpenNow ?? false,
+        fitsActiveVehicle: locationFitsClass(loc, activeVehicleClass),
       };
     });
-  }, [data, userLat, userLng]);
+  }, [data, userLat, userLng, activeVehicleClass]);
 
   const availNowIds = useMemo(() => {
     if (!availNowData?.locationIds) return new Set<string>();
@@ -191,8 +210,11 @@ export default function CustomerSearch() {
     if (filterTopRated) {
       result = result.filter((l) => (l.averageRating ?? 0) >= 4.0);
     }
+    if (filterCompatible && activeVehicleClass) {
+      result = result.filter((l) => l.fitsActiveVehicle !== false);
+    }
     return result;
-  }, [enrichedLocations, searchTerm, filterOpenNow, filterAvailNow, filterTopRated, availNowIds]);
+  }, [enrichedLocations, searchTerm, filterOpenNow, filterAvailNow, filterTopRated, filterCompatible, activeVehicleClass, availNowIds]);
 
   const sortLocations = (a: LocationWithMeta, b: LocationWithMeta) => {
     if (filterTopRated) {
@@ -237,10 +259,12 @@ export default function CustomerSearch() {
     );
   };
 
-  const renderLocationCard = (loc: LocationWithMeta, idx: number) => (
+  const renderLocationCard = (loc: LocationWithMeta, idx: number) => {
+    const incompatible = !!activeVehicleClass && loc.fitsActiveVehicle === false;
+    return (
     <motion.div key={loc.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.03 }}>
       <Link href={`/location/${loc.id}`} className="block h-full">
-        <Card className="h-full flex flex-col group cursor-pointer border-2 hover:border-primary/30">
+        <Card className={`h-full flex flex-col group cursor-pointer border-2 hover:border-primary/30 ${incompatible ? "opacity-60" : ""}`}>
           <div className="p-6 flex-1">
             <div className="flex justify-between items-start mb-2">
               <h3 className="text-xl font-bold text-slate-900">{loc.name}</h3>
@@ -248,6 +272,11 @@ export default function CustomerSearch() {
                 <Navigation className="h-4 w-4" />
               </div>
             </div>
+            {incompatible && (
+              <div className="mb-2 inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200 text-xs font-medium">
+                <Truck className="h-3 w-3" /> No bay fits your active vehicle
+              </div>
+            )}
 
             {/* Star rating */}
             <div className="flex items-center gap-1.5 mb-2">
@@ -307,6 +336,7 @@ export default function CustomerSearch() {
       </Link>
     </motion.div>
   );
+  };
 
   return (
     <div className="space-y-6">
@@ -408,6 +438,20 @@ export default function CustomerSearch() {
               {filterTopRated ? <X className="h-3.5 w-3.5" /> : <Star className="h-3.5 w-3.5" />}
               Top Rated
             </button>
+            {activeVehicleClass && (
+              <button
+                onClick={() => setFilterCompatible(!filterCompatible)}
+                title="Show only locations with at least one bay that fits your active vehicle"
+                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium border transition-all ${
+                  filterCompatible
+                    ? "bg-blue-50 text-blue-700 border-blue-300 shadow-sm"
+                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                }`}
+              >
+                {filterCompatible ? <Truck className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
+                {filterCompatible ? "Fits my vehicle" : "Show all locations"}
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full">

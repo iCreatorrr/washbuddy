@@ -8,6 +8,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { ActiveVehiclePill } from "@/components/customer/active-vehicle-pill";
+import { useActiveVehicle } from "@/contexts/activeVehicle";
+import { deriveSizeClassFromLengthInches } from "@/lib/vehicleBodyType";
 
 interface CityOption {
   name: string;
@@ -469,7 +471,20 @@ export default function RoutePlanner() {
   const geoAttemptedRef = useRef(false);
 
   const { data, isLoading } = useSearchLocations({}, { request: { credentials: "include" } });
-  const allLocations = data?.locations || [];
+  const { activeVehicle } = useActiveVehicle();
+  const activeVehicleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
+  // Filter out locations that physically can't host the active vehicle:
+  // those with at least one bay configured but no bay supporting the
+  // class. Locations without bay data fall through (we err permissive).
+  const allLocations = useMemo(() => {
+    const raw = (data?.locations || []) as any[];
+    if (!activeVehicleClass) return raw;
+    return raw.filter((loc: any) => {
+      const bays = loc.washBays || [];
+      if (bays.length === 0) return true;
+      return bays.some((b: any) => (b.supportedClasses || []).includes(activeVehicleClass));
+    });
+  }, [data, activeVehicleClass]);
 
   useEffect(() => {
     if (geoAttemptedRef.current) return;
