@@ -147,9 +147,22 @@ export default function CustomerSearch() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
 
+  // Including activeVehicleClass in the query key triggers a refetch
+  // whenever the driver swaps the active vehicle via the pill, so the
+  // displayed list reflects what the *current* vehicle can fit at —
+  // the client-side filter on the cached response was masking but not
+  // re-fetching, and that latent bug would surface the moment we move
+  // filtering server-side.
   const { data, isLoading, isError, refetch } = useSearchLocations(
     {},
-    { request: { credentials: "include" }, query: { enabled: true, staleTime: 60_000 } }
+    {
+      request: { credentials: "include" },
+      query: {
+        enabled: true,
+        staleTime: 60_000,
+        queryKey: ["/api/locations/search", { vehicleClass: activeVehicleClass }],
+      },
+    }
   );
   const { data: bookingsData } = useListBookings(
     { status: "COMPLETED", limit: 100 },

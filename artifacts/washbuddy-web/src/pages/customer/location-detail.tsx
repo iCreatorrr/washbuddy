@@ -8,7 +8,6 @@ import { formatCurrency, formatDate } from "@/lib/utils";
 import { format, addDays } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
 import { useActiveVehicle } from "@/contexts/activeVehicle";
-import { ActiveVehiclePill } from "@/components/customer/active-vehicle-pill";
 import {
   BODY_TYPE_ICON,
   BODY_TYPE_LABEL,
@@ -167,23 +166,9 @@ export default function LocationDetail() {
   // whenever the underlying vehicle changes. Skip the very first render
   // (initial pickup of activeVehicle on mount) by tracking the last
   // observed id.
-  const lastVehicleIdRef = React.useRef<string | null>(null);
-  useEffect(() => {
-    const id = activeVehicle?.id ?? null;
-    if (lastVehicleIdRef.current === null) {
-      lastVehicleIdRef.current = id;
-      return;
-    }
-    if (lastVehicleIdRef.current !== id) {
-      lastVehicleIdRef.current = id;
-      setSelectedService(null);
-      setSelectedSlot(null);
-      setHoldId(null);
-      setHoldExpiresAt(null);
-      setBookingResult(null);
-      setBookingStep(1);
-    }
-  }, [activeVehicle?.id]);
+  // (Mid-flow vehicle-swap reset effect removed — the pill that
+  // changed the active vehicle from this page is gone, so the
+  // active-vehicle id can no longer change without leaving the page.)
 
   // Availability is class-aware: passing the active vehicle's size class
   // filters slots to those a compatible bay can host. Without an active
@@ -957,12 +942,12 @@ function ActiveVehicleContextCard() {
   const Icon = BODY_TYPE_ICON[bt];
   const cls = deriveSizeClassFromLengthInches(activeVehicle.lengthInches);
   const lengthFeet = inchesToFeet(activeVehicle.lengthInches);
-  // The pill below opens an absolutely-positioned dropdown — `overflow-hidden`
-  // on the outer Card would clip it. We render the colored stripe via a
-  // pseudo border instead, so the pill can grow downward freely.
+  // Read-only context. The clickable pill that previously sat at the
+  // right edge of this card is gone — drivers swap vehicles via the
+  // global pill on Find a Wash / Route Planner, not mid-booking.
   return (
-    <Card className="relative p-0">
-      <div className={`absolute left-0 top-0 bottom-0 w-1 ${style.stripe} rounded-l-2xl`} aria-hidden />
+    <Card className="relative p-0 overflow-hidden">
+      <div className={`absolute left-0 top-0 bottom-0 w-1 ${style.stripe}`} aria-hidden />
       <div className="px-5 pl-6 py-3 flex items-center gap-3">
         <div className={`h-10 w-10 ${style.chipBg} rounded-xl flex items-center justify-center shrink-0`}>
           <Icon className={`h-5 w-5 ${style.chipFg}`} />
@@ -973,7 +958,6 @@ function ActiveVehicleContextCard() {
             {vehicleDisplayName(activeVehicle)} <span className="text-slate-400 font-normal">·</span> <span className="font-medium text-slate-600">{BODY_TYPE_LABEL[bt]}{cls ? ` · ${SIZE_CLASS_LABEL[cls]}` : ""}{lengthFeet ? ` · ${lengthFeet} ft` : ""}</span>
           </p>
         </div>
-        <ActiveVehiclePill />
       </div>
     </Card>
   );

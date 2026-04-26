@@ -470,9 +470,17 @@ export default function RoutePlanner() {
   const autoRoutedRef = useRef(!!cached);
   const geoAttemptedRef = useRef(false);
 
-  const { data, isLoading } = useSearchLocations({}, { request: { credentials: "include" } });
   const { activeVehicle } = useActiveVehicle();
   const activeVehicleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
+  // activeVehicleClass in the query key so swapping the active vehicle
+  // refetches the location list (matches the search.tsx contract).
+  const { data, isLoading } = useSearchLocations(
+    {},
+    {
+      request: { credentials: "include" },
+      query: { queryKey: ["/api/locations/search", { vehicleClass: activeVehicleClass }] },
+    }
+  );
   // Filter out locations that physically can't host the active vehicle.
   // Treat an explicit empty washBays array as "no compatible bays" (the
   // location really has nothing to host); only the missing-key case falls
