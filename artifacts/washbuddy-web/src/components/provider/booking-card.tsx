@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { Card, Badge, Button } from "@/components/ui";
 import { Star, AlertTriangle, Sparkles, ChevronDown, MessageSquare, Camera, StickyNote, Package } from "lucide-react";
-import { formatCurrency, formatVehicleClass } from "@/lib/utils";
+import { formatCurrency, formatDate, formatVehicleClass } from "@/lib/utils";
 import { toast } from "sonner";
 import { PhotoPrompt } from "./photo-prompt";
 import { BODY_TYPE_ICON, BODY_TYPE_STYLE, deriveSizeClassFromLengthInches, normalizeBodyType, type BodyType } from "@/lib/vehicleBodyType";
+import { groupNotesByAuthorRole, noteSectionLabel, noteMetaLine } from "@/lib/noteLabels";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -161,13 +162,32 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
           </div>
 
           {Array.isArray(b.washNotes) && b.washNotes.length > 0 && (
-            <div className="rounded-lg bg-amber-50 border border-amber-100 p-3 space-y-1">
-              <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-bold text-amber-800">
-                <StickyNote className="h-3 w-3" /> Notes
-              </div>
-              {b.washNotes.map((n: any) => (
-                <p key={n.id} className="text-sm text-amber-900 whitespace-pre-wrap">{n.content}</p>
-              ))}
+            <div className="space-y-2">
+              {groupNotesByAuthorRole(b.washNotes).map(({ role, notes }) => {
+                const incoming = role !== "PROVIDER";
+                const wrap = incoming
+                  ? "rounded-lg bg-amber-50 border border-amber-100 p-3 space-y-1.5"
+                  : "rounded-lg bg-slate-50 border border-slate-200 p-3 space-y-1.5";
+                const labelClr = incoming ? "text-amber-800" : "text-slate-500";
+                const iconClr = incoming ? "text-amber-700" : "text-slate-500";
+                const textClr = incoming ? "text-amber-900" : "text-slate-700";
+                return (
+                  <div key={role} className={wrap}>
+                    <div className={`flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-bold ${labelClr}`}>
+                      <StickyNote className={`h-3 w-3 ${iconClr}`} /> {noteSectionLabel("PROVIDER", role)}
+                    </div>
+                    {notes.map((n: any) => {
+                      const meta = noteMetaLine(n, (d) => formatDate(d, "MMM d"));
+                      return (
+                        <div key={n.id}>
+                          <p className={`text-sm whitespace-pre-wrap ${textClr}`}>{n.content}</p>
+                          {meta && <p className="text-[10px] text-slate-500 mt-0.5">{meta}</p>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
           )}
 

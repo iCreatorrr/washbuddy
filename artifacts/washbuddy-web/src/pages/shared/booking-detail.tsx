@@ -10,10 +10,19 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ReviewForm } from "@/components/review-form";
 import { toast, Toaster } from "sonner";
 import { BODY_TYPE_ICON, BODY_TYPE_LABEL, BODY_TYPE_STYLE, normalizeBodyType, vehicleDisplayName } from "@/lib/vehicleBodyType";
+import { groupNotesByAuthorRole, noteSectionLabel, noteMetaLine, type NoteViewerRole } from "@/lib/noteLabels";
+import { Send } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
 const ALL_STATUSES = ["REQUESTED","HELD","PROVIDER_CONFIRMED","PROVIDER_DECLINED","EXPIRED","CUSTOMER_CANCELLED","PROVIDER_CANCELLED","LATE","NO_SHOW","CHECKED_IN","IN_SERVICE","COMPLETED_PENDING_WINDOW","COMPLETED","DISPUTED","REFUNDED","SETTLED"];
+
+/** Drivers can attach notes to a booking until it's wrapped up. After
+ * COMPLETED / SETTLED / cancelled, the booking is in archive mode and
+ * notes don't make sense to add. */
+function isActiveBooking(status: string): boolean {
+  return ["REQUESTED","HELD","PROVIDER_CONFIRMED","CHECKED_IN","IN_SERVICE","LATE","COMPLETED_PENDING_WINDOW"].includes(status);
+}
 
 export default function BookingDetail() {
   const [, params] = useRoute("/bookings/:id");
@@ -219,7 +228,11 @@ export default function BookingDetail() {
       {isProvider ? (
         <ProviderBody booking={b} />
       ) : (
-        <CustomerBody booking={b} />
+        <CustomerBody
+          booking={b}
+          canAddNote={isCustomer && isActiveBooking(b.status)}
+          onNoteAdded={() => queryClient.invalidateQueries({ queryKey: [`/api/bookings/${b.id}`] })}
+        />
       )}
 
     </div>
@@ -376,17 +389,7 @@ function ProviderBody({ booking: b }: { booking: any }) {
       </Card>
 
       {notes.length > 0 && (
-        <Card className="p-6 md:p-8 border-amber-100 bg-amber-50/40">
-          <div className="flex items-center gap-2 mb-3">
-            <StickyNote className="h-4 w-4 text-amber-700" />
-            <h2 className="text-xs font-bold text-amber-800 uppercase tracking-wider">Notes from customer</h2>
-          </div>
-          <div className="space-y-3">
-            {notes.map((n: any) => (
-              <p key={n.id} className="text-slate-800 whitespace-pre-wrap leading-relaxed">{n.content}</p>
-            ))}
-          </div>
-        </Card>
+        <NoteSections viewer="PROVIDER" notes={notes} />
       )}
 
       {/* Footer: vehicle / bay / total — operator already knows their
@@ -456,7 +459,7 @@ function ProviderBody({ booking: b }: { booking: any }) {
 
 /** Customer body — keeps the prior service-led summary; the customer
  * cares about what they booked and where. */
-function CustomerBody({ booking: b }: { booking: any }) {
+function CustomerBody({ booking: b, canAddNote, onNoteAdded }: { booking: any; canAddNote: boolean; onNoteAdded: () => void }) {
   const notes: any[] = Array.isArray(b.washNotes) ? b.washNotes : [];
   const addOns: any[] = Array.isArray(b.addOns) ? b.addOns : [];
   const bt = b.vehicle?.bodyType ? normalizeBodyType(b.vehicle.bodyType) : null;
@@ -500,15 +503,14 @@ function CustomerBody({ booking: b }: { booking: any }) {
         </div>
 
         {notes.length > 0 && (
+          <CustomerNotesBlock notes={notes} />
+        )}
+
+        {canAddNote && (
           <div className="flex gap-4 items-start">
-            <div className="bg-amber-50 p-3 rounded-xl text-amber-700"><StickyNote className="h-5 w-5" /></div>
+            <div className="bg-slate-100 p-3 rounded-xl text-slate-500"><StickyNote className="h-5 w-5" /></div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Notes</p>
-              <div className="space-y-2">
-                {notes.map((n: any) => (
-                  <p key={n.id} className="text-sm text-slate-800 whitespace-pre-wrap">{n.content}</p>
-                ))}
-              </div>
+              <AddNoteForm bookingId={b.id} onSubmitted={onNoteAdded} />
             </div>
           </div>
         )}
@@ -571,5 +573,146 @@ function CustomerBody({ booking: b }: { booking: any }) {
         </Card>
       </div>
     </div>
+  );
+}
+
+/** Provider booking detail notes block. Splits notes by authorRole so
+ * a multi-author thread reads as labeled groups. Each group's header
+ * names the author's role (never the person); a small metadata line
+ * underneath shows the name + date. */
+function NoteSections({ viewer, notes }: { viewer: NoteViewerRole; notes: any[] }) {
+  const groups = groupNotesByAuthorRole(notes);
+  return (
+    <>
+      {groups.map(({ role, notes: groupNotes }) => {
+        // Provider-context notes (the operator's own org's notes) read
+        // in a quieter slate card. Notes from drivers / fleet keep the
+        // amber treatment so they read as "from outside, attention".
+        const incoming = role !== "PROVIDER";
+        const cardClass = incoming
+          ? "p-6 md:p-8 border-amber-100 bg-amber-50/40"
+          : "p-6 md:p-8 border-slate-100 bg-slate-50/40";
+        const iconClass = incoming ? "text-amber-700" : "text-slate-500";
+        const labelClass = incoming ? "text-amber-800" : "text-slate-500";
+        return (
+          <Card key={role} className={cardClass}>
+            <div className="flex items-center gap-2 mb-3">
+              <StickyNote className={`h-4 w-4 ${iconClass}`} />
+              <h2 className={`text-xs font-bold uppercase tracking-wider ${labelClass}`}>
+                {noteSectionLabel(viewer, role)}
+              </h2>
+            </div>
+            <div className="space-y-3">
+              {groupNotes.map((n: any) => {
+                const meta = noteMetaLine(n, (d) => formatDate(d, "MMM d, yyyy"));
+                return (
+                  <div key={n.id}>
+                    <p className="text-slate-800 whitespace-pre-wrap leading-relaxed">{n.content}</p>
+                    {meta && <p className="text-xs text-slate-500 mt-1">{meta}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        );
+      })}
+    </>
+  );
+}
+
+/** Customer view notes block — same role-based grouping in the
+ * compact icon-rail layout that customer body uses. */
+function CustomerNotesBlock({ notes }: { notes: any[] }) {
+  const groups = groupNotesByAuthorRole(notes);
+  return (
+    <>
+      {groups.map(({ role, notes: groupNotes }) => (
+        <div key={role} className="flex gap-4 items-start">
+          <div className="bg-amber-50 p-3 rounded-xl text-amber-700"><StickyNote className="h-5 w-5" /></div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">{noteSectionLabel("DRIVER", role)}</p>
+            <div className="space-y-2">
+              {groupNotes.map((n: any) => {
+                const meta = noteMetaLine(n, (d) => formatDate(d, "MMM d, yyyy"));
+                return (
+                  <div key={n.id}>
+                    <p className="text-sm text-slate-800 whitespace-pre-wrap">{n.content}</p>
+                    {meta && <p className="text-[11px] text-slate-500 mt-0.5">{meta}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** Append-only "Add a note" affordance. Driver-side booking detail
+ * uses this; the submitted note is immutable (no edit/delete on the
+ * server). Optimistic local refetch via the parent's onSubmitted hook. */
+export function AddNoteForm({ bookingId, onSubmitted }: { bookingId: string; onSubmitted: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [content, setContent] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async () => {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    setSubmitting(true);
+    try {
+      const r = await fetch(`${API_BASE}/api/bookings/${bookingId}/notes`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: trimmed }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.message || "Failed to add note");
+      }
+      toast.success("Note added");
+      setContent("");
+      setOpen(false);
+      onSubmitted();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
+      >
+        <StickyNote className="h-4 w-4" /> Add a note
+      </button>
+    );
+  }
+  return (
+    <Card className="p-4 border-amber-100 bg-amber-50/30">
+      <p className="text-xs text-amber-800 mb-2">Notes are visible to the provider and can't be edited once added.</p>
+      <textarea
+        value={content}
+        onChange={(e) => setContent(e.target.value.slice(0, 2000))}
+        autoFocus
+        rows={3}
+        placeholder="Anything the provider should know? (e.g. running 5 min late)"
+        className="w-full border border-amber-200 rounded-lg p-2 text-sm bg-white focus:border-amber-400 focus:outline-none resize-none"
+      />
+      <div className="flex justify-between items-center mt-2">
+        <span className="text-[11px] text-slate-500">{content.length}/2000</span>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => { setOpen(false); setContent(""); }}>Cancel</Button>
+          <Button size="sm" onClick={submit} disabled={!content.trim() || submitting} isLoading={submitting} className="gap-1">
+            <Send className="h-3.5 w-3.5" /> Send
+          </Button>
+        </div>
+      </div>
+    </Card>
   );
 }
