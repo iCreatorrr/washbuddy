@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useSearchLocations } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
+
+const API_BASE = import.meta.env.VITE_API_URL || "";
 import { Card, Input, Button, Badge, ErrorState } from "@/components/ui";
 import { MapPin, Navigation, Route, ArrowRight, X, Loader2, ChevronDown, Crosshair } from "lucide-react";
 import { Link, useLocation } from "wouter";
@@ -472,15 +474,19 @@ export default function RoutePlanner() {
 
   const { activeVehicle } = useActiveVehicle();
   const activeVehicleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
-  // activeVehicleClass in the query key so swapping the active vehicle
-  // refetches the location list (matches the search.tsx contract).
-  const { data, isLoading } = useSearchLocations(
-    {},
-    {
-      request: { credentials: "include" },
-      query: { queryKey: ["/api/locations/search", { vehicleClass: activeVehicleClass }] },
-    }
-  );
+  // Raw useQuery so vehicleClass lives in the URL; mirrors search.tsx
+  // for the same observability reasons (every swap is a visible
+  // network request rather than a cache-key trick on the same URL).
+  const locationsUrl = `${API_BASE}/api/locations/search${activeVehicleClass ? `?vehicleClass=${activeVehicleClass}` : ""}`;
+  const { data, isLoading } = useQuery({
+    queryKey: ["/api/locations/search", { vehicleClass: activeVehicleClass ?? "ANY" }],
+    queryFn: async () => {
+      const r = await fetch(locationsUrl, { credentials: "include" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    },
+    staleTime: 60_000,
+  });
   // All locations are surfaced; we annotate each with a `fitsActiveVehicle`
   // flag so the route planner can render incompatible ones in a grayed
   // unclickable state instead of hiding them. The driver sees why a

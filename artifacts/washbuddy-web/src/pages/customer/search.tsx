@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { useSearchLocations, useListBookings, useGetAvailableNowLocations } from "@workspace/api-client-react";
+import { useListBookings, useGetAvailableNowLocations } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
+
+const API_BASE = import.meta.env.VITE_API_URL || "";
 import { Card, Input, Button, Badge, ErrorState } from "@/components/ui";
 import { MapPin, Search, Navigation, Map, List, Clock, Filter, X, Zap, Star, Truck } from "lucide-react";
 import { Link, useLocation } from "wouter";
@@ -144,23 +147,28 @@ export default function CustomerSearch() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
 
-  // Including activeVehicleClass in the query key triggers a refetch
-  // whenever the driver swaps the active vehicle via the pill, so the
-  // displayed list reflects what the *current* vehicle can fit at —
-  // the client-side filter on the cached response was masking but not
-  // re-fetching, and that latent bug would surface the moment we move
-  // filtering server-side.
-  const { data, isLoading, isError, refetch } = useSearchLocations(
-    {},
-    {
-      request: { credentials: "include" },
-      query: {
-        enabled: true,
-        staleTime: 60_000,
-        queryKey: ["/api/locations/search", { vehicleClass: activeVehicleClass }],
-      },
-    }
-  );
+  // Use a raw useQuery so the URL itself carries vehicleClass as a
+  // query param. Two reasons over the generated useSearchLocations:
+  //   (1) The auto-derived queryKey is strictly tied to the URL, so
+  //       swapping vehicles is *observably* a different request in
+  //       dev tools' Network tab (you can confirm a refetch fired).
+  //   (2) The generated client's queryFn was closed over the original
+  //       `params` arg — a queryKey override created separate cache
+  //       entries but the same underlying fetch, which made any
+  //       runtime "did the refetch happen?" debugging opaque.
+  // Server currently ignores vehicleClass and returns the same data;
+  // the client filters via locationFitsClass. The param is forward-
+  // compatible with server-side filtering when we add it.
+  const locationsUrl = `${API_BASE}/api/locations/search${activeVehicleClass ? `?vehicleClass=${activeVehicleClass}` : ""}`;
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ["/api/locations/search", { vehicleClass: activeVehicleClass ?? "ANY" }],
+    queryFn: async () => {
+      const r = await fetch(locationsUrl, { credentials: "include" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    },
+    staleTime: 60_000,
+  });
   const { data: bookingsData } = useListBookings(
     { status: "COMPLETED", limit: 100 },
     { request: { credentials: "include" }, query: { enabled: !!user } }
