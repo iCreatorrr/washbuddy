@@ -658,10 +658,34 @@ model Service {
   bookings           Booking[]
   bookingHolds       BookingHold[]
   pricing            ServicePricing[]
+  bookingServices    BookingService[]
 
   @@index([locationId])
   @@index([isVisible])
   @@map("services")
+}
+
+// Many-to-many: a single Booking can include multiple Services
+// (e.g. Full Detail + Interior + Undercarriage in one wash). Snapshots
+// of name / price / duration are frozen here so historical bookings
+// remain accurate even after the underlying Service is renamed,
+// re-priced, or deleted.
+model BookingService {
+  id           String   @id @default(uuid()) @db.Uuid
+  bookingId    String   @map("booking_id") @db.Uuid
+  serviceId    String   @map("service_id") @db.Uuid
+  nameSnapshot String   @map("name_snapshot")
+  priceMinor   Int      @map("price_minor")
+  durationMins Int      @map("duration_mins")
+  displayOrder Int      @default(0) @map("display_order")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+  service Service @relation(fields: [serviceId], references: [id])
+
+  @@unique([bookingId, serviceId])
+  @@index([bookingId])
+  @@map("booking_services")
 }
 
 model ServiceCompatibility {
@@ -684,6 +708,12 @@ model BookingHold {
   id             String   @id @default(uuid()) @db.Uuid
   locationId     String   @map("location_id") @db.Uuid
   serviceId      String   @map("service_id") @db.Uuid
+  // Multi-service holds carry an ordered list of service ids so the
+  // booking-creation step can recreate the BookingService rows
+  // exactly as the driver chose them. The `serviceId` column above is
+  // kept (set to the first id) for any legacy code path that reads it
+  // and for the FK; new code reads `serviceIds`.
+  serviceIds     String[] @default([]) @map("service_ids")
   slotStartAtUtc DateTime @map("slot_start_at_utc") @db.Timestamptz
   slotEndAtUtc   DateTime @map("slot_end_at_utc") @db.Timestamptz
   expiresAtUtc   DateTime @map("expires_at_utc") @db.Timestamptz
@@ -772,6 +802,11 @@ model Booking {
   messages         BookingMessage[]
   washNotes        WashNote[]
   addOns           BookingAddOn[]
+  // Multi-service: the join table is the source of truth. The
+  // single `serviceId` column above stays for backward compat —
+  // it points at the *primary* (first) service. All new code reads
+  // `bookingServices`.
+  bookingServices  BookingService[]
 
   @@index([locationId, scheduledStartAtUtc, scheduledEndAtUtc, status])
   @@index([customerId])
