@@ -116,56 +116,51 @@ export default function BookingDetail() {
         <ArrowLeft className="h-4 w-4" /> Back
       </button>
 
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div>
-          <Badge className={getStatusColor(b.status)}>{getStatusLabel(b.status)}</Badge>
-          <h1 className="text-4xl font-display font-bold text-slate-900 mt-4 mb-2">{b.serviceNameSnapshot}</h1>
-          <p className="text-slate-500 font-mono text-sm">ID: {b.id}</p>
+      {/* Header — provider view leads with customer name + scheduled
+          time; that's what the operator actually needs to see. Customers
+          and admins fall back to the older "service-name-as-headline"
+          framing because they care about what was booked, not who. */}
+      {isProvider ? (
+        <ProviderHeader
+          booking={b}
+          isAdmin={isAdmin}
+          onAction={handleAction}
+          confirmPending={confirmMut.isPending}
+          checkinPending={checkinMut.isPending}
+          startPending={startMut.isPending}
+          completePending={completeMut.isPending}
+          cancelPending={cancelMut.isPending}
+          adminActionLoading={adminActionLoading}
+          activeStatuses={activeStatuses}
+          onForceCancel={handleForceCancel}
+          onOverride={() => setShowOverrideDialog(true)}
+        />
+      ) : (
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+          <div>
+            <Badge className={getStatusColor(b.status)}>{getStatusLabel(b.status)}</Badge>
+            <h1 className="text-4xl font-display font-bold text-slate-900 mt-4 mb-2">{b.serviceNameSnapshot}</h1>
+            <p className="text-slate-500 font-mono text-sm">ID: {b.id}</p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {(isCustomer) && ["REQUESTED", "HELD", "PROVIDER_CONFIRMED"].includes(b.status) && (
+              <Button variant="outline" onClick={() => handleAction("cancel")} isLoading={cancelMut.isPending}>
+                Cancel Booking
+              </Button>
+            )}
+            {isAdmin && activeStatuses.includes(b.status) && (
+              <Button variant="destructive" onClick={handleForceCancel} isLoading={adminActionLoading} className="gap-1">
+                <Shield className="h-4 w-4" /> Force Cancel
+              </Button>
+            )}
+            {isAdmin && (
+              <Button variant="outline" onClick={() => setShowOverrideDialog(true)} className="gap-1 text-amber-600 border-amber-200 hover:bg-amber-50">
+                <AlertTriangle className="h-4 w-4" /> Override Status
+              </Button>
+            )}
+          </div>
         </div>
-        
-        {/* Contextual Actions */}
-        <div className="flex flex-wrap gap-3">
-          {(isCustomer || isProvider) && ["REQUESTED", "HELD", "PROVIDER_CONFIRMED"].includes(b.status) && (
-            <Button variant="outline" onClick={() => handleAction("cancel")} isLoading={cancelMut.isPending}>
-              Cancel Booking
-            </Button>
-          )}
-          
-          {isProvider && b.status === "REQUESTED" && (
-            <Button onClick={() => handleAction("confirm")} isLoading={confirmMut.isPending} className="bg-blue-600 hover:bg-blue-700">
-              <CheckCircle2 className="mr-2 h-4 w-4" /> Confirm Job
-            </Button>
-          )}
-          {isProvider && b.status === "PROVIDER_CONFIRMED" && (
-            <Button onClick={() => handleAction("checkin")} isLoading={checkinMut.isPending} className="bg-indigo-600 hover:bg-indigo-700">
-              Mark Checked In
-            </Button>
-          )}
-          {isProvider && b.status === "CHECKED_IN" && (
-            <Button onClick={() => handleAction("start")} isLoading={startMut.isPending} className="bg-purple-600 hover:bg-purple-700">
-              Start Wash
-            </Button>
-          )}
-          {isProvider && b.status === "IN_SERVICE" && (
-            <Button onClick={() => handleAction("complete")} isLoading={completeMut.isPending} className="bg-emerald-600 hover:bg-emerald-700">
-              Complete Wash
-            </Button>
-          )}
-
-          {/* Admin Actions */}
-          {isAdmin && activeStatuses.includes(b.status) && (
-            <Button variant="destructive" onClick={handleForceCancel} isLoading={adminActionLoading} className="gap-1">
-              <Shield className="h-4 w-4" /> Force Cancel
-            </Button>
-          )}
-          {isAdmin && (
-            <Button variant="outline" onClick={() => setShowOverrideDialog(true)} className="gap-1 text-amber-600 border-amber-200 hover:bg-amber-50">
-              <AlertTriangle className="h-4 w-4" /> Override Status
-            </Button>
-          )}
-        </div>
-      </div>
+      )}
 
       {/* Override Status Dialog */}
       {showOverrideDialog && (
@@ -221,147 +216,360 @@ export default function BookingDetail() {
         </motion.div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <Card className="p-6 md:p-8 space-y-6">
-          <h2 className="text-xl font-bold text-slate-900 border-b border-slate-100 pb-4">Details</h2>
-          
-          <div className="flex gap-4 items-start">
-            <div className="bg-slate-100 p-3 rounded-xl text-slate-500"><Calendar className="h-5 w-5" /></div>
-            <div>
-              <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Schedule</p>
-              <p className="font-bold text-slate-900">{formatDate(b.scheduledStartAtUtc, "MMM d, yyyy • h:mm a", b.locationTimezone)}</p>
-              <p className="text-sm text-slate-500">to {formatDate(b.scheduledEndAtUtc, "h:mm a", b.locationTimezone)}</p>
-            </div>
+      {isProvider ? (
+        <ProviderBody booking={b} />
+      ) : (
+        <CustomerBody booking={b} />
+      )}
+
+    </div>
+  );
+}
+
+/** Provider header — leads with the customer's name (the operator
+ * already knows everything else). Booking ID and status badge sit
+ * subordinate; action buttons cluster on the right; scheduled time is
+ * called out below. */
+function ProviderHeader({
+  booking: b,
+  isAdmin,
+  onAction,
+  confirmPending,
+  checkinPending,
+  startPending,
+  completePending,
+  cancelPending,
+  adminActionLoading,
+  activeStatuses,
+  onForceCancel,
+  onOverride,
+}: {
+  booking: any;
+  isAdmin: boolean;
+  onAction: (a: string) => void;
+  confirmPending: boolean;
+  checkinPending: boolean;
+  startPending: boolean;
+  completePending: boolean;
+  cancelPending: boolean;
+  adminActionLoading: boolean;
+  activeStatuses: string[];
+  onForceCancel: () => void;
+  onOverride: () => void;
+}) {
+  const customerName = b.isOffPlatform
+    ? (b.offPlatformClientName || "Walk-in")
+    : `${b.customer?.firstName || ""} ${b.customer?.lastName || ""}`.trim() || "—";
+  const contactInfo = b.isOffPlatform
+    ? (b.offPlatformClientPhone || b.offPlatformClientEmail || null)
+    : (b.customer?.email || null);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 mb-2">
+            <Badge className={getStatusColor(b.status)}>{getStatusLabel(b.status)}</Badge>
+            <span className="text-xs font-mono text-slate-400">#{b.id.split("-")[0].toUpperCase()}</span>
           </div>
-
-          <div className="flex gap-4 items-start">
-            <div className="bg-slate-100 p-3 rounded-xl text-slate-500"><MapPin className="h-5 w-5" /></div>
-            <div>
-              <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Location</p>
-              <p className="font-bold text-slate-900">{b.location?.name}</p>
-              <p className="text-sm text-slate-500">{b.location?.provider?.name}</p>
-            </div>
-          </div>
-
-          <div className="flex gap-4 items-start">
-            {(() => {
-              const bt = b.vehicle?.bodyType ? normalizeBodyType(b.vehicle.bodyType) : null;
-              const style = bt ? BODY_TYPE_STYLE[bt] : null;
-              const Icon = bt ? BODY_TYPE_ICON[bt] : Truck;
-              return (
-                <div className={`p-3 rounded-xl ${style ? style.chipBg : "bg-slate-100"} ${style ? style.chipFg : "text-slate-500"}`}>
-                  <Icon className="h-5 w-5" />
-                </div>
-              );
-            })()}
-            <div>
-              <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Vehicle</p>
-              <p className="font-bold text-slate-900">{b.vehicle ? vehicleDisplayName(b.vehicle) : "Not specified"}</p>
-              <p className="text-sm text-slate-500">
-                {b.vehicle?.bodyType ? BODY_TYPE_LABEL[normalizeBodyType(b.vehicle.bodyType)] : (b.vehicle?.categoryCode || "")}
-              </p>
-            </div>
-          </div>
-
-          {isProvider && (
-            <div className="flex gap-4 items-start">
-              <div className="bg-slate-100 p-3 rounded-xl text-slate-500"><User className="h-5 w-5" /></div>
-              <div>
-                <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Customer</p>
-                {b.isOffPlatform ? (
-                  <>
-                    <p className="font-bold text-slate-900">{b.offPlatformClientName || "Walk-in"}</p>
-                    <p className="text-sm text-slate-500">
-                      {b.offPlatformClientPhone || b.offPlatformClientEmail || "No contact info on file"}
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <p className="font-bold text-slate-900">{b.customer?.firstName} {b.customer?.lastName}</p>
-                    <p className="text-sm text-slate-500">{b.customer?.email}</p>
-                  </>
-                )}
-              </div>
-            </div>
+          <h1 className="text-3xl md:text-4xl font-display font-bold text-slate-900 truncate">{customerName}</h1>
+          {contactInfo && (
+            <p className="text-sm text-slate-500 mt-1">{contactInfo}</p>
           )}
+        </div>
 
-          {Array.isArray((b as any).washNotes) && (b as any).washNotes.length > 0 && (
-            <div className="flex gap-4 items-start">
-              <div className="bg-amber-50 p-3 rounded-xl text-amber-700"><StickyNote className="h-5 w-5" /></div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Notes</p>
-                <div className="space-y-2">
-                  {(b as any).washNotes.map((n: any) => (
-                    <p key={n.id} className="text-sm text-slate-800 whitespace-pre-wrap">{n.content}</p>
-                  ))}
-                </div>
-              </div>
-            </div>
+        <div className="flex flex-wrap gap-2 shrink-0">
+          {["REQUESTED", "HELD", "PROVIDER_CONFIRMED"].includes(b.status) && (
+            <Button variant="outline" onClick={() => onAction("cancel")} isLoading={cancelPending}>
+              Cancel Booking
+            </Button>
           )}
-
-          {Array.isArray((b as any).addOns) && (b as any).addOns.length > 0 && (
-            <div className="flex gap-4 items-start">
-              <div className="bg-slate-100 p-3 rounded-xl text-slate-500"><Package className="h-5 w-5" /></div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Add-ons</p>
-                <ul className="text-sm space-y-1">
-                  {(b as any).addOns.map((a: any) => (
-                    <li key={a.id} className="flex justify-between gap-3">
-                      <span className="text-slate-700">{a.name}{a.quantity > 1 ? ` × ${a.quantity}` : ""}</span>
-                      <span className="font-medium text-slate-900">{formatCurrency(a.totalMinor ?? a.priceMinor * (a.quantity ?? 1))}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
+          {b.status === "REQUESTED" && (
+            <Button onClick={() => onAction("confirm")} isLoading={confirmPending} className="bg-blue-600 hover:bg-blue-700">
+              <CheckCircle2 className="mr-2 h-4 w-4" /> Confirm Job
+            </Button>
           )}
-        </Card>
-
-        <div className="space-y-8">
-          <Card className="p-6 md:p-8 bg-slate-900 text-white border-slate-800">
-            <h2 className="text-xl font-bold border-b border-slate-800 pb-4 mb-4 flex items-center gap-3">
-              <CreditCard className="h-5 w-5 text-slate-400" /> Payment Summary
-            </h2>
-            <div className="space-y-3">
-              <div className="flex justify-between text-slate-300">
-                <span>Base Price</span>
-                <span>{formatCurrency(b.serviceBasePriceMinor || b.totalPriceMinor)}</span>
-              </div>
-              {(b.platformFeeMinor || 0) > 0 && (
-                <div className="flex justify-between text-slate-300">
-                  <span>Platform Fee</span>
-                  <span>{formatCurrency(b.platformFeeMinor!)}</span>
-                </div>
-              )}
-              <div className="flex justify-between text-xl font-display font-bold text-blue-400 pt-4 border-t border-slate-800 mt-4">
-                <span>Total</span>
-                <span>{formatCurrency(b.totalPriceMinor, b.currencyCode)}</span>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-6 md:p-8">
-            <h2 className="text-xl font-bold text-slate-900 mb-6">Status History</h2>
-            <div className="space-y-6 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-200 before:to-transparent">
-              {b.statusHistory?.map((event, idx) => (
-                <div key={event.id} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
-                  <div className="flex items-center justify-center w-10 h-10 rounded-full border-4 border-white bg-blue-100 text-blue-600 shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10">
-                    <ChevronRight className="h-4 w-4" />
-                  </div>
-                  <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
-                    <div className="flex items-center justify-between space-x-2 mb-1">
-                      <div className="font-bold text-slate-900">{getStatusLabel(event.toStatus)}</div>
-                    </div>
-                    <div className="text-xs text-slate-500 mb-2">{formatDate(event.createdAt)}</div>
-                    <div className="text-sm text-slate-600">{event.reason || "Status updated"}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
+          {b.status === "PROVIDER_CONFIRMED" && (
+            <Button onClick={() => onAction("checkin")} isLoading={checkinPending} className="bg-indigo-600 hover:bg-indigo-700">
+              Mark Checked In
+            </Button>
+          )}
+          {b.status === "CHECKED_IN" && (
+            <Button onClick={() => onAction("start")} isLoading={startPending} className="bg-purple-600 hover:bg-purple-700">
+              Start Wash
+            </Button>
+          )}
+          {b.status === "IN_SERVICE" && (
+            <Button onClick={() => onAction("complete")} isLoading={completePending} className="bg-emerald-600 hover:bg-emerald-700">
+              Complete Wash
+            </Button>
+          )}
+          {isAdmin && activeStatuses.includes(b.status) && (
+            <Button variant="destructive" onClick={onForceCancel} isLoading={adminActionLoading} className="gap-1">
+              <Shield className="h-4 w-4" /> Force Cancel
+            </Button>
+          )}
+          {isAdmin && (
+            <Button variant="outline" onClick={onOverride} className="gap-1 text-amber-600 border-amber-200 hover:bg-amber-50">
+              <AlertTriangle className="h-4 w-4" /> Override Status
+            </Button>
+          )}
         </div>
       </div>
 
+      <div className="flex items-center gap-2 text-sm text-slate-600">
+        <Calendar className="h-4 w-4 text-slate-400" />
+        <span className="font-medium text-slate-900">{formatDate(b.scheduledStartAtUtc, "EEEE, MMM d • h:mm a", b.locationTimezone)}</span>
+        <span className="text-slate-400">→ {formatDate(b.scheduledEndAtUtc, "h:mm a", b.locationTimezone)}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Provider body — services + add-ons + customer notes lead.
+ * Vehicle / bay / total are tucked into a small footer card; status
+ * history collapses behind a disclosure. */
+function ProviderBody({ booking: b }: { booking: any }) {
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const notes: any[] = Array.isArray(b.washNotes) ? b.washNotes : [];
+  const addOns: any[] = Array.isArray(b.addOns) ? b.addOns : [];
+  const bt = b.vehicle?.bodyType ? normalizeBodyType(b.vehicle.bodyType) : null;
+  const style = bt ? BODY_TYPE_STYLE[bt] : null;
+  const Icon = bt ? BODY_TYPE_ICON[bt] : Truck;
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      {/* Service order: what they're getting */}
+      <Card className="p-6 md:p-8">
+        <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Service order</h2>
+        <div className="space-y-3 mb-6">
+          {(b.serviceNameSnapshot || "—").split(",").map((name: string, i: number) => (
+            <div key={i} className="flex items-baseline justify-between gap-4 pb-3 border-b border-slate-100 last:border-0 last:pb-0">
+              <div>
+                <p className="font-semibold text-slate-900 text-lg">{name.trim()}</p>
+                {b.service?.durationMins && i === 0 && (
+                  <p className="text-sm text-slate-500 mt-0.5">{b.service.durationMins} min</p>
+                )}
+              </div>
+              {i === 0 && (
+                <p className="font-medium text-slate-900 text-lg shrink-0">
+                  {formatCurrency(b.serviceBasePriceMinor || b.totalPriceMinor, b.currencyCode)}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {addOns.length > 0 && (
+          <div className="mt-2">
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Add-ons</h3>
+            <ul className="space-y-2">
+              {addOns.map((a: any) => (
+                <li key={a.id} className="flex items-baseline justify-between gap-4 text-sm">
+                  <span className="text-slate-700">{a.name}{a.quantity > 1 ? ` × ${a.quantity}` : ""}</span>
+                  <span className="font-medium text-slate-900">{formatCurrency(a.totalMinor ?? a.priceMinor * (a.quantity ?? 1))}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Card>
+
+      {notes.length > 0 && (
+        <Card className="p-6 md:p-8 border-amber-100 bg-amber-50/40">
+          <div className="flex items-center gap-2 mb-3">
+            <StickyNote className="h-4 w-4 text-amber-700" />
+            <h2 className="text-xs font-bold text-amber-800 uppercase tracking-wider">Notes from customer</h2>
+          </div>
+          <div className="space-y-3">
+            {notes.map((n: any) => (
+              <p key={n.id} className="text-slate-800 whitespace-pre-wrap leading-relaxed">{n.content}</p>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Footer: vehicle / bay / total — operator already knows their
+          facility, so this is reference, not focal. */}
+      <Card className="p-5 md:p-6 bg-slate-50 border-slate-200">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 items-center">
+          <div className="min-w-0">
+            <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">Vehicle</p>
+            <div className="flex items-center gap-2 min-w-0">
+              {bt && style && (
+                <div className={`h-7 w-7 ${style.chipBg} rounded-md flex items-center justify-center shrink-0`}>
+                  <Icon className={`h-4 w-4 ${style.chipFg}`} />
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-900 truncate">
+                  {b.vehicle ? vehicleDisplayName(b.vehicle) : (b.fleetPlaceholderClass || "—")}
+                </p>
+                {b.vehicle?.lengthInches && (
+                  <p className="text-xs text-slate-500">
+                    {Math.round(b.vehicle.lengthInches / 12)} ft
+                    {bt && BODY_TYPE_LABEL[bt] ? ` · ${BODY_TYPE_LABEL[bt]}` : ""}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+          <div>
+            <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">Bay</p>
+            <p className="text-sm font-semibold text-slate-900">{b.washBay?.name || "Unassigned"}</p>
+          </div>
+          <div>
+            <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">Source</p>
+            <p className="text-sm font-semibold text-slate-900">
+              {b.bookingSource === "WALK_IN" ? "Walk-in" : b.bookingSource === "DIRECT" ? "Direct" : "WashBuddy"}
+            </p>
+          </div>
+          <div className="md:text-right">
+            <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400 mb-1">Total</p>
+            <p className="text-lg font-display font-bold text-slate-900">
+              {formatCurrency(b.totalPriceMinor, b.currencyCode)}
+            </p>
+          </div>
+        </div>
+      </Card>
+
+      {Array.isArray(b.statusHistory) && b.statusHistory.length > 0 && (
+        <details className="group" open={historyOpen} onToggle={(e) => setHistoryOpen((e.target as HTMLDetailsElement).open)}>
+          <summary className="cursor-pointer list-none inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors">
+            <ChevronRight className={`h-4 w-4 transition-transform ${historyOpen ? "rotate-90" : ""}`} />
+            Status history
+          </summary>
+          <div className="mt-3 ml-5 pl-5 border-l border-slate-200 space-y-3">
+            {b.statusHistory.map((event: any) => (
+              <div key={event.id} className="text-sm">
+                <p className="font-semibold text-slate-900">{getStatusLabel(event.toStatus)}</p>
+                <p className="text-xs text-slate-500">{formatDate(event.createdAt)}</p>
+                {event.reason && <p className="text-xs text-slate-600 mt-0.5">{event.reason}</p>}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+/** Customer body — keeps the prior service-led summary; the customer
+ * cares about what they booked and where. */
+function CustomerBody({ booking: b }: { booking: any }) {
+  const notes: any[] = Array.isArray(b.washNotes) ? b.washNotes : [];
+  const addOns: any[] = Array.isArray(b.addOns) ? b.addOns : [];
+  const bt = b.vehicle?.bodyType ? normalizeBodyType(b.vehicle.bodyType) : null;
+  const style = bt ? BODY_TYPE_STYLE[bt] : null;
+  const Icon = bt ? BODY_TYPE_ICON[bt] : Truck;
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+      <Card className="p-6 md:p-8 space-y-6">
+        <h2 className="text-xl font-bold text-slate-900 border-b border-slate-100 pb-4">Details</h2>
+
+        <div className="flex gap-4 items-start">
+          <div className="bg-slate-100 p-3 rounded-xl text-slate-500"><Calendar className="h-5 w-5" /></div>
+          <div>
+            <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Schedule</p>
+            <p className="font-bold text-slate-900">{formatDate(b.scheduledStartAtUtc, "MMM d, yyyy • h:mm a", b.locationTimezone)}</p>
+            <p className="text-sm text-slate-500">to {formatDate(b.scheduledEndAtUtc, "h:mm a", b.locationTimezone)}</p>
+          </div>
+        </div>
+
+        <div className="flex gap-4 items-start">
+          <div className="bg-slate-100 p-3 rounded-xl text-slate-500"><MapPin className="h-5 w-5" /></div>
+          <div>
+            <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Location</p>
+            <p className="font-bold text-slate-900">{b.location?.name}</p>
+            <p className="text-sm text-slate-500">{b.location?.provider?.name}</p>
+          </div>
+        </div>
+
+        <div className="flex gap-4 items-start">
+          <div className={`p-3 rounded-xl ${style ? style.chipBg : "bg-slate-100"} ${style ? style.chipFg : "text-slate-500"}`}>
+            <Icon className="h-5 w-5" />
+          </div>
+          <div>
+            <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Vehicle</p>
+            <p className="font-bold text-slate-900">{b.vehicle ? vehicleDisplayName(b.vehicle) : "Not specified"}</p>
+            <p className="text-sm text-slate-500">
+              {bt ? BODY_TYPE_LABEL[bt] : (b.vehicle?.categoryCode || "")}
+            </p>
+          </div>
+        </div>
+
+        {notes.length > 0 && (
+          <div className="flex gap-4 items-start">
+            <div className="bg-amber-50 p-3 rounded-xl text-amber-700"><StickyNote className="h-5 w-5" /></div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Notes</p>
+              <div className="space-y-2">
+                {notes.map((n: any) => (
+                  <p key={n.id} className="text-sm text-slate-800 whitespace-pre-wrap">{n.content}</p>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {addOns.length > 0 && (
+          <div className="flex gap-4 items-start">
+            <div className="bg-slate-100 p-3 rounded-xl text-slate-500"><Package className="h-5 w-5" /></div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Add-ons</p>
+              <ul className="text-sm space-y-1">
+                {addOns.map((a: any) => (
+                  <li key={a.id} className="flex justify-between gap-3">
+                    <span className="text-slate-700">{a.name}{a.quantity > 1 ? ` × ${a.quantity}` : ""}</span>
+                    <span className="font-medium text-slate-900">{formatCurrency(a.totalMinor ?? a.priceMinor * (a.quantity ?? 1))}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <div className="space-y-8">
+        <Card className="p-6 md:p-8 bg-slate-900 text-white border-slate-800">
+          <h2 className="text-xl font-bold border-b border-slate-800 pb-4 mb-4 flex items-center gap-3">
+            <CreditCard className="h-5 w-5 text-slate-400" /> Payment Summary
+          </h2>
+          <div className="space-y-3">
+            <div className="flex justify-between text-slate-300">
+              <span>Base Price</span>
+              <span>{formatCurrency(b.serviceBasePriceMinor || b.totalPriceMinor)}</span>
+            </div>
+            {(b.platformFeeMinor || 0) > 0 && (
+              <div className="flex justify-between text-slate-300">
+                <span>Platform Fee</span>
+                <span>{formatCurrency(b.platformFeeMinor!)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-xl font-display font-bold text-blue-400 pt-4 border-t border-slate-800 mt-4">
+              <span>Total</span>
+              <span>{formatCurrency(b.totalPriceMinor, b.currencyCode)}</span>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="p-6 md:p-8">
+          <h2 className="text-xl font-bold text-slate-900 mb-6">Status History</h2>
+          <div className="space-y-3">
+            {b.statusHistory?.map((event: any) => (
+              <div key={event.id} className="flex items-start gap-3 text-sm">
+                <div className="h-2 w-2 mt-1.5 rounded-full bg-blue-500 shrink-0" />
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-900">{getStatusLabel(event.toStatus)}</p>
+                  <p className="text-xs text-slate-500">{formatDate(event.createdAt)}</p>
+                  {event.reason && <p className="text-xs text-slate-600 mt-0.5">{event.reason}</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }
