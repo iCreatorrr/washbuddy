@@ -1130,6 +1130,12 @@ model WashNote {
   bookingId  String?   @map("booking_id") @db.Uuid
   locationId String    @map("location_id") @db.Uuid
   authorId   String    @map("author_id") @db.Uuid
+  // Role of the author at the moment the note was written. Frozen at
+  // write so a user role change later doesn't relabel old notes.
+  // Values: PROVIDER, DRIVER, FLEET. PROVIDER covers PROVIDER_ADMIN +
+  // PROVIDER_STAFF (staff-vs-admin distinction is irrelevant for the
+  // viewer's "from whom" attribution).
+  authorRole String    @default("PROVIDER") @map("author_role")
   noteType   String    @map("note_type") // SHIFT, BOOKING_INSTRUCTION, OPERATOR_NOTE, SUPPLY_REQUEST, CLIENT_NOTE
   content    String
   shiftDate  DateTime? @map("shift_date") @db.Date

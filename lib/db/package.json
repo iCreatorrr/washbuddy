@@ -23,6 +23,7 @@
     "demo:backfill-bays": "tsx src/demo-seed/scripts/backfill-bays.ts",
     "demo:backfill-vehicle-body-type": "tsx src/demo-seed/scripts/backfill-vehicle-body-type-and-default.ts",
     "demo:backfill-services-instant-book": "tsx src/demo-seed/scripts/backfill-services-instant-book.ts",
+    "demo:backfill-wash-note-author-role": "tsx src/demo-seed/scripts/backfill-wash-note-author-role.ts",
     "demo:cleanup-unassigned-bookings": "tsx src/demo-seed/scripts/cleanup-unassigned-bookings.ts",
     "demo:configure-bronx-bays": "tsx src/demo-seed/scripts/configure-bronx-bays.ts",
     "studio": "prisma studio --schema=./prisma/schema.prisma"
