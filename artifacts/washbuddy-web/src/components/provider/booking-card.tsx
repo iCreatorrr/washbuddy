@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Card, Badge, Button } from "@/components/ui";
-import { Star, AlertTriangle, Sparkles, ChevronDown, MessageSquare, Camera, StickyNote } from "lucide-react";
+import { Star, AlertTriangle, Sparkles, ChevronDown, MessageSquare, Camera, StickyNote, Package } from "lucide-react";
 import { formatCurrency, formatVehicleClass } from "@/lib/utils";
 import { toast } from "sonner";
 import { PhotoPrompt } from "./photo-prompt";
@@ -44,6 +44,16 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   COMPLETED: { label: "Complete", className: "bg-emerald-100 text-emerald-800 border-emerald-300" },
   SETTLED: { label: "Complete", className: "bg-emerald-100 text-emerald-800 border-emerald-300" },
 };
+
+/** Render the bay label without the doubled "Bay Bay 3" — bay names are
+ * usually stored as "Bay 3" already, so a leading "Bay: " label collapses
+ * the prefix to just "Bay 3". Falls back to "Bay: Unassigned". */
+function stripBayPrefix(name: string | null | undefined): string {
+  if (!name) return "Bay: Unassigned";
+  const trimmed = name.trim();
+  if (/^bay\b/i.test(trimmed)) return trimmed;
+  return `Bay: ${trimmed}`;
+}
 
 function ElapsedTimer({ startedAt, durationMins }: { startedAt: string; durationMins: number }) {
   const [elapsed, setElapsed] = useState(0);
@@ -122,8 +132,22 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
           {b.clientTags?.includes("VIP") && <Star className="h-4 w-4 text-amber-400 fill-amber-400" />}
           {b.clientTags?.includes("SERVICE_RECOVERY") && <AlertTriangle className="h-4 w-4 text-red-400" />}
           {b.clientTags?.includes("NEW_CLIENT") && <Sparkles className="h-4 w-4 text-green-400" />}
+          {(b.addOnCount ?? b.addOns?.length ?? 0) > 0 && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-slate-500" title={`${b.addOnCount ?? b.addOns?.length} add-on(s)`}>
+              <Package className="h-3.5 w-3.5" />{b.addOnCount ?? b.addOns?.length}
+            </span>
+          )}
         </div>
-        <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${expanded ? "rotate-180" : ""}`} />
+        {/* Chevron is its own button so clicking the icon (not just the row
+            body) toggles expand without travelling to the row's onClick. */}
+        <button
+          type="button"
+          aria-label={expanded ? "Collapse row" : "Expand row"}
+          onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+          className="p-1 -mr-1 rounded-md hover:bg-slate-100 transition-colors shrink-0"
+        >
+          <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${expanded ? "rotate-180" : ""}`} />
+        </button>
       </div>
 
       {/* Expanded details */}
@@ -131,13 +155,39 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
         <div className="px-4 pb-4 border-t border-slate-100 pt-3 space-y-3">
           <div className="flex flex-wrap gap-4 text-sm text-slate-600">
             <span>Vehicle: {b.vehicle?.unitNumber || formatVehicleClass(b.fleetPlaceholderClass) || "N/A"}</span>
-            <span>Bay: {b.washBay?.name || "Unassigned"}</span>
+            <span>{stripBayPrefix(b.washBay?.name)}</span>
             <span>Price: {formatCurrency(b.totalPriceMinor, b.currencyCode)}</span>
             {b.discountAmountMinor > 0 && <span className="text-green-600">Discount: -{formatCurrency(b.discountAmountMinor)}</span>}
           </div>
 
+          {Array.isArray(b.washNotes) && b.washNotes.length > 0 && (
+            <div className="rounded-lg bg-amber-50 border border-amber-100 p-3 space-y-1">
+              <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-bold text-amber-800">
+                <StickyNote className="h-3 w-3" /> Notes
+              </div>
+              {b.washNotes.map((n: any) => (
+                <p key={n.id} className="text-sm text-amber-900 whitespace-pre-wrap">{n.content}</p>
+              ))}
+            </div>
+          )}
+
+          {Array.isArray(b.addOns) && b.addOns.length > 0 && (
+            <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 space-y-1">
+              <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-bold text-slate-600">
+                <Package className="h-3 w-3" /> Add-ons
+              </div>
+              <ul className="text-sm text-slate-700 space-y-0.5">
+                {b.addOns.map((a: any) => (
+                  <li key={a.id} className="flex justify-between">
+                    <span>{a.name}{a.quantity > 1 ? ` × ${a.quantity}` : ""}</span>
+                    <span className="font-medium text-slate-900">{formatCurrency(a.totalMinor ?? a.priceMinor * (a.quantity ?? 1))}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-2 text-xs text-slate-500">
-            {b.washNoteCount > 0 && <span className="flex items-center gap-1"><StickyNote className="h-3 w-3" />{b.washNoteCount} notes</span>}
             {b.photoCount > 0 && <span className="flex items-center gap-1"><Camera className="h-3 w-3" />{b.photoCount} photos</span>}
             {b.messageCount > 0 && <span className="flex items-center gap-1"><MessageSquare className="h-3 w-3" />{b.messageCount} messages</span>}
           </div>

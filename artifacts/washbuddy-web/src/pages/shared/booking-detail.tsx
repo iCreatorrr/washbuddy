@@ -4,7 +4,7 @@ import { useGetBooking, useConfirmBooking, useCheckinBooking, useStartService, u
 import { useAuth } from "@/contexts/auth";
 import { Card, Badge, Button } from "@/components/ui";
 import { formatCurrency, formatDate, getStatusColor, getStatusLabel } from "@/lib/utils";
-import { MapPin, Calendar, Truck, User, CreditCard, ChevronRight, CheckCircle2, Star, ArrowLeft, Shield, AlertTriangle, X } from "lucide-react";
+import { MapPin, Calendar, Truck, User, CreditCard, ChevronRight, CheckCircle2, Star, ArrowLeft, Shield, AlertTriangle, X, StickyNote, Package } from "lucide-react";
 import { motion } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
 import { ReviewForm } from "@/components/review-form";
@@ -281,6 +281,37 @@ export default function BookingDetail() {
                     <p className="text-sm text-slate-500">{b.customer?.email}</p>
                   </>
                 )}
+              </div>
+            </div>
+          )}
+
+          {Array.isArray((b as any).washNotes) && (b as any).washNotes.length > 0 && (
+            <div className="flex gap-4 items-start">
+              <div className="bg-amber-50 p-3 rounded-xl text-amber-700"><StickyNote className="h-5 w-5" /></div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Notes</p>
+                <div className="space-y-2">
+                  {(b as any).washNotes.map((n: any) => (
+                    <p key={n.id} className="text-sm text-slate-800 whitespace-pre-wrap">{n.content}</p>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {Array.isArray((b as any).addOns) && (b as any).addOns.length > 0 && (
+            <div className="flex gap-4 items-start">
+              <div className="bg-slate-100 p-3 rounded-xl text-slate-500"><Package className="h-5 w-5" /></div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Add-ons</p>
+                <ul className="text-sm space-y-1">
+                  {(b as any).addOns.map((a: any) => (
+                    <li key={a.id} className="flex justify-between gap-3">
+                      <span className="text-slate-700">{a.name}{a.quantity > 1 ? ` × ${a.quantity}` : ""}</span>
+                      <span className="font-medium text-slate-900">{formatCurrency(a.totalMinor ?? a.priceMinor * (a.quantity ?? 1))}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
           )}
