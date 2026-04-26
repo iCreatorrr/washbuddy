@@ -481,17 +481,20 @@ export default function RoutePlanner() {
       query: { queryKey: ["/api/locations/search", { vehicleClass: activeVehicleClass }] },
     }
   );
-  // Filter out locations that physically can't host the active vehicle.
-  // Treat an explicit empty washBays array as "no compatible bays" (the
-  // location really has nothing to host); only the missing-key case falls
-  // through to permissive (older API responses).
+  // All locations are surfaced; we annotate each with a `fitsActiveVehicle`
+  // flag so the route planner can render incompatible ones in a grayed
+  // unclickable state instead of hiding them. The driver sees why a
+  // location they expected to find is unavailable.
   const allLocations = useMemo(() => {
     const raw = (data?.locations || []) as any[];
-    if (!activeVehicleClass) return raw;
-    return raw.filter((loc: any) => {
-      if (!Array.isArray(loc.washBays)) return true;
-      if (loc.washBays.length === 0) return false;
-      return loc.washBays.some((b: any) => (b.supportedClasses || []).includes(activeVehicleClass));
+    return raw.map((loc: any) => {
+      let fits: boolean | null = null;
+      if (activeVehicleClass) {
+        if (!Array.isArray(loc.washBays)) fits = null; // unknown — older response shape
+        else if (loc.washBays.length === 0) fits = false;
+        else fits = loc.washBays.some((b: any) => (b.supportedClasses || []).includes(activeVehicleClass));
+      }
+      return { ...loc, fitsActiveVehicle: fits };
     });
   }, [data, activeVehicleClass]);
 
@@ -1078,52 +1081,72 @@ export default function RoutePlanner() {
 
           {displayLocations.length > 0 && !isRouting && (
             <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-              {displayLocations.map((loc, idx) => (
-                <motion.div
-                  key={loc.id}
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: idx * 0.03 }}
-                >
-                  <Link href={buildLocationUrl(loc.id)} className="block">
-                    <div className="bg-white rounded-xl border border-slate-200 p-4 hover:border-blue-300 hover:shadow-sm transition-all cursor-pointer">
-                      <div className="flex items-start justify-between mb-1">
-                        <h3 className="font-semibold text-slate-900 text-sm leading-tight">{loc.name}</h3>
-                        <div className="flex items-center gap-1.5 ml-2 shrink-0">
-                          {etas[loc.id] != null && (
-                            <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-xs">
-                              {formatETA(etas[loc.id])} away
-                            </Badge>
-                          )}
-                          <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-xs">
-                            {route ? `${Math.round(loc.distanceToRoute)} km` : `${Math.round(loc.distFromOrigin)} km`}
+              {displayLocations.map((loc, idx) => {
+                const incompatible = (loc as any).fitsActiveVehicle === false;
+                const card = (
+                  <div
+                    className={`rounded-xl border p-4 transition-all ${
+                      incompatible
+                        ? "bg-slate-50 border-slate-200 cursor-default"
+                        : "bg-white border-slate-200 hover:border-blue-300 hover:shadow-sm cursor-pointer"
+                    }`}
+                    title={incompatible ? "Change your active vehicle to book at this location" : undefined}
+                  >
+                    <div className="flex items-start justify-between mb-1">
+                      <h3 className={`font-semibold text-sm leading-tight ${incompatible ? "text-slate-500" : "text-slate-900"}`}>{loc.name}</h3>
+                      <div className="flex items-center gap-1.5 ml-2 shrink-0">
+                        {etas[loc.id] != null && (
+                          <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-xs">
+                            {formatETA(etas[loc.id])} away
                           </Badge>
-                        </div>
+                        )}
+                        <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-xs">
+                          {route ? `${Math.round(loc.distanceToRoute)} km` : `${Math.round(loc.distFromOrigin)} km`}
+                        </Badge>
                       </div>
-                      <p className="text-xs text-slate-500 mb-2">
-                        {loc.city}, {(loc as any).stateCode || (loc as any).regionCode}
-                      </p>
-                      {loc.services && loc.services.length > 0 && (
-                        <div className="flex flex-wrap gap-1">
-                          {loc.services.slice(0, 2).map((svc) => (
-                            <span
-                              key={svc.id}
-                              className="text-xs bg-slate-50 text-slate-600 px-2 py-0.5 rounded-md"
-                            >
-                              {svc.name} · {formatCurrency((svc as any).allInPriceMinor ?? svc.basePriceMinor)}
-                            </span>
-                          ))}
-                          {loc.services.length > 2 && (
-                            <span className="text-xs text-blue-600 font-medium px-1">
-                              +{loc.services.length - 2} more
-                            </span>
-                          )}
-                        </div>
-                      )}
                     </div>
-                  </Link>
-                </motion.div>
-              ))}
+                    <p className={`text-xs mb-2 ${incompatible ? "text-slate-400" : "text-slate-500"}`}>
+                      {loc.city}, {(loc as any).stateCode || (loc as any).regionCode}
+                    </p>
+                    {incompatible && (
+                      <div className="mb-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-300 text-[11px] font-medium">
+                        No bay fits your active vehicle
+                      </div>
+                    )}
+                    {loc.services && loc.services.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {loc.services.slice(0, 2).map((svc) => (
+                          <span
+                            key={svc.id}
+                            className={`text-xs px-2 py-0.5 rounded-md ${incompatible ? "bg-slate-100 text-slate-400" : "bg-slate-50 text-slate-600"}`}
+                          >
+                            {svc.name} · {formatCurrency((svc as any).allInPriceMinor ?? svc.basePriceMinor)}
+                          </span>
+                        ))}
+                        {loc.services.length > 2 && (
+                          <span className={`text-xs font-medium px-1 ${incompatible ? "text-slate-400" : "text-blue-600"}`}>
+                            +{loc.services.length - 2} more
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+                return (
+                  <motion.div
+                    key={loc.id}
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: idx * 0.03 }}
+                  >
+                    {incompatible ? (
+                      <div className="block">{card}</div>
+                    ) : (
+                      <Link href={buildLocationUrl(loc.id)} className="block">{card}</Link>
+                    )}
+                  </motion.div>
+                );
+              })}
             </div>
           )}
         </div>

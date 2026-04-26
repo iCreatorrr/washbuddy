@@ -136,9 +136,6 @@ export default function CustomerSearch() {
   const [filterOpenNow, setFilterOpenNow] = useState(false);
   const [filterAvailNow, setFilterAvailNow] = useState(false);
   const [filterTopRated, setFilterTopRated] = useState(false);
-  // Default ON: hide locations the active vehicle physically can't fit.
-  // Off-state shows all locations (with a "won't fit your bus" hint).
-  const [filterCompatible, setFilterCompatible] = useState(true);
   const { activeVehicle } = useActiveVehicle();
   const activeVehicleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
   const [userLat, setUserLat] = useState<number | null>(null);
@@ -225,11 +222,14 @@ export default function CustomerSearch() {
     if (filterTopRated) {
       result = result.filter((l) => (l.averageRating ?? 0) >= 4.0);
     }
-    if (filterCompatible && activeVehicleClass) {
-      result = result.filter((l) => l.fitsActiveVehicle !== false);
-    }
+    // Vehicle compatibility no longer hides locations — incompatible
+    // ones render in a grayed unclickable state instead, so the driver
+    // can see why a location is unavailable instead of "missing".
     return result;
-  }, [enrichedLocations, searchTerm, filterOpenNow, filterAvailNow, filterTopRated, filterCompatible, activeVehicleClass, availNowIds]);
+  }, [enrichedLocations, searchTerm, filterOpenNow, filterAvailNow, filterTopRated, availNowIds]);
+
+  const hasIncompatibleVisible = activeVehicleClass != null
+    && filtered.some((l) => l.fitsActiveVehicle === false);
 
   const sortLocations = (a: LocationWithMeta, b: LocationWithMeta) => {
     if (filterTopRated) {
@@ -276,22 +276,32 @@ export default function CustomerSearch() {
 
   const renderLocationCard = (loc: LocationWithMeta, idx: number) => {
     const incompatible = !!activeVehicleClass && loc.fitsActiveVehicle === false;
-    return (
-    <motion.div key={loc.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.03 }}>
-      <Link href={`/location/${loc.id}`} className="block h-full">
-        <Card className={`h-full flex flex-col group cursor-pointer border-2 hover:border-primary/30 ${incompatible ? "opacity-60" : ""}`}>
-          <div className="p-6 flex-1">
-            <div className="flex justify-between items-start mb-2">
-              <h3 className="text-xl font-bold text-slate-900">{loc.name}</h3>
+    // Incompatible cards are non-clickable. Render the inner Card as a
+    // div so there's no Link, the cursor stays default, and a tap does
+    // nothing — the helper text above the list explains how to fix it.
+    const cardInner = (
+      <Card
+        className={`h-full flex flex-col border-2 ${
+          incompatible
+            ? "bg-slate-50 border-slate-200 cursor-default"
+            : "group cursor-pointer hover:border-primary/30"
+        }`}
+        title={incompatible ? "Change your active vehicle to book at this location" : undefined}
+      >
+        <div className="p-6 flex-1">
+          <div className="flex justify-between items-start mb-2">
+            <h3 className={`text-xl font-bold ${incompatible ? "text-slate-500" : "text-slate-900"}`}>{loc.name}</h3>
+            {!incompatible && (
               <div className="bg-slate-50 p-2 rounded-full text-slate-400 group-hover:bg-primary group-hover:text-white transition-colors shrink-0 ml-2">
                 <Navigation className="h-4 w-4" />
               </div>
-            </div>
-            {incompatible && (
-              <div className="mb-2 inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200 text-xs font-medium">
-                <Truck className="h-3 w-3" /> No bay fits your active vehicle
-              </div>
             )}
+          </div>
+          {incompatible && (
+            <div className="mb-2 inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 text-amber-800 border border-amber-300 text-xs font-medium">
+              <Truck className="h-3 w-3" /> No bay fits your active vehicle
+            </div>
+          )}
 
             {/* Star rating */}
             <div className="flex items-center gap-1.5 mb-2">
@@ -338,19 +348,27 @@ export default function CustomerSearch() {
             <div className="space-y-2">
               {loc.services?.slice(0, 2).map((svc) => (
                 <div key={svc.id} className="flex justify-between items-center text-sm">
-                  <span className="font-medium text-slate-700">{svc.name}</span>
-                  <span className="font-bold text-slate-900">{formatCurrency(svc.allInPriceMinor ?? svc.basePriceMinor)}</span>
+                  <span className={`font-medium ${incompatible ? "text-slate-400" : "text-slate-700"}`}>{svc.name}</span>
+                  <span className={`font-bold ${incompatible ? "text-slate-500" : "text-slate-900"}`}>{formatCurrency(svc.allInPriceMinor ?? svc.basePriceMinor)}</span>
                 </div>
               ))}
               {(loc.services?.length || 0) > 2 && (
-                <p className="text-xs text-primary font-semibold pt-1">+{(loc.services?.length || 0) - 2} more services</p>
+                <p className={`text-xs font-semibold pt-1 ${incompatible ? "text-slate-400" : "text-primary"}`}>+{(loc.services?.length || 0) - 2} more services</p>
               )}
             </div>
           </div>
         </Card>
-      </Link>
-    </motion.div>
-  );
+    );
+
+    return (
+      <motion.div key={loc.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.03 }}>
+        {incompatible ? (
+          <div className="block h-full">{cardInner}</div>
+        ) : (
+          <Link href={`/location/${loc.id}`} className="block h-full">{cardInner}</Link>
+        )}
+      </motion.div>
+    );
   };
 
   return (
@@ -358,6 +376,16 @@ export default function CustomerSearch() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <ActiveVehiclePill />
       </div>
+      {/* When at least one visible card is grayed out as incompatible,
+          surface a small helper that points the driver at the pill —
+          otherwise the gray-out is silent and the user wonders why
+          half the list looks dead. */}
+      {hasIncompatibleVisible && activeVehicle && (
+        <p className="text-sm text-slate-500">
+          Some locations don't fit <span className="font-semibold text-slate-700">{activeVehicle.nickname || activeVehicle.unitNumber}</span>.
+          Change your active vehicle above to see more options.
+        </p>
+      )}
       <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-slate-900 via-blue-900 to-cyan-900 text-white p-8 sm:p-12">
         <div
           className="absolute inset-0 opacity-30"
@@ -453,20 +481,6 @@ export default function CustomerSearch() {
               {filterTopRated ? <X className="h-3.5 w-3.5" /> : <Star className="h-3.5 w-3.5" />}
               Top Rated
             </button>
-            {activeVehicleClass && (
-              <button
-                onClick={() => setFilterCompatible(!filterCompatible)}
-                title="Show only locations with at least one bay that fits your active vehicle"
-                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium border transition-all ${
-                  filterCompatible
-                    ? "bg-blue-50 text-blue-700 border-blue-300 shadow-sm"
-                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
-                }`}
-              >
-                {filterCompatible ? <Truck className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
-                {filterCompatible ? "Fits my vehicle" : "Show all locations"}
-              </button>
-            )}
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
