@@ -158,6 +158,10 @@ router.get("/providers/:providerId/locations/:locationId/daily-board", requireAu
         vehicle: { select: { id: true, unitNumber: true, subtypeCode: true, bodyType: true, nickname: true, lengthInches: true, heightInches: true, licensePlate: true, fleet: { select: { name: true } } } },
         customer: { select: { id: true, firstName: true, lastName: true } },
         service: { select: { name: true } },
+        bookingServices: {
+          select: { id: true, nameSnapshot: true, priceMinor: true, durationMins: true, displayOrder: true },
+          orderBy: { displayOrder: "asc" },
+        },
         washBay: { select: { id: true, name: true } },
         assignedOperator: { select: { id: true, firstName: true, lastName: true } },
         // Inline notes + add-ons so the Daily Board expanded view can
@@ -223,6 +227,7 @@ router.get("/providers/:providerId/locations/:locationId/daily-board", requireAu
         fleetName: b.vehicle?.fleet?.name || null,
         assignedOperator: b.assignedOperator ? { id: b.assignedOperator.id, firstName: b.assignedOperator.firstName, lastName: b.assignedOperator.lastName } : null,
         washBay: b.washBay ? { id: b.washBay.id, name: b.washBay.name } : null,
+        bookingServices: b.bookingServices,
         clientTags,
         washNotes: b.washNotes,
         washNoteCount: b._count.washNotes,

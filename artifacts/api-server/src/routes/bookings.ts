@@ -23,27 +23,43 @@ const HOLD_TTL_MS = 10 * 60 * 1000;
 
 router.post("/bookings/hold", requireAuth, async (req, res) => {
   try {
-    const { locationId, serviceId, slotStartUtc, vehicleId } = req.body;
+    const { locationId, serviceId, serviceIds, slotStartUtc, vehicleId } = req.body;
 
-    if (!locationId || !serviceId || !slotStartUtc) {
+    // Multi-service contract: caller passes serviceIds (ordered array)
+    // OR a single serviceId (back-compat). The hold persists the full
+    // ordered list and uses the SUM of service durations to validate
+    // the slot. The single column tracks the first id so legacy code
+    // paths that still read .serviceId keep working.
+    const orderedServiceIds: string[] = Array.isArray(serviceIds) && serviceIds.length > 0
+      ? serviceIds.filter((s: unknown): s is string => typeof s === "string" && s.length > 0)
+      : (typeof serviceId === "string" ? [serviceId] : []);
+
+    if (!locationId || orderedServiceIds.length === 0 || !slotStartUtc) {
       res.status(400).json({
         errorCode: "VALIDATION_ERROR",
-        message: "locationId, serviceId, and slotStartUtc are required",
+        message: "locationId, serviceIds (or serviceId), and slotStartUtc are required",
       });
       return;
     }
 
     const user = req.user as SessionUser;
 
-    const service = await prisma.service.findFirst({
-      where: { id: serviceId, locationId, isVisible: true },
+    const services = await prisma.service.findMany({
+      where: { id: { in: orderedServiceIds }, locationId, isVisible: true },
       include: { location: { select: { providerId: true } } },
     });
 
-    if (!service) {
-      res.status(404).json({ errorCode: "NOT_FOUND", message: "Service not found at this location" });
+    if (services.length !== orderedServiceIds.length) {
+      res.status(404).json({ errorCode: "NOT_FOUND", message: "One or more services not found at this location" });
       return;
     }
+
+    // Order the result the same as the caller's array so the snapshot
+    // on the hold preserves the driver's selected order.
+    const servicesById = new Map(services.map((s) => [s.id, s]));
+    const orderedServices = orderedServiceIds.map((id) => servicesById.get(id)!);
+    // Backward-compat: single-service call sites still read `service`.
+    const service = orderedServices[0];
 
     // ─── Fleet Policy Enforcement (DRIVER role only) ───────────────
     if (isDriver(user)) {
@@ -121,9 +137,19 @@ router.post("/bookings/hold", requireAuth, async (req, res) => {
     });
 
     const slotStart = new Date(slotStartUtc);
-    const durationMins = vehicleClassHint
-      ? (await resolveServiceDuration(prisma, service.id, vehicleClassHint)) ?? service.durationMins
-      : service.durationMins;
+    // Total duration is the SUM of every selected service's duration,
+    // class-aware where the service has a per-class override. The
+    // smart-slot search needs a contiguous block this large.
+    const perServiceDurations = await Promise.all(
+      orderedServices.map(async (s) => {
+        if (vehicleClassHint) {
+          const d = await resolveServiceDuration(prisma, s.id, vehicleClassHint);
+          return d ?? s.durationMins;
+        }
+        return s.durationMins;
+      })
+    );
+    const durationMins = perServiceDurations.reduce((a, b) => a + b, 0);
     const slotEnd = new Date(slotStart.getTime() + durationMins * 60 * 1000);
     const now = new Date();
 
@@ -160,7 +186,11 @@ router.post("/bookings/hold", requireAuth, async (req, res) => {
       return tx.bookingHold.create({
         data: {
           locationId,
-          serviceId,
+          // Single serviceId column tracks the first service for the
+          // FK to satisfy. The full ordered list is the canonical
+          // source for the booking-creation step.
+          serviceId: orderedServiceIds[0],
+          serviceIds: orderedServiceIds,
           slotStartAtUtc: slotStart,
           slotEndAtUtc: slotEnd,
           expiresAtUtc: expiresAt,
@@ -254,11 +284,22 @@ router.post("/bookings", requireAuth, async (req, res) => {
       });
       if (!hold) throw new Error("HOLD_NOT_AVAILABLE");
 
-      const service = await tx.service.findUnique({
-        where: { id: hold.serviceId },
+      // Multi-service: read the ordered list off the hold. Older
+      // single-service holds (rows that predate this column) fall
+      // back to the singular serviceId.
+      const orderedHoldServiceIds: string[] = (hold.serviceIds && hold.serviceIds.length > 0)
+        ? hold.serviceIds
+        : [hold.serviceId];
+
+      const heldServices = await tx.service.findMany({
+        where: { id: { in: orderedHoldServiceIds } },
         include: { location: true },
       });
-      if (!service) throw new Error("SERVICE_NOT_FOUND");
+      if (heldServices.length !== orderedHoldServiceIds.length) throw new Error("SERVICE_NOT_FOUND");
+
+      const heldById = new Map(heldServices.map((s: any) => [s.id, s]));
+      const orderedServices = orderedHoldServiceIds.map((id) => heldById.get(id)!);
+      const primary = orderedServices[0];
 
       const vClass = await resolveBookingVehicleClass(tx, {
         vehicleId: vehicleId || null,
@@ -266,7 +307,15 @@ router.post("/bookings", requireAuth, async (req, res) => {
       });
       if (!vClass) throw new Error("VEHICLE_CLASS_UNRESOLVED");
 
-      const duration = (await resolveServiceDuration(tx, service.id, vClass)) ?? service.durationMins;
+      // Per-service duration (class-aware); the booking covers the
+      // sum across all selected services.
+      const perServiceDurations = await Promise.all(
+        orderedServices.map(async (s: any) => {
+          const d = await resolveServiceDuration(tx, s.id, vClass);
+          return d ?? s.durationMins;
+        })
+      );
+      const duration = perServiceDurations.reduce((a, b) => a + b, 0);
       const startUtc = hold.slotStartAtUtc;
       const endUtc = new Date(startUtc.getTime() + duration * 60 * 1000);
 
@@ -278,45 +327,70 @@ router.post("/bookings", requireAuth, async (req, res) => {
       });
       if (!bay) throw new Error("SLOT_JUST_TAKEN");
 
-      const calculatedFee = calculatePlatformFee(service.basePriceMinor);
-      const totalPrice = service.basePriceMinor + calculatedFee;
+      const combinedBasePrice = orderedServices.reduce((sum: number, s: any) => sum + s.basePriceMinor, 0);
+      const calculatedFee = calculatePlatformFee(combinedBasePrice);
+      const totalPrice = combinedBasePrice + calculatedFee;
+      const combinedNameSnapshot = orderedServices.map((s: any) => s.name).join(", ");
 
-      // PRD 3.3: 5 min SLA for bookings within 24h, 10 min for 24h+ out
+      // PRD 3.3: 5 min SLA for bookings within 24h, 10 min for 24h+ out.
+      // Use the primary service's location SLA settings — all
+      // services in a multi-select share the same location.
       const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
       const responseSla = startUtc.getTime() - now.getTime() < TWENTY_FOUR_HOURS_MS
-        ? service.location.responseSlaUnder1hMins
-        : service.location.responseSlaFutureMins;
+        ? primary.location.responseSlaUnder1hMins
+        : primary.location.responseSlaFutureMins;
       const responseDeadline = new Date(now.getTime() + responseSla * 60 * 1000);
+
+      // Any service in the bundle requiring confirmation flips the
+      // whole booking to REQUESTED — the strictest gate wins.
+      const anyRequiresConfirmation = orderedServices.some((s: any) => s.requiresConfirmation);
 
       const b = await tx.booking.create({
         data: {
           locationId: hold.locationId,
-          serviceId: hold.serviceId,
+          serviceId: primary.id,
           customerId: user.id,
           vehicleId: vehicleId || null,
           fleetPlaceholderClass: fleetPlaceholderClass || null,
-          status: service.requiresConfirmation ? "REQUESTED" : "PROVIDER_CONFIRMED",
+          status: anyRequiresConfirmation ? "REQUESTED" : "PROVIDER_CONFIRMED",
           idempotencyKey,
-          serviceNameSnapshot: service.name,
-          serviceBasePriceMinor: service.basePriceMinor,
+          serviceNameSnapshot: combinedNameSnapshot,
+          serviceBasePriceMinor: combinedBasePrice,
           platformFeeMinor: calculatedFee,
           totalPriceMinor: totalPrice,
-          currencyCode: service.currencyCode,
-          locationTimezone: service.location.timezone,
+          currencyCode: primary.currencyCode,
+          locationTimezone: primary.location.timezone,
           scheduledStartAtUtc: startUtc,
           scheduledEndAtUtc: endUtc,
-          providerResponseDeadlineUtc: service.requiresConfirmation ? responseDeadline : null,
+          providerResponseDeadlineUtc: anyRequiresConfirmation ? responseDeadline : null,
           bookingHoldExpiresUtc: hold.expiresAtUtc,
           washBayId: bay.id,
           bookingSource: "PLATFORM",
         },
       });
 
+      // Persist the join rows. Snapshots freeze name/price/duration
+      // here so a future Service rename / re-price never alters the
+      // historical record.
+      for (let i = 0; i < orderedServices.length; i++) {
+        const s = orderedServices[i] as any;
+        await tx.bookingService.create({
+          data: {
+            bookingId: b.id,
+            serviceId: s.id,
+            nameSnapshot: s.name,
+            priceMinor: s.basePriceMinor,
+            durationMins: perServiceDurations[i],
+            displayOrder: i,
+          },
+        });
+      }
+
       await tx.bookingStatusHistory.create({
         data: {
           bookingId: b.id,
           fromStatus: null,
-          toStatus: service.requiresConfirmation ? "REQUESTED" : "PROVIDER_CONFIRMED",
+          toStatus: anyRequiresConfirmation ? "REQUESTED" : "PROVIDER_CONFIRMED",
           changedBy: user.id,
           reason: `Booking created; assigned to ${bay.name}`,
         },
@@ -327,7 +401,7 @@ router.post("/bookings", requireAuth, async (req, res) => {
         data: { bookingId: b.id },
       });
 
-      return { booking: b, service, vClass, duration, startUtc };
+      return { booking: b, service: primary, vClass, duration, startUtc };
     }, { isolationLevel: "Serializable" });
 
     let result;
@@ -483,6 +557,10 @@ router.get("/bookings/:bookingId", requireAuth, async (req, res) => {
       include: {
         location: { select: { id: true, name: true, timezone: true, providerId: true, provider: { select: { id: true, name: true } } } },
         service: { select: { id: true, name: true, durationMins: true } },
+        bookingServices: {
+          select: { id: true, serviceId: true, nameSnapshot: true, priceMinor: true, durationMins: true, displayOrder: true },
+          orderBy: { displayOrder: "asc" },
+        },
         customer: { select: { id: true, email: true, firstName: true, lastName: true } },
         vehicle: true,
         // Bay was missing from this projection — the detail page was

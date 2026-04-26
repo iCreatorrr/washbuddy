@@ -13,12 +13,28 @@ const router: IRouter = Router();
 
 router.get("/locations/:locationId/availability", async (req, res) => {
   try {
-    const { date, serviceId, vehicleClass: vehicleClassRaw } = req.query;
+    const { date, serviceId, serviceIds: serviceIdsRaw, vehicleClass: vehicleClassRaw } = req.query;
 
-    if (!date || !serviceId) {
+    // Multi-service availability: caller passes serviceIds=A,B,C OR
+    // a single serviceId. The slot grid reflects the total duration
+    // across all selected services (the smart-slot guarantee — every
+    // displayed slot has a contiguous block large enough to host the
+    // full bundle on a single bay).
+    const orderedServiceIds: string[] = (() => {
+      if (typeof serviceIdsRaw === "string" && serviceIdsRaw.length > 0) {
+        return serviceIdsRaw.split(",").map((s) => s.trim()).filter(Boolean);
+      }
+      if (Array.isArray(serviceIdsRaw)) {
+        return (serviceIdsRaw as unknown[]).filter((s): s is string => typeof s === "string" && s.length > 0);
+      }
+      if (typeof serviceId === "string" && serviceId.length > 0) return [serviceId];
+      return [];
+    })();
+
+    if (!date || orderedServiceIds.length === 0) {
       res.status(400).json({
         errorCode: "VALIDATION_ERROR",
-        message: "date (YYYY-MM-DD) and serviceId are required",
+        message: "date (YYYY-MM-DD) and serviceIds (or serviceId) are required",
       });
       return;
     }
@@ -35,14 +51,22 @@ router.get("/locations/:locationId/availability", async (req, res) => {
       return;
     }
 
-    const service = await prisma.service.findFirst({
-      where: { id: serviceId as string, locationId: location.id, isVisible: true },
+    const services = await prisma.service.findMany({
+      where: { id: { in: orderedServiceIds }, locationId: location.id, isVisible: true },
     });
 
-    if (!service) {
-      res.status(404).json({ errorCode: "NOT_FOUND", message: "Service not found at this location" });
+    if (services.length !== orderedServiceIds.length) {
+      res.status(404).json({ errorCode: "NOT_FOUND", message: "One or more services not found at this location" });
       return;
     }
+
+    // Preserve caller's service order so the snapshot ordering on
+    // the resulting hold matches the driver's pick order.
+    const servicesById = new Map(services.map((s) => [s.id, s]));
+    const orderedServices = orderedServiceIds.map((id) => servicesById.get(id)!);
+    // Single-service callers still expect `service` (back-compat with
+    // the prior contract); set it to the first ordered service.
+    const service = orderedServices[0];
 
     const dateStr = date as string;
     const tz = location.timezone;
@@ -60,15 +84,23 @@ router.get("/locations/:locationId/availability", async (req, res) => {
       return;
     }
 
-    // Service duration is class-aware when the caller specifies a vehicle
-    // class; otherwise we use the base duration. The driver's availability
-    // view typically hits this before the vehicle is picked, in which case
-    // the base duration is the most conservative estimate.
+    // Total slot duration is the SUM of every selected service's
+    // duration, class-aware when the caller specifies a vehicle. Each
+    // displayed slot has a contiguous block this large on a single
+    // compatible bay — the smart-slot guarantee for multi-service
+    // bundles. The buffer (currently 0) is layered on top so future
+    // tuning never eats into the operational gap between bookings.
     const effectiveClass: VehicleClass = vehicleClass || "MEDIUM";
-    const resolvedDuration = vehicleClass
-      ? await resolveServiceDuration(prisma, service.id, effectiveClass)
-      : service.durationMins;
-    const slotDuration = resolvedDuration ?? service.durationMins;
+    const perServiceDurations = await Promise.all(
+      orderedServices.map(async (s) => {
+        if (vehicleClass) {
+          const d = await resolveServiceDuration(prisma, s.id, effectiveClass);
+          return d ?? s.durationMins;
+        }
+        return s.durationMins;
+      })
+    );
+    const slotDuration = perServiceDurations.reduce((a, b) => a + b, 0);
 
     const slots: Array<{
       startTime: string;
