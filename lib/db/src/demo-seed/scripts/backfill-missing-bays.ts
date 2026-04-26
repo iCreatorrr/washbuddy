@@ -8,17 +8,52 @@
  * Idempotent: locations that already have at least one active bay
  * are skipped. Re-runnable safely.
  *
+ * The bay shape mirrors the seed's facility-tier distribution
+ * (30% MEDIUM, 40% LARGE, 30% EXTRA_LARGE) deterministically by
+ * location id, so a freshly backfilled location is indistinguishable
+ * from a fresh seed of the same id.
+ *
  * Run: pnpm --filter @workspace/db demo:backfill-missing-bays
  */
 
 import { prisma } from "../../index";
 
-const DEFAULT_BAY_CLASSES: string[][] = [
-  ["SMALL", "MEDIUM"],
-  ["SMALL", "MEDIUM", "LARGE"],
-  ["MEDIUM", "LARGE", "EXTRA_LARGE"],
-  ["SMALL", "MEDIUM", "LARGE", "EXTRA_LARGE"],
-];
+type Tier = "MEDIUM" | "LARGE" | "EXTRA_LARGE";
+
+function hashUuid(id: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return h;
+}
+
+function tierForLocation(id: string): Tier {
+  const bucket = hashUuid(id) % 100;
+  if (bucket < 30) return "MEDIUM";
+  if (bucket < 70) return "LARGE";
+  return "EXTRA_LARGE";
+}
+
+function bayCountForTier(id: string, tier: Tier): number {
+  const n = hashUuid(id + ":bays") % 3;
+  if (tier === "EXTRA_LARGE") return 2 + n;
+  return 2 + (n % 2);
+}
+
+function shapeFor(tier: Tier, index: number, total: number): { supportedClasses: string[]; maxLengthIn: number; maxHeightIn: number } {
+  const isLast = index === total - 1;
+  if (tier === "MEDIUM") return { supportedClasses: ["SMALL", "MEDIUM"], maxLengthIn: 360, maxHeightIn: 132 };
+  if (tier === "LARGE") {
+    return isLast
+      ? { supportedClasses: ["SMALL", "MEDIUM", "LARGE"], maxLengthIn: 540, maxHeightIn: 156 }
+      : { supportedClasses: ["SMALL", "MEDIUM"], maxLengthIn: 360, maxHeightIn: 132 };
+  }
+  if (isLast) return { supportedClasses: ["SMALL", "MEDIUM", "LARGE", "EXTRA_LARGE"], maxLengthIn: 720, maxHeightIn: 168 };
+  if (index === total - 2) return { supportedClasses: ["SMALL", "MEDIUM", "LARGE"], maxLengthIn: 540, maxHeightIn: 156 };
+  return { supportedClasses: ["SMALL", "MEDIUM"], maxLengthIn: 360, maxHeightIn: 132 };
+}
 
 async function main() {
   const candidates = await prisma.location.findMany({
@@ -29,7 +64,6 @@ async function main() {
     select: {
       id: true,
       name: true,
-      services: { select: { capacityPerSlot: true } },
       _count: { select: { washBays: { where: { isActive: true } } } },
     },
   });
@@ -38,6 +72,7 @@ async function main() {
   let bayed = 0;
   let baysCreated = 0;
   let alreadyHadBays = 0;
+  const tierCounts = { MEDIUM: 0, LARGE: 0, EXTRA_LARGE: 0 };
 
   for (const loc of candidates) {
     inspected += 1;
@@ -46,23 +81,19 @@ async function main() {
       continue;
     }
 
-    // Match the seed's per-location bay logic: 3-4 bays, classes
-    // ramping from SMALL/MEDIUM up to a wide-coverage Bay 4. This
-    // mirrors lib/db/prisma/seed.ts so a backfilled location is
-    // indistinguishable from a freshly-seeded one.
-    const maxCap = loc.services.length > 0
-      ? Math.max(...loc.services.map((s) => s.capacityPerSlot), 3)
-      : 3;
-    const numBays = Math.min(Math.max(maxCap, 3), 4);
+    const tier = tierForLocation(loc.id);
+    const numBays = bayCountForTier(loc.id, tier);
+    tierCounts[tier] += 1;
 
     for (let b = 0; b < numBays; b++) {
+      const shape = shapeFor(tier, b, numBays);
       await prisma.washBay.create({
         data: {
           locationId: loc.id,
           name: `Bay ${b + 1}`,
-          maxVehicleLengthIn: b < 2 ? 480 : 720,
-          maxVehicleHeightIn: b < 2 ? 144 : 168,
-          supportedClasses: DEFAULT_BAY_CLASSES[Math.min(b, DEFAULT_BAY_CLASSES.length - 1)],
+          maxVehicleLengthIn: shape.maxLengthIn,
+          maxVehicleHeightIn: shape.maxHeightIn,
+          supportedClasses: shape.supportedClasses,
           isActive: true,
           displayOrder: b,
         },
@@ -77,6 +108,9 @@ async function main() {
   console.log(`  already had bays: ${alreadyHadBays}`);
   console.log(`  newly bayed:      ${bayed}`);
   console.log(`  bays created:     ${baysCreated}`);
+  if (bayed > 0) {
+    console.log(`  tier mix (newly): MEDIUM ${tierCounts.MEDIUM} · LARGE ${tierCounts.LARGE} · EXTRA_LARGE ${tierCounts.EXTRA_LARGE}`);
+  }
 }
 
 main()

@@ -962,23 +962,70 @@ async function main() {
     include: { services: { select: { id: true, capacityPerSlot: true } } },
   });
 
-  // Wash Bays — 1-4 per location based on capacity
-  // Ensure every location gets at least 3 bays (even if no services are configured yet)
+  // Wash Bays — realistic facility-tier distribution. Real commercial
+  // bus-wash networks vary: some yards top out at MEDIUM, most at
+  // LARGE, only a minority handle 45ft+ EXTRA_LARGE coaches. Earlier
+  // we created near-uniform 3-bay locations where every location got
+  // an EXTRA_LARGE-capable bay, so the driver-side compat check
+  // showed every location as compatible regardless of vehicle. Tier
+  // assignment is deterministic on the location id (FNV-1a over the
+  // uuid) so the mix is stable across re-seeds.
+  //
+  // 30% MEDIUM tier  — all bays cap at MEDIUM
+  // 40% LARGE tier   — at least one bay caps at LARGE
+  // 30% EXTRA_LARGE  — at least one bay caps at EXTRA_LARGE
+  //
+  // Bay supportedClasses are contiguous from SMALL up to the cap —
+  // a LARGE bay is {SMALL, MEDIUM, LARGE}, never partial. Bigger bays
+  // physically accept smaller vehicles too.
+  const seedBayHash = (id: string): number => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < id.length; i++) {
+      h ^= id.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return h;
+  };
+  type FacilityTier = "MEDIUM" | "LARGE" | "EXTRA_LARGE";
+  const seedTierFor = (id: string): FacilityTier => {
+    const bucket = seedBayHash(id) % 100;
+    if (bucket < 30) return "MEDIUM";
+    if (bucket < 70) return "LARGE";
+    return "EXTRA_LARGE";
+  };
+  const seedBayCount = (id: string, tier: FacilityTier): number => {
+    const n = seedBayHash(id + ":bays") % 3;
+    if (tier === "EXTRA_LARGE") return 2 + n; // 2-4
+    return 2 + (n % 2); // 2-3 for MEDIUM/LARGE
+  };
+  const seedBayShape = (tier: FacilityTier, index: number, total: number): { supportedClasses: string[]; maxLengthIn: number; maxHeightIn: number } => {
+    const isLast = index === total - 1;
+    if (tier === "MEDIUM") return { supportedClasses: ["SMALL", "MEDIUM"], maxLengthIn: 360, maxHeightIn: 132 };
+    if (tier === "LARGE") {
+      return isLast
+        ? { supportedClasses: ["SMALL", "MEDIUM", "LARGE"], maxLengthIn: 540, maxHeightIn: 156 }
+        : { supportedClasses: ["SMALL", "MEDIUM"], maxLengthIn: 360, maxHeightIn: 132 };
+    }
+    if (isLast) return { supportedClasses: ["SMALL", "MEDIUM", "LARGE", "EXTRA_LARGE"], maxLengthIn: 720, maxHeightIn: 168 };
+    if (index === total - 2) return { supportedClasses: ["SMALL", "MEDIUM", "LARGE"], maxLengthIn: 540, maxHeightIn: 156 };
+    return { supportedClasses: ["SMALL", "MEDIUM"], maxLengthIn: 360, maxHeightIn: 132 };
+  };
+
   let bayCount = 0;
+  const tierCounts = { MEDIUM: 0, LARGE: 0, EXTRA_LARGE: 0 };
   for (const loc of allApprovedLocations) {
-    const maxCap = loc.services.length > 0
-      ? Math.max(...loc.services.map((s) => s.capacityPerSlot), 3)
-      : 3;
-    const numBays = Math.min(Math.max(maxCap, 3), 4);
-    const classes = [["SMALL", "MEDIUM"], ["SMALL", "MEDIUM", "LARGE"], ["MEDIUM", "LARGE", "EXTRA_LARGE"], ["SMALL", "MEDIUM", "LARGE", "EXTRA_LARGE"]];
+    const tier = seedTierFor(loc.id);
+    const numBays = seedBayCount(loc.id, tier);
+    tierCounts[tier] += 1;
     for (let b = 0; b < numBays; b++) {
+      const shape = seedBayShape(tier, b, numBays);
       await prisma.washBay.create({
         data: {
           locationId: loc.id,
           name: `Bay ${b + 1}`,
-          maxVehicleLengthIn: b < 2 ? 480 : 720,
-          maxVehicleHeightIn: b < 2 ? 144 : 168,
-          supportedClasses: classes[Math.min(b, classes.length - 1)],
+          maxVehicleLengthIn: shape.maxLengthIn,
+          maxVehicleHeightIn: shape.maxHeightIn,
+          supportedClasses: shape.supportedClasses,
           isActive: true,
           displayOrder: b,
         },
@@ -986,7 +1033,8 @@ async function main() {
       bayCount++;
     }
   }
-  console.log(`  ✓ ${bayCount} wash bays created.`);
+  console.log(`  ✓ ${bayCount} wash bays created across ${allApprovedLocations.length} locations.`);
+  console.log(`    MEDIUM tier: ${tierCounts.MEDIUM} · LARGE tier: ${tierCounts.LARGE} · EXTRA_LARGE tier: ${tierCounts.EXTRA_LARGE}`);
 
   // Client Profiles — 15 profiles across 5 providers
   const profileProviders = allApprovedLocations.slice(0, 5);
