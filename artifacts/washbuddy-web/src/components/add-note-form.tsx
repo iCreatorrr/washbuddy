@@ -37,7 +37,7 @@ export function AddNoteForm({ bookingId, onSubmitted, viewerRole = "DRIVER" }: P
     ? "Internal note for your team (e.g. left-side panel needs touch-up wax)"
     : "Anything the provider should know? (e.g. running 5 min late)";
   const helpText = isProvider
-    ? "Visible to your team and the driver. Notes can't be edited once another role has been involved."
+    ? "Internal note — visible to your team only. The driver does not see provider notes."
     : "Notes are visible to the provider and can't be edited once added.";
 
   const submit = async () => {

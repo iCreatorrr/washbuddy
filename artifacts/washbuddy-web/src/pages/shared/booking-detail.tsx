@@ -689,9 +689,15 @@ function NoteSections({
 }
 
 /** Customer view notes block — same role-based grouping in the
- * compact icon-rail layout that customer body uses. */
+ * compact icon-rail layout that customer body uses. Provider-authored
+ * notes are filtered out client-side as defense-in-depth (the API
+ * already filters them for non-provider viewers); a stale or
+ * misconfigured response can never leak an internal provider note
+ * into the driver's view. */
 function CustomerNotesBlock({ notes }: { notes: any[] }) {
-  const groups = groupNotesByAuthorRole(notes);
+  const visibleNotes = notes.filter((n) => n?.authorRole !== "PROVIDER");
+  if (visibleNotes.length === 0) return null;
+  const groups = groupNotesByAuthorRole(visibleNotes);
   return (
     <>
       {groups.map(({ role, notes: groupNotes }) => (

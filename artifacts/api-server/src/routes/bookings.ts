@@ -526,7 +526,18 @@ router.get("/bookings/:bookingId", requireAuth, async (req, res) => {
       return;
     }
 
-    res.json({ booking });
+    // Provider-authored notes are internal to the provider org —
+    // drivers (customers) never see them. The driver still sees their
+    // own DRIVER notes and any FLEET notes from their fleet admin.
+    // Existing rows stay in the database; the API just filters them
+    // out for non-provider viewers.
+    let washNotes = (booking as any).washNotes ?? [];
+    if (!isProvider && !isAdmin) {
+      washNotes = washNotes.filter((n: any) => n.authorRole !== "PROVIDER");
+    }
+    const sanitized = { ...booking, washNotes };
+
+    res.json({ booking: sanitized });
   } catch (err) {
     req.log.error({ err }, "Failed to get booking");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to get booking" });
