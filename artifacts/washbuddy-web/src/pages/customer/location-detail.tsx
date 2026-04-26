@@ -402,6 +402,36 @@ export default function LocationDetail() {
               state below instead of Steps 1-3. */}
           <ActiveVehicleContextCard />
 
+          {/* If the active vehicle's class can't fit any active bay at
+              this location, every slot will be empty — say so up front
+              instead of letting the user trip across "no slots" further
+              down. The pill above is the way out (swap vehicle); we link
+              to /search as a fallback for browsing other locations. */}
+          {(() => {
+            if (!activeVehicle) return null;
+            const cls = deriveSizeClassFromLengthInches(activeVehicle.lengthInches);
+            const bays: any[] = (locData as any)?.washBays || [];
+            const fits = !cls || bays.length === 0
+              ? true
+              : bays.some((b) => (b.supportedClasses || []).includes(cls));
+            if (fits) return null;
+            return (
+              <Card className="p-4 bg-amber-50 border-amber-200">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="flex-1 text-sm text-amber-900">
+                    <p className="font-bold">Your active vehicle won't fit at this location.</p>
+                    <p className="text-amber-800/80 mt-0.5">
+                      No bay here supports {cls && SIZE_CLASS_LABEL[cls] ? SIZE_CLASS_LABEL[cls] : "this"} vehicles.
+                      Switch vehicles via the pill above, or
+                      <button onClick={() => setNav("/search")} className="ml-1 font-semibold underline hover:no-underline">browse other locations</button>.
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            );
+          })()}
+
           {!vehicleLoading && !hasAnyVehicle ? (
             <Card className="p-8 text-center bg-amber-50 border-amber-200">
               <div className="h-14 w-14 mx-auto bg-amber-100 rounded-2xl flex items-center justify-center mb-3">

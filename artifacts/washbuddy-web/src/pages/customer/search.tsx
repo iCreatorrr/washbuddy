@@ -119,13 +119,15 @@ type LocationWithMeta = {
 };
 
 /** True if at least one active bay at the location supports the given
- * vehicle class. Used to dim or hide locations that physically can't
- * host the driver's active bus. */
+ * vehicle class. A location with zero active bays can't host anything,
+ * so when the response is *known* to lack bays (washBays === []) we
+ * treat it as incompatible. Only when `washBays` is missing entirely
+ * (older API response shape) do we fall back to permissive. */
 function locationFitsClass(loc: LocationWithMeta, vehicleClass: string | null): boolean {
   if (!vehicleClass) return true;
-  const bays = loc.washBays || [];
-  if (bays.length === 0) return true; // Unknown — be permissive, don't hide it
-  return bays.some((b) => (b.supportedClasses || []).includes(vehicleClass));
+  if (!Array.isArray(loc.washBays)) return true; // unknown — old response shape
+  if (loc.washBays.length === 0) return false; // explicitly no bays → can't host
+  return loc.washBays.some((b) => (b.supportedClasses || []).includes(vehicleClass));
 }
 
 export default function CustomerSearch() {

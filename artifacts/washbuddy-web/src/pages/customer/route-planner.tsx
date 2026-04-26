@@ -473,16 +473,17 @@ export default function RoutePlanner() {
   const { data, isLoading } = useSearchLocations({}, { request: { credentials: "include" } });
   const { activeVehicle } = useActiveVehicle();
   const activeVehicleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
-  // Filter out locations that physically can't host the active vehicle:
-  // those with at least one bay configured but no bay supporting the
-  // class. Locations without bay data fall through (we err permissive).
+  // Filter out locations that physically can't host the active vehicle.
+  // Treat an explicit empty washBays array as "no compatible bays" (the
+  // location really has nothing to host); only the missing-key case falls
+  // through to permissive (older API responses).
   const allLocations = useMemo(() => {
     const raw = (data?.locations || []) as any[];
     if (!activeVehicleClass) return raw;
     return raw.filter((loc: any) => {
-      const bays = loc.washBays || [];
-      if (bays.length === 0) return true;
-      return bays.some((b: any) => (b.supportedClasses || []).includes(activeVehicleClass));
+      if (!Array.isArray(loc.washBays)) return true;
+      if (loc.washBays.length === 0) return false;
+      return loc.washBays.some((b: any) => (b.supportedClasses || []).includes(activeVehicleClass));
     });
   }, [data, activeVehicleClass]);
 
