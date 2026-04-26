@@ -20,6 +20,19 @@ function normalizeBodyType(raw: unknown): BodyType {
   return (VALID_BODY_TYPES as readonly string[]).includes(upper) ? (upper as BodyType) : "OTHER";
 }
 
+/** Map driver-side bodyType → ServiceCompatibility subtypeCode so a Coach
+ * the driver added picks up the COACH rule (maxLen 540) instead of falling
+ * back to the STANDARD rule (maxLen 480) and being told it doesn't fit. */
+function defaultSubtypeFromBodyType(bodyType: BodyType): string {
+  switch (bodyType) {
+    case "COACH": return "COACH";
+    case "SHUTTLE": return "SHUTTLE";
+    case "SCHOOL_BUS": return "SCHOOL_BUS";
+    case "TRANSIT_BUS": return "STANDARD";
+    case "OTHER": return "STANDARD";
+  }
+}
+
 /** Compute the set of vehicle IDs a user is eligible to set as their
  * default: personally-owned (ownerUserId === user.id) ∪ vehicles they
  * have a currently-active FleetDriverAssignment for. */
@@ -147,13 +160,14 @@ router.post("/vehicles", requireAuth, async (req, res) => {
 
     const trimmedNickname = typeof nickname === "string" ? nickname.trim().slice(0, 40) : null;
 
+    const normalizedBodyType = normalizeBodyType(bodyType);
     const vehicle = await prisma.vehicle.create({
       data: {
         fleetId: fleetId || null,
         ownerUserId: fleetId ? null : user.id,
         categoryCode: categoryCode || "BUS",
-        subtypeCode: subtypeCode || "STANDARD",
-        bodyType: normalizeBodyType(bodyType),
+        subtypeCode: subtypeCode || defaultSubtypeFromBodyType(normalizedBodyType),
+        bodyType: normalizedBodyType,
         nickname: trimmedNickname || null,
         lengthInches,
         heightInches: typeof heightInches === "number" ? heightInches : 132,

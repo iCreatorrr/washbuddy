@@ -223,16 +223,19 @@ export default function LocationDetail() {
     return () => clearInterval(interval);
   }, [holdExpiresAt]);
 
-  // Service-vs-vehicle compatibility check using whatever rules a service
-  // exposes. We fall back to permissive when no rules are defined; the
-  // ultimate gate is bay availability (driven by size class in feet/inches),
-  // which the API filters via the vehicleClass query param.
+  // Service-vs-vehicle compatibility. The compatibility rules are seeded
+  // per (categoryCode, subtypeCode) — but driver-added personal vehicles
+  // default to subtypeCode="STANDARD" regardless of bodyType, so a strict
+  // subtype match would falsely reject a 44ft Coach that the driver added
+  // through the simplified driver form. Treat subtype as advisory: a
+  // vehicle is compatible if ANY rule for the same category has size
+  // headroom for it. Bay-class matching (handled by the availability API)
+  // is the real gate.
   const isVehicleCompatible = (vehicle: any, service: any): boolean => {
     const rules = (service as any).compatibilityRules;
     if (!rules || rules.length === 0) return true;
     return rules.some((rule: any) => {
       if (rule.categoryCode !== vehicle.categoryCode) return false;
-      if (rule.subtypeCode && rule.subtypeCode !== vehicle.subtypeCode) return false;
       if (rule.maxLengthInches && vehicle.lengthInches > rule.maxLengthInches) return false;
       if (rule.maxHeightInches && vehicle.heightInches > rule.maxHeightInches) return false;
       return true;
