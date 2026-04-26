@@ -7,6 +7,7 @@ import { PhotoPrompt } from "./photo-prompt";
 import { BODY_TYPE_ICON, BODY_TYPE_STYLE, deriveSizeClassFromLengthInches, normalizeBodyType, type BodyType } from "@/lib/vehicleBodyType";
 import { groupNotesByAuthorRole, noteSectionLabel, noteMetaLine } from "@/lib/noteLabels";
 import { resolveBookingDisplayName } from "@/lib/bookingDisplay";
+import { NoteActionsMenu } from "@/components/note-actions-menu";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -189,10 +190,18 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
                     </div>
                     {notes.map((n: any) => {
                       const meta = noteMetaLine(n, (d) => formatDate(typeof d === "string" ? d : d.toISOString(), "MMM d"));
+                      // Daily Board is scoped to the operator's own
+                      // location; every viewer is same-org for the
+                      // bookings surfaced here, so PROVIDER notes get
+                      // the kebab unconditionally.
+                      const editable = role === "PROVIDER";
                       return (
-                        <div key={n.id}>
-                          <p className={`text-sm whitespace-pre-wrap ${textClr}`}>{n.content}</p>
-                          {meta && <p className="text-[10px] text-slate-500 mt-0.5">{meta}</p>}
+                        <div key={n.id} className="flex items-start gap-1">
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm whitespace-pre-wrap ${textClr}`}>{n.content}</p>
+                            {meta && <p className="text-[10px] text-slate-500 mt-0.5">{meta}</p>}
+                          </div>
+                          {editable && <NoteActionsMenu note={n} onChanged={onStatusChange} />}
                         </div>
                       );
                     })}

@@ -602,6 +602,80 @@ router.post("/bookings/:bookingId/notes", requireAuth, async (req, res) => {
   }
 });
 
+// Provider-only edit/delete for provider-authored notes. Driver- and
+// fleet-authored notes stay strictly append-only — protecting the
+// provider from mid-flight rewrites by the driver. The viewer must be
+// in the same provider org as the note's booking location.
+async function authorizeProviderNoteMutation(
+  user: SessionUser,
+  noteId: string,
+): Promise<{ ok: true; note: { id: string; bookingId: string | null } } | { ok: false; status: number; error: { errorCode: string; message: string } }> {
+  const note = await prisma.washNote.findUnique({
+    where: { id: noteId },
+    select: {
+      id: true, bookingId: true, authorRole: true,
+      location: { select: { providerId: true } },
+    },
+  });
+  if (!note) return { ok: false, status: 404, error: { errorCode: "NOT_FOUND", message: "Note not found" } };
+  if (note.authorRole !== "PROVIDER") {
+    // Append-only for everyone else.
+    return { ok: false, status: 403, error: { errorCode: "FORBIDDEN", message: "This note is append-only and cannot be edited or deleted." } };
+  }
+  const isAdmin = isPlatformAdmin(user);
+  const isProvider = isProviderRole(user, note.location.providerId);
+  if (!isAdmin && !isProvider) {
+    return { ok: false, status: 403, error: { errorCode: "FORBIDDEN", message: "Access denied" } };
+  }
+  return { ok: true, note: { id: note.id, bookingId: note.bookingId } };
+}
+
+router.patch("/notes/:noteId", requireAuth, async (req, res) => {
+  try {
+    const user = req.user as SessionUser;
+    const { content } = req.body as { content?: unknown };
+    if (typeof content !== "string" || content.trim().length === 0) {
+      res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "content is required" });
+      return;
+    }
+    if (content.length > 2000) {
+      res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "content must be 2000 characters or fewer" });
+      return;
+    }
+
+    const auth = await authorizeProviderNoteMutation(user, req.params.noteId);
+    if (!auth.ok) { res.status(auth.status).json(auth.error); return; }
+
+    const note = await prisma.washNote.update({
+      where: { id: auth.note.id },
+      data: { content: content.trim() },
+      select: {
+        id: true, content: true, noteType: true, authorRole: true, createdAt: true,
+        author: { select: { firstName: true, lastName: true } },
+      },
+    });
+
+    res.json({ note });
+  } catch (err) {
+    req.log.error({ err }, "Failed to update note");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to update note" });
+  }
+});
+
+router.delete("/notes/:noteId", requireAuth, async (req, res) => {
+  try {
+    const user = req.user as SessionUser;
+    const auth = await authorizeProviderNoteMutation(user, req.params.noteId);
+    if (!auth.ok) { res.status(auth.status).json(auth.error); return; }
+
+    await prisma.washNote.delete({ where: { id: auth.note.id } });
+    res.json({ ok: true });
+  } catch (err) {
+    req.log.error({ err }, "Failed to delete note");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to delete note" });
+  }
+});
+
 async function transitionBooking(
   bookingId: string,
   expectedStatus: string[],

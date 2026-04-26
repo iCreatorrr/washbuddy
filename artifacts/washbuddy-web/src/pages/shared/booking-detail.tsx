@@ -12,6 +12,7 @@ import { toast, Toaster } from "sonner";
 import { BODY_TYPE_ICON, BODY_TYPE_LABEL, BODY_TYPE_STYLE, normalizeBodyType, vehicleDisplayName } from "@/lib/vehicleBodyType";
 import { groupNotesByAuthorRole, noteSectionLabel, noteMetaLine, type NoteViewerRole } from "@/lib/noteLabels";
 import { Send } from "lucide-react";
+import { NoteActionsMenu } from "@/components/note-actions-menu";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -102,6 +103,20 @@ export default function BookingDetail() {
 
   const isCustomer = user?.id === b.customerId;
   const isProvider = hasRole("PROVIDER_ADMIN") || hasRole("PROVIDER_STAFF");
+  // Same-org check: a provider-side viewer is allowed to edit/delete
+  // PROVIDER-authored notes only when their provider role's scopeId
+  // matches this booking's location.providerId. Belt-and-braces — the
+  // server enforces too. PLATFORM_SUPER_ADMIN can mutate anywhere.
+  const viewerProviderId: string | null = b.location?.providerId ?? null;
+  const isSameOrgProvider = (() => {
+    if (hasRole("PLATFORM_SUPER_ADMIN")) return true;
+    if (!isProvider || !viewerProviderId) return false;
+    const roles = (user as any)?.roles || [];
+    return roles.some((r: any) =>
+      (r.role === "PROVIDER_ADMIN" || r.role === "PROVIDER_STAFF") &&
+      r.scopeId === viewerProviderId,
+    );
+  })();
   const activeStatuses = ["REQUESTED", "HELD", "PROVIDER_CONFIRMED", "CHECKED_IN", "IN_SERVICE", "LATE"];
   const isCompleted = b.status === "COMPLETED" || b.status === "COMPLETED_PENDING_WINDOW" || b.status === "SETTLED";
   const showReviewForm = isCustomer && isCompleted && !reviewSubmitted;
@@ -226,7 +241,11 @@ export default function BookingDetail() {
       )}
 
       {isProvider ? (
-        <ProviderBody booking={b} />
+        <ProviderBody
+          booking={b}
+          canEditProviderNotes={isSameOrgProvider}
+          onNoteChanged={() => queryClient.invalidateQueries({ queryKey: [`/api/bookings/${b.id}`] })}
+        />
       ) : (
         <CustomerBody
           booking={b}
@@ -342,7 +361,7 @@ function ProviderHeader({
 /** Provider body — services + add-ons + customer notes lead.
  * Vehicle / bay / total are tucked into a small footer card; status
  * history collapses behind a disclosure. */
-function ProviderBody({ booking: b }: { booking: any }) {
+function ProviderBody({ booking: b, canEditProviderNotes, onNoteChanged }: { booking: any; canEditProviderNotes: boolean; onNoteChanged: () => void }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const notes: any[] = Array.isArray(b.washNotes) ? b.washNotes : [];
   const addOns: any[] = Array.isArray(b.addOns) ? b.addOns : [];
@@ -389,7 +408,7 @@ function ProviderBody({ booking: b }: { booking: any }) {
       </Card>
 
       {notes.length > 0 && (
-        <NoteSections viewer="PROVIDER" notes={notes} />
+        <NoteSections viewer="PROVIDER" notes={notes} canEditProviderNotes={canEditProviderNotes} onNoteChanged={onNoteChanged} />
       )}
 
       {/* Footer: vehicle / bay / total — operator already knows their
@@ -580,7 +599,14 @@ function CustomerBody({ booking: b, canAddNote, onNoteAdded }: { booking: any; c
  * a multi-author thread reads as labeled groups. Each group's header
  * names the author's role (never the person); a small metadata line
  * underneath shows the name + date. */
-function NoteSections({ viewer, notes }: { viewer: NoteViewerRole; notes: any[] }) {
+function NoteSections({
+  viewer, notes, canEditProviderNotes, onNoteChanged,
+}: {
+  viewer: NoteViewerRole;
+  notes: any[];
+  canEditProviderNotes: boolean;
+  onNoteChanged: () => void;
+}) {
   const groups = groupNotesByAuthorRole(notes);
   return (
     <>
@@ -594,6 +620,7 @@ function NoteSections({ viewer, notes }: { viewer: NoteViewerRole; notes: any[] 
           : "p-6 md:p-8 border-slate-100 bg-slate-50/40";
         const iconClass = incoming ? "text-amber-700" : "text-slate-500";
         const labelClass = incoming ? "text-amber-800" : "text-slate-500";
+        const editable = role === "PROVIDER" && canEditProviderNotes;
         return (
           <Card key={role} className={cardClass}>
             <div className="flex items-center gap-2 mb-3">
@@ -606,9 +633,12 @@ function NoteSections({ viewer, notes }: { viewer: NoteViewerRole; notes: any[] 
               {groupNotes.map((n: any) => {
                 const meta = noteMetaLine(n, (d) => formatDate(typeof d === "string" ? d : d.toISOString(), "MMM d, yyyy"));
                 return (
-                  <div key={n.id}>
-                    <p className="text-slate-800 whitespace-pre-wrap leading-relaxed">{n.content}</p>
-                    {meta && <p className="text-xs text-slate-500 mt-1">{meta}</p>}
+                  <div key={n.id} className="flex items-start gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-slate-800 whitespace-pre-wrap leading-relaxed">{n.content}</p>
+                      {meta && <p className="text-xs text-slate-500 mt-1">{meta}</p>}
+                    </div>
+                    {editable && <NoteActionsMenu note={n} onChanged={onNoteChanged} />}
                   </div>
                 );
               })}
