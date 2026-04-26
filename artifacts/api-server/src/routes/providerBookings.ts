@@ -213,7 +213,13 @@ router.get("/providers/:providerId/locations/:locationId/daily-board", requireAu
         } : null,
         fleetPlaceholderClass: b.fleetPlaceholderClass,
         customer: b.customer ? { id: b.customer.id, firstName: b.customer.firstName, lastName: b.customer.lastName } : null,
+        // Client-side resolver needs both offPlatformClientName AND
+        // isOffPlatform to know which one to prefer; otherwise walk-in
+        // bookings show the operator's name (Booking.customerId points
+        // at the operator on off-platform creation).
         offPlatformClientName: b.offPlatformClientName,
+        isOffPlatform: b.isOffPlatform,
+        bookingSource: b.bookingSource,
         fleetName: b.vehicle?.fleet?.name || null,
         assignedOperator: b.assignedOperator ? { id: b.assignedOperator.id, firstName: b.assignedOperator.firstName, lastName: b.assignedOperator.lastName } : null,
         washBay: b.washBay ? { id: b.washBay.id, name: b.washBay.name } : null,
@@ -295,13 +301,32 @@ router.get("/providers/:providerId/locations/:locationId/bay-timeline", requireA
         status: { in: ACTIVE_STATUSES as any },
       },
       include: {
-        vehicle: { select: { unitNumber: true, subtypeCode: true, bodyType: true, nickname: true } },
-        customer: { select: { firstName: true } },
-        assignedOperator: { select: { firstName: true } },
+        vehicle: {
+          select: {
+            unitNumber: true, subtypeCode: true, bodyType: true, nickname: true,
+            // Fleet name belongs in the bay-timeline payload so the
+            // block can render "Northeast Bus Lines · NEB-202" as its
+            // secondary line. Daily Board already had this — bringing
+            // bay-timeline up to par.
+            fleet: { select: { name: true } },
+          },
+        },
+        customer: { select: { firstName: true, lastName: true } },
+        assignedOperator: { select: { firstName: true, lastName: true } },
       },
     });
 
     for (const b of allBookings) {
+      // For walk-in / direct bookings, customerId points at the
+      // operator (e.g. James) — see the off-platform creation handler.
+      // The actual walk-in client lives in offPlatformClientName, so
+      // prefer that whenever the booking is off-platform. The boards
+      // were universally showing "James Chen" otherwise.
+      const isOffPlatform = b.isOffPlatform === true || b.bookingSource === "WALK_IN" || b.bookingSource === "DIRECT";
+      const driverFirstName = isOffPlatform
+        ? (b.offPlatformClientName || b.customer?.firstName || null)
+        : (b.customer?.firstName || b.offPlatformClientName || null);
+
       const mapped = {
         id: b.id,
         scheduledStartAtUtc: b.scheduledStartAtUtc,
@@ -310,13 +335,17 @@ router.get("/providers/:providerId/locations/:locationId/bay-timeline", requireA
         serviceCompletedAtUtc: b.serviceCompletedAtUtc,
         status: b.status,
         bookingSource: b.bookingSource,
+        isOffPlatform: b.isOffPlatform,
+        offPlatformClientName: b.offPlatformClientName,
         serviceNameSnapshot: b.serviceNameSnapshot,
         vehicle: b.vehicle ? { unitNumber: b.vehicle.unitNumber, bodyType: b.vehicle.bodyType, nickname: b.vehicle.nickname } : null,
         vehicleUnitNumber: b.vehicle?.unitNumber || null,
         vehicleSubtypeCode: b.vehicle?.subtypeCode || null,
+        fleetName: b.vehicle?.fleet?.name || null,
         fleetPlaceholderClass: b.fleetPlaceholderClass,
-        driverFirstName: b.customer?.firstName || b.offPlatformClientName || null,
+        driverFirstName,
         assignedOperatorFirstName: b.assignedOperator?.firstName || null,
+        assignedOperatorLastName: b.assignedOperator?.lastName || null,
       };
       if (b.washBayId) {
         if (!bayBookingsMap.has(b.washBayId)) bayBookingsMap.set(b.washBayId, []);
