@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { useLocation } from "wouter";
 import { Card, Button, Input, Label, Badge } from "@/components/ui";
-import { Plus, Star, Trash2, X, AlertTriangle, Lock } from "lucide-react";
+import { Plus, Star, Trash2, X, AlertTriangle, Lock, MoreVertical } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useActiveVehicle, type ActiveVehicleRow } from "@/contexts/activeVehicle";
 import {
@@ -184,45 +185,98 @@ function VehicleCard({
   const display = vehicleDisplayName(vehicle);
   const secondary = vehicle.nickname?.trim() ? vehicle.unitNumber : null;
 
+  // Active card pops with full body-type colour + ring + soft tint;
+  // every other card collapses to a plain white card with a slate
+  // border, slate text, and a much-muted icon chip — no green/yellow
+  // tints, no body-type background fill on the chip. The contrast
+  // between active and inactive needs to be unmissable on a list.
+  const cardClass = vehicle.isDefault
+    ? "ring-2 ring-primary shadow-md bg-primary/[0.03]"
+    : "border border-slate-200 bg-white";
+  const stripeClass = vehicle.isDefault ? style.stripe : "bg-slate-200";
+  const chipBgClass = vehicle.isDefault ? style.chipBg : "bg-slate-50";
+  const chipFgClass = vehicle.isDefault ? style.chipFg : "text-slate-400";
+
   return (
-    <Card className={`relative overflow-hidden p-0 transition-shadow ${vehicle.isDefault ? "ring-2 ring-primary shadow-md bg-primary/[0.03]" : ""}`}>
-      <div className={`absolute left-0 top-0 bottom-0 w-1 ${style.stripe}`} aria-hidden />
+    <Card className={`relative overflow-hidden p-0 transition-shadow ${cardClass}`}>
+      <div className={`absolute left-0 top-0 bottom-0 w-1 ${stripeClass}`} aria-hidden />
       <div className="p-5 pl-6 flex items-start gap-4">
-        <div className={`h-12 w-12 ${style.chipBg} rounded-xl flex items-center justify-center shrink-0`}>
-          <Icon className={`h-6 w-6 ${style.chipFg}`} />
+        <div className={`h-12 w-12 ${chipBgClass} rounded-xl flex items-center justify-center shrink-0`}>
+          <Icon className={`h-6 w-6 ${chipFgClass}`} />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className={`font-bold text-lg truncate ${vehicle.isDefault ? "text-slate-900" : "text-slate-700"}`}>{display}</h3>
+          <div className="flex items-start gap-2 flex-wrap">
+            <h3 className={`flex-1 min-w-0 truncate text-lg ${vehicle.isDefault ? "font-bold text-slate-900" : "font-medium text-slate-600"}`}>{display}</h3>
             {vehicle.isDefault && (
-              <Badge className="bg-primary/10 text-primary border-primary/20"><Star className="h-3 w-3 mr-1 fill-primary" />Active</Badge>
+              <Badge className="bg-primary/10 text-primary border-primary/20 shrink-0"><Star className="h-3 w-3 mr-1 fill-primary" />Active</Badge>
             )}
             {!vehicle.isOwnedByUser && (
-              <Badge className="bg-slate-100 text-slate-600 border-slate-200"><Lock className="h-3 w-3 mr-1" />{vehicle.fleet?.name || "Fleet"}</Badge>
+              <Badge className="bg-slate-100 text-slate-600 border-slate-200 shrink-0"><Lock className="h-3 w-3 mr-1" />{vehicle.fleet?.name || "Fleet"}</Badge>
+            )}
+            {onDelete && vehicle.isOwnedByUser && (
+              <VehicleKebabMenu vehicle={vehicle} onDelete={onDelete} />
             )}
           </div>
-          <div className="flex items-center gap-2 mt-1 text-sm text-slate-500">
+          <div className={`flex items-center gap-2 mt-1 text-sm ${vehicle.isDefault ? "text-slate-500" : "text-slate-400"}`}>
             {secondary && <span className="font-mono uppercase tracking-wider">{secondary}</span>}
             {secondary && <span>·</span>}
             <span>{BODY_TYPE_LABEL[bodyType]}</span>
             {lengthFeet != null && (<><span>·</span><span>{lengthFeet} ft</span></>)}
             {sizeClass && (<><span>·</span><span>{SIZE_CLASS_LABEL[sizeClass]}</span></>)}
           </div>
-          <div className="mt-3 flex items-center gap-2">
-            {!vehicle.isDefault && vehicle.isEligibleForDefault && (
-              <Button variant="outline" size="sm" onClick={() => onSetDefault(vehicle.id)}>
+          {!vehicle.isDefault && vehicle.isEligibleForDefault && (
+            <div className="mt-3">
+              <Button variant="outline" size="sm" onClick={() => onSetDefault(vehicle.id)} className="border-slate-300 text-slate-600 hover:text-slate-900">
                 <Star className="h-3.5 w-3.5 mr-1" /> Set as active
               </Button>
-            )}
-            {onDelete && vehicle.isOwnedByUser && (
-              <Button variant="ghost" size="sm" onClick={() => onDelete(vehicle)} className="text-red-600 hover:text-red-700">
-                <Trash2 className="h-3.5 w-3.5 mr-1" /> Delete
-              </Button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </Card>
+  );
+}
+
+/** Per-card kebab menu. Single destructive action today (Remove
+ * vehicle) but extensible — the kebab pattern keeps the card calm
+ * even when more actions land later. The menu item is red to signal
+ * destruction; the trigger itself is neutral so it doesn't compete
+ * with the active card's accent. */
+function VehicleKebabMenu({ vehicle, onDelete }: { vehicle: VehicleRow; onDelete: (v: VehicleRow) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", onClick);
+    return () => window.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label="Vehicle actions"
+        className="p-1 -mr-1 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+      >
+        <MoreVertical className="h-4 w-4" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-30 w-44 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden text-sm">
+          <button
+            type="button"
+            onClick={() => { setOpen(false); onDelete(vehicle); }}
+            className="w-full text-left px-3 py-2 hover:bg-red-50 flex items-center gap-2 text-red-600"
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Remove vehicle
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
