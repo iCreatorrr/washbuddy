@@ -8,6 +8,7 @@ import { BODY_TYPE_ICON, BODY_TYPE_STYLE, deriveSizeClassFromLengthInches, norma
 import { groupNotesByAuthorRole, noteSectionLabel, noteMetaLine } from "@/lib/noteLabels";
 import { resolveBookingDisplayName } from "@/lib/bookingDisplay";
 import { NoteEditor, NoteKebabMenu } from "@/components/note-actions-menu";
+import { AddNoteForm } from "@/components/add-note-form";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -266,6 +267,16 @@ export function BookingCard({
               })}
             </div>
           )}
+
+          {/* Provider add-note. Renders unconditionally on Daily Board
+              (every viewer here is same-org by definition — the
+              endpoint scopes to the operator's location), so an
+              operator can attach a note even on bookings that don't
+              have one yet. onStatusChange refetches the day's data so
+              the new note appears in the list inline. */}
+          <div className="pt-1">
+            <AddNoteForm bookingId={b.id} onSubmitted={onStatusChange} viewerRole="PROVIDER" />
+          </div>
 
           {Array.isArray(b.addOns) && b.addOns.length > 0 && (
             <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 space-y-1">

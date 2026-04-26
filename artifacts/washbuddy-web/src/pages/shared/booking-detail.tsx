@@ -11,8 +11,8 @@ import { ReviewForm } from "@/components/review-form";
 import { toast, Toaster } from "sonner";
 import { BODY_TYPE_ICON, BODY_TYPE_LABEL, BODY_TYPE_STYLE, normalizeBodyType, vehicleDisplayName } from "@/lib/vehicleBodyType";
 import { groupNotesByAuthorRole, noteSectionLabel, noteMetaLine, type NoteViewerRole } from "@/lib/noteLabels";
-import { Send } from "lucide-react";
 import { NoteEditor, NoteKebabMenu } from "@/components/note-actions-menu";
+import { AddNoteForm } from "@/components/add-note-form";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -244,6 +244,7 @@ export default function BookingDetail() {
         <ProviderBody
           booking={b}
           canEditProviderNotes={isSameOrgProvider}
+          canAddNote={isSameOrgProvider}
           onNoteChanged={() => queryClient.invalidateQueries({ queryKey: [`/api/bookings/${b.id}`] })}
         />
       ) : (
@@ -361,7 +362,7 @@ function ProviderHeader({
 /** Provider body — services + add-ons + customer notes lead.
  * Vehicle / bay / total are tucked into a small footer card; status
  * history collapses behind a disclosure. */
-function ProviderBody({ booking: b, canEditProviderNotes, onNoteChanged }: { booking: any; canEditProviderNotes: boolean; onNoteChanged: () => void }) {
+function ProviderBody({ booking: b, canEditProviderNotes, canAddNote, onNoteChanged }: { booking: any; canEditProviderNotes: boolean; canAddNote: boolean; onNoteChanged: () => void }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const notes: any[] = Array.isArray(b.washNotes) ? b.washNotes : [];
   const addOns: any[] = Array.isArray(b.addOns) ? b.addOns : [];
@@ -409,6 +410,16 @@ function ProviderBody({ booking: b, canEditProviderNotes, onNoteChanged }: { boo
 
       {notes.length > 0 && (
         <NoteSections viewer="PROVIDER" notes={notes} canEditProviderNotes={canEditProviderNotes} onNoteChanged={onNoteChanged} />
+      )}
+
+      {/* Provider add-note. Renders even when there are zero notes
+          yet, so the operator has an explicit on-ramp; otherwise a
+          provider would be stuck unable to attach context to a
+          booking with no prior notes. */}
+      {canAddNote && (
+        <div className="px-1">
+          <AddNoteForm bookingId={b.id} onSubmitted={onNoteChanged} viewerRole="PROVIDER" />
+        </div>
       )}
 
       {/* Footer: vehicle / bay / total — operator already knows their
@@ -706,70 +717,7 @@ function CustomerNotesBlock({ notes }: { notes: any[] }) {
   );
 }
 
-/** Append-only "Add a note" affordance. Driver-side booking detail
- * uses this; the submitted note is immutable (no edit/delete on the
- * server). Optimistic local refetch via the parent's onSubmitted hook. */
-export function AddNoteForm({ bookingId, onSubmitted }: { bookingId: string; onSubmitted: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [content, setContent] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  const submit = async () => {
-    const trimmed = content.trim();
-    if (!trimmed) return;
-    setSubmitting(true);
-    try {
-      const r = await fetch(`${API_BASE}/api/bookings/${bookingId}/notes`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: trimmed }),
-      });
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        throw new Error(d.message || "Failed to add note");
-      }
-      toast.success("Note added");
-      setContent("");
-      setOpen(false);
-      onSubmitted();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
-      >
-        <StickyNote className="h-4 w-4" /> Add a note
-      </button>
-    );
-  }
-  return (
-    <Card className="p-4 border-amber-100 bg-amber-50/30">
-      <p className="text-xs text-amber-800 mb-2">Notes are visible to the provider and can't be edited once added.</p>
-      <textarea
-        value={content}
-        onChange={(e) => setContent(e.target.value.slice(0, 2000))}
-        autoFocus
-        rows={3}
-        placeholder="Anything the provider should know? (e.g. running 5 min late)"
-        className="w-full border border-amber-200 rounded-lg p-2 text-sm bg-white focus:border-amber-400 focus:outline-none resize-none"
-      />
-      <div className="flex justify-between items-center mt-2">
-        <span className="text-[11px] text-slate-500">{content.length}/2000</span>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => { setOpen(false); setContent(""); }}>Cancel</Button>
-          <Button size="sm" onClick={submit} disabled={!content.trim() || submitting} isLoading={submitting} className="gap-1">
-            <Send className="h-3.5 w-3.5" /> Send
-          </Button>
-        </div>
-      </div>
-    </Card>
-  );
-}
+// AddNoteForm moved to components/add-note-form.tsx so Daily Board can
+// import it without depending on a page module. Re-export for any
+// caller that still imports from this file.
+export { AddNoteForm } from "@/components/add-note-form";
