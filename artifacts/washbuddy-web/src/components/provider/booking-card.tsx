@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { PhotoPrompt } from "./photo-prompt";
 import { BODY_TYPE_ICON, BODY_TYPE_STYLE, deriveSizeClassFromLengthInches, normalizeBodyType, type BodyType } from "@/lib/vehicleBodyType";
 import { groupNotesByAuthorRole, noteSectionLabel, noteMetaLine } from "@/lib/noteLabels";
+import { resolveBookingDisplayName } from "@/lib/bookingDisplay";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -83,8 +84,9 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
   const accent = bodyAccentFor(b);
   const src = SOURCE_BADGE[b.bookingSource] || SOURCE_BADGE.PLATFORM;
   const st = STATUS_BADGE[b.status] || STATUS_BADGE.PROVIDER_CONFIRMED;
-  const clientName = b.customer ? `${b.customer.firstName} ${b.customer.lastName}` : b.offPlatformClientName || "Unknown";
+  const displayName = resolveBookingDisplayName(b);
   const time = new Date(b.scheduledStartAtUtc).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone: b.locationTimezone });
+  const BodyIcon = accent.Icon;
 
   const handleTransition = async (newStatus: string) => {
     setActionLoading(true);
@@ -103,17 +105,21 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
       {/* Body-type stripe — single accent per row, complements the size class
           badge without competing with it. Stripe color keys on bodyType only. */}
       {b.vehicle?.bodyType && <div className={`absolute left-0 top-0 bottom-0 w-1 ${accent.style.stripe}`} aria-hidden />}
-      {/* Collapsed row */}
+      {/* Collapsed row — driver / customer name leads. Service name
+          moves to the expanded view; the operator can scan a list of
+          names + times faster than a list of "Exterior Bus Wash". */}
       <div className={`flex items-center gap-2 px-4 py-3 cursor-pointer ${b.vehicle?.bodyType ? "pl-5" : ""}`} onClick={() => setExpanded(!expanded)}>
         <span className="text-sm font-medium text-slate-600 w-[70px] shrink-0">{time}</span>
         <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${vc.color}`}>
           <span className="text-xs font-bold">{vc.label}</span>
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-slate-900 truncate">{clientName}</p>
-          <p className="text-xs text-slate-500 truncate">{b.fleetName || ""}</p>
+        <div className="flex-1 min-w-0 flex items-center gap-1.5">
+          {b.vehicle?.bodyType && (
+            <BodyIcon className={`h-3.5 w-3.5 shrink-0 ${accent.style.text}`} aria-hidden />
+          )}
+          <p className="text-sm font-medium text-slate-900 truncate">{displayName}</p>
         </div>
-        <span className="text-xs text-slate-500 min-w-[100px] max-w-[200px] truncate hidden sm:block" title={b.serviceNameSnapshot}>{b.serviceNameSnapshot}</span>
+        <span className="text-xs text-slate-500 truncate hidden sm:block max-w-[120px]">{b.fleetName || ""}</span>
         <span className="text-xs w-[80px] truncate hidden md:block" title={b.washBay?.name ? `Bay: ${b.washBay.name}` : "No bay assigned"}>
           {b.washBay?.name
             ? <span className="text-slate-600 font-medium">{b.washBay.name}</span>
@@ -154,6 +160,11 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
       {/* Expanded details */}
       {expanded && (
         <div className="px-4 pb-4 border-t border-slate-100 pt-3 space-y-3">
+          {/* Service name lives here in the expanded view (it's no
+              longer in the collapsed row). Surface as the first line
+              so an operator who clicked the row to see "what is this"
+              sees the answer immediately. */}
+          <div className="text-sm font-semibold text-slate-900">{b.serviceNameSnapshot}</div>
           <div className="flex flex-wrap gap-4 text-sm text-slate-600">
             <span>Vehicle: {b.vehicle?.unitNumber || formatVehicleClass(b.fleetPlaceholderClass) || "N/A"}</span>
             <span>{stripBayPrefix(b.washBay?.name)}</span>

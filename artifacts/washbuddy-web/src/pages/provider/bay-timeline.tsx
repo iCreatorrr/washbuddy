@@ -9,7 +9,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { getTimelineBlockColors } from "@/lib/service-colors";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { BODY_TYPE_STYLE, normalizeBodyType } from "@/lib/vehicleBodyType";
+import { BODY_TYPE_ICON, BODY_TYPE_STYLE, normalizeBodyType } from "@/lib/vehicleBodyType";
+import { resolveBookingDisplayName } from "@/lib/bookingDisplay";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -300,16 +301,21 @@ export default function BayTimeline() {
                       <div className="absolute top-0 h-full border-l-2 border-red-500 z-10" style={{ left: `${nowPos}%` }} />
                     )}
 
-                    {/* Booking blocks */}
+                    {/* Booking blocks — primary label is now the
+                        driver/customer name (the operator scans for
+                        "who is this"); service name moves to the
+                        secondary line + tooltip. */}
                     {bookingsForBay.map((b: any) => {
                       const pos = getBlockPosition(b.scheduledStartAtUtc, b.scheduledEndAtUtc);
                       const colorClasses = getTimelineBlockColors(b.serviceNameSnapshot);
                       const slot = overlapSlots.get(b.id) || { slotIndex: 0, slotCount: 1 };
                       const blockHeight = (ROW_HEIGHT - 8) / slot.slotCount;
                       const blockTop = 4 + slot.slotIndex * blockHeight;
-                      const clientName = b.driverFirstName || b.offPlatformClientName || "";
+                      const displayName = resolveBookingDisplayName(b);
                       const originalBayId = bay.id;
-                      const bodyTypeStyle = b.vehicle?.bodyType ? BODY_TYPE_STYLE[normalizeBodyType(b.vehicle.bodyType)] : null;
+                      const bt = b.vehicle?.bodyType ? normalizeBodyType(b.vehicle.bodyType) : null;
+                      const bodyTypeStyle = bt ? BODY_TYPE_STYLE[bt] : null;
+                      const BodyIcon = bt ? BODY_TYPE_ICON[bt] : null;
 
                       return (
                         <div
@@ -329,14 +335,17 @@ export default function BayTimeline() {
                             top: `${blockTop}px`,
                             height: `${blockHeight - 2}px`,
                           }}
-                          title={`${b.serviceNameSnapshot} — ${clientName}\n${b.vehicleUnitNumber || b.fleetPlaceholderClass || ""}`}
+                          title={`${displayName} — ${b.serviceNameSnapshot}\n${b.vehicleUnitNumber || b.fleetPlaceholderClass || ""}`}
                           onClick={() => navigate(`/bookings/${b.id}`)}
                         >
                           {bodyTypeStyle && <div className={`absolute left-0 top-0 bottom-0 w-1 ${bodyTypeStyle.stripe}`} aria-hidden />}
-                          <p className={cn("text-xs font-bold truncate leading-tight", bodyTypeStyle ? "pl-1.5" : "")}>{b.serviceNameSnapshot}</p>
+                          <div className={cn("flex items-center gap-1 leading-tight", bodyTypeStyle ? "pl-1.5" : "")}>
+                            {BodyIcon && bodyTypeStyle && <BodyIcon className={cn("h-3 w-3 shrink-0", bodyTypeStyle.text)} aria-hidden />}
+                            <p className="text-xs font-bold truncate">{displayName}</p>
+                          </div>
                           {blockHeight > 28 && (
-                            <p className={cn("text-[10px] truncate leading-tight opacity-80", bodyTypeStyle ? "pl-1.5" : "")}>
-                              {clientName}{b.vehicleUnitNumber ? ` · ${b.vehicleUnitNumber}` : ""}
+                            <p className={cn("text-[10px] truncate leading-tight opacity-70", bodyTypeStyle ? "pl-1.5" : "")}>
+                              {b.vehicleUnitNumber || b.fleetPlaceholderClass || ""}
                             </p>
                           )}
                         </div>
