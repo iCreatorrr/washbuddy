@@ -75,8 +75,26 @@ function ElapsedTimer({ startedAt, durationMins }: { startedAt: string; duration
   return <span className={`text-sm font-mono font-bold ${color}`}>{mins}:{String(secs).padStart(2, "0")}</span>;
 }
 
-export function BookingCard({ booking, onStatusChange }: { booking: any; onStatusChange: () => void }) {
-  const [expanded, setExpanded] = useState(false);
+export function BookingCard({
+  booking,
+  onStatusChange,
+  rowExpanded,
+  onToggleExpanded,
+}: {
+  booking: any;
+  onStatusChange: () => void;
+  // Optional — when the parent owns expansion state (Daily Board does
+  // this so it survives refetches), defer to it. Falls back to local
+  // state for any caller that hasn't migrated yet.
+  rowExpanded?: boolean;
+  onToggleExpanded?: () => void;
+}) {
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const expanded = rowExpanded ?? localExpanded;
+  const setExpanded = (next: boolean | ((p: boolean) => boolean)) => {
+    if (onToggleExpanded) onToggleExpanded();
+    else setLocalExpanded(next);
+  };
   const [actionLoading, setActionLoading] = useState(false);
   const [showPhotoPrompt, setShowPhotoPrompt] = useState<"BEFORE" | "AFTER" | null>(null);
 

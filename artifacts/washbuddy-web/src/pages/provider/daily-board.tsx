@@ -97,26 +97,36 @@ export default function DailyBoard() {
   const [ipExpanded, setIpExpanded] = useState(true);
   const [compExpanded, setCompExpanded] = useState(false);
 
-  const Section = ({ title, icon: Icon, items, color, expanded, onToggle }: any) => (
-    <div>
-      <button onClick={onToggle} className="w-full flex items-center justify-between py-3 px-1 group">
-        <div className="flex items-center gap-2">
-          <Icon className={`h-5 w-5 ${color}`} />
-          <span className="font-bold text-slate-900">{title}</span>
-          <Badge variant="default" className="ml-1">{items.length}</Badge>
-        </div>
-        <ChevronRight className={`h-4 w-4 text-slate-400 transition-transform ${expanded ? "rotate-90" : ""}`} />
-      </button>
-      {expanded && (
-        <div className="space-y-2 pb-4">
-          {items.length === 0 ? (
-            <p className="text-sm text-slate-400 text-center py-6">No bookings</p>
-          ) : (
-            items.map((b: any) => <BookingCard key={b.id} booking={b} onStatusChange={refresh} />)
-          )}
-        </div>
-      )}
-    </div>
+  // Per-row expansion lives on the page, not on each BookingCard.
+  // BookingCard's local `expanded` state was reset every 30 seconds by
+  // the auto-refresh and on every note edit/delete (the kebab calls
+  // refresh, which mutates `data` and the row's child state evaporated
+  // along with the in-flight render). Holding a Set of ids here means
+  // the expansion survives any refetch — only an actual reload clears it.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  const toggleExpanded = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const renderSection = (
+    title: string, Icon: any, items: any[], color: string, expanded: boolean, onToggle: () => void,
+  ) => (
+    <Section
+      title={title}
+      Icon={Icon}
+      items={items}
+      color={color}
+      expanded={expanded}
+      onToggle={onToggle}
+      refresh={refresh}
+      expandedIds={expandedIds}
+      toggleExpanded={toggleExpanded}
+    />
   );
 
   if (!providerId) return <div className="p-8 text-center text-slate-500">No provider access.</div>;
@@ -220,9 +230,58 @@ export default function DailyBoard() {
         </div>
       ) : (
         <div className="space-y-2">
-          <Section title="Upcoming" icon={Clock} items={upcoming} color="text-blue-500" expanded={upExpanded} onToggle={() => setUpExpanded(!upExpanded)} />
-          <Section title="In Progress" icon={Truck} items={inProgress} color="text-green-500" expanded={ipExpanded} onToggle={() => setIpExpanded(!ipExpanded)} />
-          <Section title="Completed" icon={CheckCircle2} items={completed} color="text-emerald-600" expanded={compExpanded} onToggle={() => setCompExpanded(!compExpanded)} />
+          {renderSection("Upcoming", Clock, upcoming, "text-blue-500", upExpanded, () => setUpExpanded(!upExpanded))}
+          {renderSection("In Progress", Truck, inProgress, "text-green-500", ipExpanded, () => setIpExpanded(!ipExpanded))}
+          {renderSection("Completed", CheckCircle2, completed, "text-emerald-600", compExpanded, () => setCompExpanded(!compExpanded))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Section is defined at module scope (NOT inline in DailyBoard) so
+ * React doesn't tear down + re-mount the entire booking-row tree on
+ * every parent render. Inline declarations create a fresh component
+ * type each render — that's what was nuking note-edit state and
+ * causing the row-collapse-on-action bug. */
+function Section({
+  title, Icon, items, color, expanded, onToggle, refresh, expandedIds, toggleExpanded,
+}: {
+  title: string;
+  Icon: any;
+  items: any[];
+  color: string;
+  expanded: boolean;
+  onToggle: () => void;
+  refresh: () => void;
+  expandedIds: Set<string>;
+  toggleExpanded: (id: string) => void;
+}) {
+  return (
+    <div>
+      <button onClick={onToggle} className="w-full flex items-center justify-between py-3 px-1 group">
+        <div className="flex items-center gap-2">
+          <Icon className={`h-5 w-5 ${color}`} />
+          <span className="font-bold text-slate-900">{title}</span>
+          <Badge variant="default" className="ml-1">{items.length}</Badge>
+        </div>
+        <ChevronRight className={`h-4 w-4 text-slate-400 transition-transform ${expanded ? "rotate-90" : ""}`} />
+      </button>
+      {expanded && (
+        <div className="space-y-2 pb-4">
+          {items.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-6">No bookings</p>
+          ) : (
+            items.map((b: any) => (
+              <BookingCard
+                key={b.id}
+                booking={b}
+                onStatusChange={refresh}
+                rowExpanded={expandedIds.has(b.id)}
+                onToggleExpanded={() => toggleExpanded(b.id)}
+              />
+            ))
+          )}
         </div>
       )}
     </div>
