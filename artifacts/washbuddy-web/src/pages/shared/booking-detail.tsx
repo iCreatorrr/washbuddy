@@ -604,7 +604,7 @@ function NoteSections({ viewer, notes }: { viewer: NoteViewerRole; notes: any[] 
             </div>
             <div className="space-y-3">
               {groupNotes.map((n: any) => {
-                const meta = noteMetaLine(n, (d) => formatDate(d, "MMM d, yyyy"));
+                const meta = noteMetaLine(n, (d) => formatDate(typeof d === "string" ? d : d.toISOString(), "MMM d, yyyy"));
                 return (
                   <div key={n.id}>
                     <p className="text-slate-800 whitespace-pre-wrap leading-relaxed">{n.content}</p>
@@ -633,7 +633,7 @@ function CustomerNotesBlock({ notes }: { notes: any[] }) {
             <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">{noteSectionLabel("DRIVER", role)}</p>
             <div className="space-y-2">
               {groupNotes.map((n: any) => {
-                const meta = noteMetaLine(n, (d) => formatDate(d, "MMM d, yyyy"));
+                const meta = noteMetaLine(n, (d) => formatDate(typeof d === "string" ? d : d.toISOString(), "MMM d, yyyy"));
                 return (
                   <div key={n.id}>
                     <p className="text-sm text-slate-800 whitespace-pre-wrap">{n.content}</p>

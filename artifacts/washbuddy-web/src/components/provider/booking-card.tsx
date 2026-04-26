@@ -188,7 +188,7 @@ export function BookingCard({ booking, onStatusChange }: { booking: any; onStatu
                       <StickyNote className={`h-3 w-3 ${iconClr}`} /> {noteSectionLabel("PROVIDER", role)}
                     </div>
                     {notes.map((n: any) => {
-                      const meta = noteMetaLine(n, (d) => formatDate(d, "MMM d"));
+                      const meta = noteMetaLine(n, (d) => formatDate(typeof d === "string" ? d : d.toISOString(), "MMM d"));
                       return (
                         <div key={n.id}>
                           <p className={`text-sm whitespace-pre-wrap ${textClr}`}>{n.content}</p>
