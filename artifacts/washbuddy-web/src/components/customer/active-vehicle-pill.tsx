@@ -74,7 +74,11 @@ export function ActiveVehiclePill({ className }: { className?: string }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-80 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
+        // Width clamps to (viewport - 1rem) so the dropdown can never
+        // overflow the screen on narrow phones, even if the trigger
+        // button sits in a tight column. Right-anchored to the trigger;
+        // text inside truncates to keep long nicknames inside the box.
+        <div className="absolute right-0 z-50 mt-2 w-80 max-w-[calc(100vw-1rem)] bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
           <div className="px-4 py-3 border-b text-xs font-bold uppercase tracking-wider text-slate-500">Switch Vehicle</div>
           <ul role="listbox" className="max-h-72 overflow-y-auto">
             {eligibleVehicles.map((v) => (
@@ -84,10 +88,10 @@ export function ActiveVehiclePill({ className }: { className?: string }) {
                   aria-selected={v.isDefault}
                   type="button"
                   onClick={async () => { await setActive(v.id); setOpen(false); }}
-                  className={`w-full text-left px-4 py-2.5 hover:bg-slate-50 transition-colors flex items-center gap-3 ${v.isDefault ? "bg-primary/5" : ""}`}
+                  className={`w-full text-left px-4 py-2.5 hover:bg-slate-50 transition-colors flex items-center gap-3 min-w-0 ${v.isDefault ? "bg-primary/5" : ""}`}
                 >
                   <DropdownItemContent vehicle={v} active={v.isDefault} />
-                  {v.isDefault && <Star className="h-4 w-4 text-primary fill-primary ml-auto" />}
+                  {v.isDefault && <Star className="h-4 w-4 text-primary fill-primary ml-auto shrink-0" />}
                 </button>
               </li>
             ))}
