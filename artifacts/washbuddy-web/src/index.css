@@ -21,6 +21,8 @@
   --color-ring: hsl(var(--ring));
   --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
 }
 
 :root {
@@ -30,6 +32,12 @@
   
   --card: 0 0% 100%;
   --card-foreground: 222 47% 11%;
+
+  /* Radix Select / Popover dropdowns reference these — without them
+     the bg-popover utility resolves to nothing and the dropdown
+     renders see-through over the page content behind it. */
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
   
   --primary: 221 83% 53%; /* Blue 600 */
   --primary-foreground: 210 40% 98%;

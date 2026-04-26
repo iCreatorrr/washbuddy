@@ -47,17 +47,18 @@ export const BODY_TYPE_STYLE: Record<BodyType, BodyTypeStyle> = {
   OTHER:       { stripe: "bg-stone-400",  chipBg: "bg-stone-100",  chipFg: "text-stone-700",  text: "text-stone-700",  dot: "bg-stone-400",  border: "border-stone-200" },
 };
 
-/** Desaturated counterpart used when a vehicle is *not* the active one,
- * so the eye is drawn to the active card without making it louder. The
- * hue is still recognisable (cool-grey for slate/zinc, warm-grey for
- * amber/stone, sage for emerald) but the chip and stripe drop to a
- * neutral palette so a row of inactive cards reads as quiet. */
+/** Desaturated counterpart used when a vehicle is *not* the active one.
+ * Pulled all the way down to neutral grey so the active card pops by
+ * reduction of everything around it: a SHUTTLE chip on a non-active
+ * card should not visually compete with the active card's coloured
+ * chip. We keep a faint hue trace via the icon foreground so type is
+ * still identifiable, but the background is uniformly neutral. */
 export const BODY_TYPE_STYLE_MUTED: Record<BodyType, BodyTypeStyle> = {
-  COACH:       { stripe: "bg-slate-300",  chipBg: "bg-slate-50",   chipFg: "text-slate-400",  text: "text-slate-400",  dot: "bg-slate-300",  border: "border-slate-100" },
-  SCHOOL_BUS:  { stripe: "bg-amber-200",  chipBg: "bg-amber-50",   chipFg: "text-amber-500",  text: "text-amber-500",  dot: "bg-amber-200",  border: "border-amber-100" },
-  SHUTTLE:     { stripe: "bg-emerald-200",chipBg: "bg-emerald-50", chipFg: "text-emerald-500",text: "text-emerald-500",dot: "bg-emerald-200",border: "border-emerald-100" },
-  TRANSIT_BUS: { stripe: "bg-zinc-300",   chipBg: "bg-zinc-50",    chipFg: "text-zinc-400",   text: "text-zinc-400",   dot: "bg-zinc-300",   border: "border-zinc-100" },
-  OTHER:       { stripe: "bg-stone-200",  chipBg: "bg-stone-50",   chipFg: "text-stone-400",  text: "text-stone-400",  dot: "bg-stone-200",  border: "border-stone-100" },
+  COACH:       { stripe: "bg-slate-200",  chipBg: "bg-slate-100",  chipFg: "text-slate-400",  text: "text-slate-400",  dot: "bg-slate-300",  border: "border-slate-100" },
+  SCHOOL_BUS:  { stripe: "bg-slate-200",  chipBg: "bg-slate-100",  chipFg: "text-amber-400/70",  text: "text-slate-500",  dot: "bg-slate-300",  border: "border-slate-100" },
+  SHUTTLE:     { stripe: "bg-slate-200",  chipBg: "bg-slate-100",  chipFg: "text-emerald-500/60",text: "text-slate-500",  dot: "bg-slate-300",  border: "border-slate-100" },
+  TRANSIT_BUS: { stripe: "bg-slate-200",  chipBg: "bg-slate-100",  chipFg: "text-zinc-400",   text: "text-slate-400",  dot: "bg-slate-300",  border: "border-slate-100" },
+  OTHER:       { stripe: "bg-slate-200",  chipBg: "bg-slate-100",  chipFg: "text-stone-400",  text: "text-slate-400",  dot: "bg-slate-300",  border: "border-slate-100" },
 };
 
 /** Returns full-saturation styling for the active vehicle, muted for the

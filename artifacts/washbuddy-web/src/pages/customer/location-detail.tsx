@@ -66,7 +66,27 @@ export default function LocationDetail() {
   const [bookingStep, setBookingStep] = useState(1);
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [etaMins, setEtaMins] = useState<number | null>(null);
-  const [bookingResult, setBookingResult] = useState<{ id: string; status: string } | null>(null);
+  // Persist the receipt across remounts (back-then-forward navigation,
+  // tab refocus). Keyed by locationId so booking at one location doesn't
+  // pre-fill the receipt at another. Cleared after the user clicks "View
+  // My Bookings" or after 30 minutes (whichever comes first).
+  const receiptStorageKey = locationId ? `wb.receipt.${locationId}` : null;
+  const [bookingResult, setBookingResult] = useState<{ id: string; status: string; slotUtc?: string; serviceId?: string } | null>(() => {
+    if (!receiptStorageKey) return null;
+    try {
+      const raw = sessionStorage.getItem(receiptStorageKey);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed?.id || !parsed?.savedAt) return null;
+      if (Date.now() - parsed.savedAt > 30 * 60 * 1000) {
+        sessionStorage.removeItem(receiptStorageKey);
+        return null;
+      }
+      return { id: parsed.id, status: parsed.status, slotUtc: parsed.slotUtc, serviceId: parsed.serviceId };
+    } catch {
+      return null;
+    }
+  });
   const [holdExpiresAt, setHoldExpiresAt] = useState<Date | null>(null);
   const [holdTimeLeft, setHoldTimeLeft] = useState<number | null>(null);
   const [shortNoticePending, setShortNoticePending] = useState<{ slotUtc: string; minutes: number } | null>(null);
@@ -302,8 +322,29 @@ export default function LocationDetail() {
           idempotencyKey
         }
       });
-      setBookingResult({ id: bookRes.booking.id, status: bookRes.booking.status });
+      const receipt = {
+        id: bookRes.booking.id,
+        status: bookRes.booking.status,
+        slotUtc: selectedSlot ?? undefined,
+        serviceId: selectedService ?? undefined,
+      };
+      setBookingResult(receipt);
+      // Clear local hold state — the server has already consumed it
+      // server-side as part of bookings/from-hold. Drop selected service
+      // and slot too, so a back-button bringing us back to this page
+      // doesn't restore the bookable form: the receipt is the only
+      // thing the user can do here now. Persist to sessionStorage so a
+      // back-then-forward navigation re-renders the receipt instead of
+      // the bookable form (the hold is already consumed server-side).
       setHoldExpiresAt(null);
+      setHoldId(null);
+      setSelectedService(null);
+      setSelectedSlot(null);
+      if (receiptStorageKey) {
+        try {
+          sessionStorage.setItem(receiptStorageKey, JSON.stringify({ ...receipt, savedAt: Date.now() }));
+        } catch { /* quota / disabled storage — receipt still works in-session */ }
+      }
     } catch (err: any) {
       if (err?.message?.includes("hold") || err?.status === 410) {
         setBookingError("Your hold has expired. Please select a new time slot.");
@@ -592,11 +633,17 @@ export default function LocationDetail() {
             <BookingReceipt
               bookingResult={bookingResult}
               locData={locData}
-              service={selectedSvc}
-              slotUtc={selectedSlot}
+              // After a back-then-forward navigation we rebuild the
+              // receipt from sessionStorage; selectedSvc / selectedSlot
+              // are null, so resolve from the persisted ids.
+              service={selectedSvc || services.find((s: any) => s.id === bookingResult.serviceId) || null}
+              slotUtc={selectedSlot || bookingResult.slotUtc || null}
               vehicle={activeVehicle}
-              totalPrice={totalPrice}
-              onDone={() => setNav("/bookings")}
+              totalPrice={totalPrice || ((selectedSvc || services.find((s: any) => s.id === bookingResult.serviceId)) as any)?.allInPriceMinor || 0}
+              onDone={() => {
+                if (receiptStorageKey) sessionStorage.removeItem(receiptStorageKey);
+                setNav("/bookings");
+              }}
             />
           )}
           </>)}
@@ -750,21 +797,34 @@ function BookingReceipt({
 
   return (
     <Card className="border-2 border-emerald-200 bg-white overflow-hidden">
-      <div className="p-6 pb-4 border-b border-emerald-100 flex items-start gap-4">
-        <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center shrink-0">
-          <CheckCircle2 className="h-6 w-6 text-emerald-600" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <h2 className="text-xl font-display font-bold text-slate-900">
-            {isInstant ? "Booking confirmed" : "Request submitted"}
-          </h2>
-          <p className="text-sm text-slate-500 mt-0.5">
-            {isInstant
-              ? "Show up at the scheduled time — your bay is reserved."
-              : "The provider will review and respond shortly."}
-          </p>
-        </div>
-        <span className="font-mono text-[11px] text-slate-400 shrink-0 hidden sm:inline">#{bookingResult.id.split("-")[0].toUpperCase()}</span>
+      <div className="px-6 pt-8 pb-2 flex flex-col items-center text-center">
+        <motion.div
+          initial={{ scale: 0.4, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: "spring", stiffness: 220, damping: 18, duration: 0.4 }}
+          className="w-20 h-20 rounded-full bg-emerald-100 flex items-center justify-center mb-4 ring-8 ring-emerald-50"
+        >
+          <CheckCircle2 className="h-10 w-10 text-emerald-600" />
+        </motion.div>
+        <motion.h2
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.18, duration: 0.3 }}
+          className="text-2xl font-display font-bold text-slate-900"
+        >
+          {isInstant ? "Booking Confirmed" : "Request Submitted"}
+        </motion.h2>
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.28, duration: 0.3 }}
+          className="text-sm text-slate-500 mt-1 max-w-md"
+        >
+          {isInstant
+            ? "Your bay is reserved — show up at the scheduled time and you're set."
+            : "The provider will review and respond shortly."}
+          <span className="block font-mono text-[11px] text-slate-400 mt-1">#{bookingResult.id.split("-")[0].toUpperCase()}</span>
+        </motion.p>
       </div>
 
       <div className="p-6 grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-5">
@@ -815,7 +875,7 @@ function BookingReceipt({
       </div>
 
       <div className="px-6 pb-6">
-        <Button className="w-full h-12" onClick={onDone}>View My Bookings</Button>
+        <Button variant="outline" className="w-full h-11" onClick={onDone}>View My Bookings</Button>
       </div>
     </Card>
   );
