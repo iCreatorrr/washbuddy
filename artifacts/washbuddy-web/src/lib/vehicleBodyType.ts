@@ -142,14 +142,18 @@ export function vehicleFitsService(
   return SIZE_CLASS_ORDER[v] <= SIZE_CLASS_ORDER[max as SizeClass];
 }
 
-/** True if the vehicle's class is one a bay supports. */
+/** True if the vehicle's class is one a bay supports. Strict: a bay
+ * with no class data (null or empty supportedClasses) is treated as
+ * non-supporting. Callers that want to be permissive when the vehicle's
+ * own class can't be derived should still get `true` — that's about
+ * the *vehicle* being unknown, not the bay. */
 export function vehicleFitsBay(
   vehicleLengthInches: number | null | undefined,
   baySupportedClasses: string[] | null | undefined,
 ): boolean {
   const v = deriveSizeClassFromLengthInches(vehicleLengthInches);
-  if (!v) return true;
-  if (!baySupportedClasses || baySupportedClasses.length === 0) return true;
+  if (!v) return true; // unknown vehicle class — caller has nothing to gate against
+  if (!Array.isArray(baySupportedClasses) || baySupportedClasses.length === 0) return false;
   return baySupportedClasses.includes(v);
 }
 

@@ -342,11 +342,17 @@ export default function LocationDetail() {
   };
 
   // Hoisted so the upfront incompatibility warning AND the gate that
-  // hides the booking steps share the same boolean.
+  // hides the booking steps share the same boolean. Strict semantics:
+  // a location with no bay data, an empty bays array, or no bay
+  // supporting the active vehicle's class is incompatible. The earlier
+  // version required `bays.length > 0` as a precondition, which meant
+  // "no bays at all" silently fell through as compatible — the same
+  // permissive-fallback footgun we just closed in search.tsx and
+  // route-planner.tsx.
   const locationIncompatibleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
-  const locationBays: any[] = (locData as any)?.washBays || [];
-  const locationIncompatible = !!activeVehicle && !!locationIncompatibleClass && locationBays.length > 0
-    && !locationBays.some((b: any) => (b.supportedClasses || []).includes(locationIncompatibleClass));
+  const locationBays: any[] = Array.isArray((locData as any)?.washBays) ? (locData as any).washBays : [];
+  const locationIncompatible = !!activeVehicle && !!locationIncompatibleClass
+    && !locationBays.some((b: any) => Array.isArray(b.supportedClasses) && b.supportedClasses.includes(locationIncompatibleClass));
   const incompatibleVehicleLine = activeVehicle
     ? `${vehicleDisplayName(activeVehicle)}${inchesToFeet(activeVehicle.lengthInches) ? `, ${inchesToFeet(activeVehicle.lengthInches)}ft` : ""}${locationIncompatibleClass && SIZE_CLASS_LABEL[locationIncompatibleClass] ? ` ${SIZE_CLASS_LABEL[locationIncompatibleClass]}` : ""}`
     : "";

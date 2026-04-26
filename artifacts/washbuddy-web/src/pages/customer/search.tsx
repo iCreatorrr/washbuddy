@@ -122,15 +122,18 @@ type LocationWithMeta = {
 };
 
 /** True if at least one active bay at the location supports the given
- * vehicle class. A location with zero active bays can't host anything,
- * so when the response is *known* to lack bays (washBays === []) we
- * treat it as incompatible. Only when `washBays` is missing entirely
- * (older API response shape) do we fall back to permissive. */
+ * vehicle class. The earlier version had a "missing washBays → return
+ * true (permissive)" fallback that silently masked any wire-format
+ * issue: if the response ever dropped the field — a stale dist, a
+ * generated-client strip, a proxy quirk — every location showed as
+ * compatible regardless of vehicle, which is exactly the symptom we
+ * just chased down. Strict semantics now: missing data means we
+ * couldn't verify, so we don't pretend it fits. */
 function locationFitsClass(loc: LocationWithMeta, vehicleClass: string | null): boolean {
-  if (!vehicleClass) return true;
-  if (!Array.isArray(loc.washBays)) return true; // unknown — old response shape
-  if (loc.washBays.length === 0) return false; // explicitly no bays → can't host
-  return loc.washBays.some((b) => (b.supportedClasses || []).includes(vehicleClass));
+  if (!vehicleClass) return true; // no active vehicle → nothing to gate against
+  const bays = loc.washBays;
+  if (!Array.isArray(bays) || bays.length === 0) return false;
+  return bays.some((b) => Array.isArray(b.supportedClasses) && b.supportedClasses.includes(vehicleClass));
 }
 
 export default function CustomerSearch() {

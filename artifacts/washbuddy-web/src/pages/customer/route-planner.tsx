@@ -503,16 +503,19 @@ export default function RoutePlanner() {
   });
   // All locations are surfaced; we annotate each with a `fitsActiveVehicle`
   // flag so the route planner can render incompatible ones in a grayed
-  // unclickable state instead of hiding them. The driver sees why a
-  // location they expected to find is unavailable.
+  // unclickable state instead of hiding them. Strict semantics:
+  // a missing or empty washBays array means "we couldn't verify",
+  // which is treated as incompatible — the prior permissive fallback
+  // silently passed every location through as compatible whenever the
+  // response shape skipped the field, which is the bug we're closing.
   const allLocations = useMemo(() => {
     const raw = (data?.locations || []) as any[];
     return raw.map((loc: any) => {
       let fits: boolean | null = null;
       if (activeVehicleClass) {
-        if (!Array.isArray(loc.washBays)) fits = null; // unknown — older response shape
-        else if (loc.washBays.length === 0) fits = false;
-        else fits = loc.washBays.some((b: any) => (b.supportedClasses || []).includes(activeVehicleClass));
+        const bays = loc.washBays;
+        if (!Array.isArray(bays) || bays.length === 0) fits = false;
+        else fits = bays.some((b: any) => Array.isArray(b.supportedClasses) && b.supportedClasses.includes(activeVehicleClass));
       }
       return { ...loc, fitsActiveVehicle: fits };
     });
