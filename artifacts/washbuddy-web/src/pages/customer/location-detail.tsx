@@ -341,6 +341,16 @@ export default function LocationDetail() {
     return false;
   };
 
+  // Hoisted so the upfront incompatibility warning AND the gate that
+  // hides the booking steps share the same boolean.
+  const locationIncompatibleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
+  const locationBays: any[] = (locData as any)?.washBays || [];
+  const locationIncompatible = !!activeVehicle && !!locationIncompatibleClass && locationBays.length > 0
+    && !locationBays.some((b: any) => (b.supportedClasses || []).includes(locationIncompatibleClass));
+  const incompatibleVehicleLine = activeVehicle
+    ? `${vehicleDisplayName(activeVehicle)}${inchesToFeet(activeVehicle.lengthInches) ? `, ${inchesToFeet(activeVehicle.lengthInches)}ft` : ""}${locationIncompatibleClass && SIZE_CLASS_LABEL[locationIncompatibleClass] ? ` ${SIZE_CLASS_LABEL[locationIncompatibleClass]}` : ""}`
+    : "";
+
   // When the booking has succeeded, the entire page collapses to a
   // single centered receipt card — no header, no sidebar, no reviews.
   // The receipt IS the page. Earlier we tried inlining the receipt as
@@ -413,37 +423,29 @@ export default function LocationDetail() {
               state below instead of Steps 1-3. */}
           <ActiveVehicleContextCard />
 
-          {/* If the active vehicle's class can't fit any active bay at
-              this location, every slot will be empty — say so up front
-              instead of letting the user trip across "no slots" further
-              down. The pill above is the way out (swap vehicle); we link
-              to /search as a fallback for browsing other locations. */}
-          {(() => {
-            if (!activeVehicle) return null;
-            const cls = deriveSizeClassFromLengthInches(activeVehicle.lengthInches);
-            const bays: any[] = (locData as any)?.washBays || [];
-            const fits = !cls || bays.length === 0
-              ? true
-              : bays.some((b) => (b.supportedClasses || []).includes(cls));
-            if (fits) return null;
-            return (
-              <Card className="p-4 bg-amber-50 border-amber-200">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
-                  <div className="flex-1 text-sm text-amber-900">
-                    <p className="font-bold">Your active vehicle won't fit at this location.</p>
-                    <p className="text-amber-800/80 mt-0.5">
-                      No bay here supports {cls && SIZE_CLASS_LABEL[cls] ? SIZE_CLASS_LABEL[cls] : "this"} vehicles.
-                      Switch vehicles via the pill above, or
-                      <button onClick={() => setNav("/search")} className="ml-1 font-semibold underline hover:no-underline">browse other locations</button>.
-                    </p>
-                  </div>
+          {/* Defense-in-depth incompatibility guard. When the active
+              vehicle's class can't fit any bay at this location, render
+              an upfront prominent warning IN PLACE OF the booking
+              steps below — the buried "no slots" message in step 2
+              was confusing and made the failure look like a date issue. */}
+          {locationIncompatible && activeVehicle ? (
+            <Card className="p-6 md:p-8 bg-amber-50 border-2 border-amber-200">
+              <div className="flex flex-col items-center text-center max-w-lg mx-auto">
+                <div className="h-14 w-14 bg-amber-100 rounded-2xl flex items-center justify-center mb-3">
+                  <AlertTriangle className="h-7 w-7 text-amber-600" />
                 </div>
-              </Card>
-            );
-          })()}
-
-          {!vehicleLoading && !hasAnyVehicle ? (
+                <h3 className="text-lg font-bold text-amber-900">This location can't host your active vehicle</h3>
+                <p className="text-sm text-amber-800/90 mt-2">
+                  Your active vehicle (<span className="font-semibold">{incompatibleVehicleLine}</span>) doesn't fit any bay at <span className="font-semibold">{locData?.name || "this location"}</span>.
+                </p>
+                <p className="text-sm text-amber-800/80 mt-2">
+                  Change your active vehicle in the pill above to book here, or
+                  <button onClick={() => setNav("/search")} className="ml-1 font-semibold underline hover:no-underline">pick a different location</button>.
+                </p>
+              </div>
+            </Card>
+          ) : (
+          !vehicleLoading && !hasAnyVehicle ? (
             <Card className="p-8 text-center bg-amber-50 border-amber-200">
               <div className="h-14 w-14 mx-auto bg-amber-100 rounded-2xl flex items-center justify-center mb-3">
                 <AlertTriangle className="h-7 w-7 text-amber-600" />
@@ -578,13 +580,14 @@ export default function LocationDetail() {
                         <p className="text-slate-400 text-sm mt-1">Try a different day or location.</p>
                       </div>
                     ) : !((availabilityData as any).slots as any[]).some((s: any) => s.available) ? (
-                      <div className="p-8 bg-amber-50 rounded-xl text-center border border-dashed border-amber-300">
-                        <p className="text-amber-800 font-medium">No bay can host your active vehicle on this date.</p>
-                        <p className="text-amber-700/80 text-sm mt-1">
-                          {activeVehicle
-                            ? `Every slot is blocked for ${activeVehicleClass ? activeVehicleClass.toLowerCase().replace("_", " ") : "your"} vehicles. Try a different day, or pick a vehicle with a smaller class via the pill above.`
-                            : "Try a different day, or pick a vehicle from the pill above."}
-                        </p>
+                      // Structural vehicle/location incompatibility is
+                      // now caught upfront — by the time we reach this
+                      // branch the location *can* host the active
+                      // vehicle, just not on this date. So the right
+                      // framing is "fully booked today" or "closed".
+                      <div className="p-8 bg-slate-50 rounded-xl text-center border border-dashed border-slate-300">
+                        <p className="text-slate-700 font-medium">No availability on this date.</p>
+                        <p className="text-slate-500 text-sm mt-1">All compatible bays are booked or the location is closed. Try a different day.</p>
                       </div>
                     ) : (
                       <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
@@ -670,10 +673,14 @@ export default function LocationDetail() {
               </p>
             </div>
           </Card>
-          </>)}
+          </>)
+        )}
         </div>
 
-        {/* Right Col - Booking Summary */}
+        {/* Right Col - Booking Summary. Hidden when the location can't
+            host the active vehicle — the upfront warning replaces the
+            entire booking flow including the summary sidebar. */}
+        {!locationIncompatible && (
         <div className="lg:col-span-1">
           <div className="sticky top-24 space-y-4">
             <Card className="bg-gradient-to-br from-slate-900 to-slate-800 text-white border-slate-700 overflow-hidden">
@@ -748,6 +755,7 @@ export default function LocationDetail() {
             </div>
           </div>
         </div>
+        )}
       </div>
 
       <div>
