@@ -17,6 +17,7 @@ import { useActiveVehicle, type ActiveVehicleRow } from "@/contexts/activeVehicl
 import {
   BODY_TYPE_ICON,
   BODY_TYPE_LABEL,
+  BODY_TYPE_STYLE,
   bodyTypeStyleFor,
   deriveSizeClassFromLengthInches,
   inchesToFeet,
@@ -85,7 +86,7 @@ export function ActiveVehiclePill({ className }: { className?: string }) {
                   onClick={async () => { await setActive(v.id); setOpen(false); }}
                   className={`w-full text-left px-4 py-2.5 hover:bg-slate-50 transition-colors flex items-center gap-3 ${v.isDefault ? "bg-primary/5" : ""}`}
                 >
-                  <PillContent vehicle={v} compact active={v.isDefault} />
+                  <DropdownItemContent vehicle={v} active={v.isDefault} />
                   {v.isDefault && <Star className="h-4 w-4 text-primary fill-primary ml-auto" />}
                 </button>
               </li>
@@ -119,6 +120,37 @@ function PillContent({ vehicle, compact, active }: { vehicle: ActiveVehicleRow; 
         <p className="font-bold text-sm text-slate-900 truncate leading-tight">{vehicleDisplayName(vehicle)}</p>
         <p className="text-xs text-slate-500 truncate leading-tight">
           {BODY_TYPE_LABEL[bt]}{lengthFeet != null ? ` · ${lengthFeet} ft` : ""}{!compact && sizeClass ? ` · ${SIZE_CLASS_LABEL[sizeClass]}` : ""}
+        </p>
+      </div>
+    </>
+  );
+}
+
+/** Dropdown menu item rendering. The active vehicle keeps its full
+ * body-type colored chip; non-active items get an outline-only chip
+ * (white interior, body-type colored border + glyph) so the active
+ * row dominates by reduction of the rest. */
+function DropdownItemContent({ vehicle, active }: { vehicle: ActiveVehicleRow; active: boolean }) {
+  const bt = normalizeBodyType(vehicle.bodyType);
+  const Icon = BODY_TYPE_ICON[bt];
+  const fullStyle = BODY_TYPE_STYLE[bt];
+  const sizeClass = deriveSizeClassFromLengthInches(vehicle.lengthInches);
+  const lengthFeet = inchesToFeet(vehicle.lengthInches);
+  return (
+    <>
+      {active ? (
+        <div className={`h-8 w-8 ${fullStyle.chipBg} rounded-lg flex items-center justify-center shrink-0`}>
+          <Icon className={`h-4 w-4 ${fullStyle.chipFg}`} />
+        </div>
+      ) : (
+        <div className={`h-8 w-8 bg-white rounded-lg border ${fullStyle.border} flex items-center justify-center shrink-0`}>
+          <Icon className={`h-4 w-4 ${fullStyle.text}`} strokeWidth={1.75} />
+        </div>
+      )}
+      <div className="text-left min-w-0">
+        <p className={`font-bold text-sm truncate leading-tight ${active ? "text-slate-900" : "text-slate-700"}`}>{vehicleDisplayName(vehicle)}</p>
+        <p className="text-xs text-slate-500 truncate leading-tight">
+          {BODY_TYPE_LABEL[bt]}{lengthFeet != null ? ` · ${lengthFeet} ft` : ""}{sizeClass ? ` · ${SIZE_CLASS_LABEL[sizeClass]}` : ""}
         </p>
       </div>
     </>
