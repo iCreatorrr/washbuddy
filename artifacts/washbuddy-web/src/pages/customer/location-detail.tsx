@@ -356,6 +356,32 @@ export default function LocationDetail() {
     return false;
   };
 
+  // When the booking has succeeded, the entire page collapses to a
+  // single centered receipt card — no header, no sidebar, no reviews.
+  // The receipt IS the page. Earlier we tried inlining the receipt as
+  // a step-3 card; that left the rest of the page (booking summary,
+  // operating hours, etc.) competing for the eye and made the success
+  // moment feel ambiguous.
+  if (bookingResult) {
+    const resolvedSvc = selectedSvc || services.find((s: any) => s.id === bookingResult.serviceId) || null;
+    return (
+      <div className="max-w-xl mx-auto py-12 px-4">
+        <BookingReceipt
+          bookingResult={bookingResult}
+          locData={locData}
+          service={resolvedSvc}
+          slotUtc={selectedSlot || bookingResult.slotUtc || null}
+          vehicle={activeVehicle}
+          totalPrice={totalPrice || ((resolvedSvc as any)?.allInPriceMinor ?? (resolvedSvc as any)?.basePriceMinor) || 0}
+          onDone={() => {
+            if (receiptStorageKey) sessionStorage.removeItem(receiptStorageKey);
+            setNav("/bookings");
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-5xl mx-auto space-y-8">
       <button onClick={() => setNav(backUrl)} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors font-medium">
@@ -633,48 +659,32 @@ export default function LocationDetail() {
             </div>
           )}
 
-          {/* Step 3: Confirm Booking — vehicle is the active one, set above */}
-          {!bookingResult ? (
-            <Card className={`transition-all duration-300 ${bookingStep < 3 ? "opacity-50 pointer-events-none" : ""}`}>
-              <div className="p-6">
-                {bookingError && (
-                  <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm font-medium">
-                    {bookingError}
-                  </div>
-                )}
-                <Button
-                  size="lg"
-                  className="w-full h-14 text-lg gap-2"
-                  onClick={handleConfirmBooking}
-                  disabled={!holdId || holdTimeLeft === 0 || bookMutation.isPending}
-                  isLoading={bookMutation.isPending}
-                >
-                  <CheckCircle2 className="h-5 w-5" /> Confirm Booking
-                </Button>
-                <p className="text-center text-xs text-slate-400 mt-3">
-                  {selectedSvc && (selectedSvc as any).requiresConfirmation === false
-                    ? "This is an instant booking — it will be confirmed immediately."
-                    : "The provider will review and confirm your booking request."}
-                </p>
-              </div>
-            </Card>
-          ) : (
-            <BookingReceipt
-              bookingResult={bookingResult}
-              locData={locData}
-              // After a back-then-forward navigation we rebuild the
-              // receipt from sessionStorage; selectedSvc / selectedSlot
-              // are null, so resolve from the persisted ids.
-              service={selectedSvc || services.find((s: any) => s.id === bookingResult.serviceId) || null}
-              slotUtc={selectedSlot || bookingResult.slotUtc || null}
-              vehicle={activeVehicle}
-              totalPrice={totalPrice || ((selectedSvc || services.find((s: any) => s.id === bookingResult.serviceId)) as any)?.allInPriceMinor || 0}
-              onDone={() => {
-                if (receiptStorageKey) sessionStorage.removeItem(receiptStorageKey);
-                setNav("/bookings");
-              }}
-            />
-          )}
+          {/* Step 3: Confirm Booking — vehicle is the active one, set above.
+              When bookingResult is set, the page-level early-return upstream
+              swaps in a centered receipt instead of this card. */}
+          <Card className={`transition-all duration-300 ${bookingStep < 3 ? "opacity-50 pointer-events-none" : ""}`}>
+            <div className="p-6">
+              {bookingError && (
+                <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm font-medium">
+                  {bookingError}
+                </div>
+              )}
+              <Button
+                size="lg"
+                className="w-full h-14 text-lg gap-2"
+                onClick={handleConfirmBooking}
+                disabled={!holdId || holdTimeLeft === 0 || bookMutation.isPending}
+                isLoading={bookMutation.isPending}
+              >
+                <CheckCircle2 className="h-5 w-5" /> Confirm Booking
+              </Button>
+              <p className="text-center text-xs text-slate-400 mt-3">
+                {selectedSvc && (selectedSvc as any).requiresConfirmation === false
+                  ? "This is an instant booking — it will be confirmed immediately."
+                  : "The provider will review and confirm your booking request."}
+              </p>
+            </div>
+          </Card>
           </>)}
         </div>
 
@@ -824,89 +834,96 @@ function BookingReceipt({
   const dateLine = slotUtc ? formatDate(slotUtc, "EEEE, MMM d, yyyy", tz) : "—";
   const timeLine = slotUtc ? renderTimeWithZone(slotUtc, tz) : "—";
 
+  const vehicleClass = vehicle ? deriveSizeClassFromLengthInches(vehicle.lengthInches) : null;
+
   return (
-    <Card className="border-2 border-emerald-200 bg-white overflow-hidden">
-      <div className="px-6 pt-8 pb-2 flex flex-col items-center text-center">
+    <Card className="bg-white border border-slate-200 shadow-sm">
+      <div className="px-8 py-10 flex flex-col items-center text-center">
         <motion.div
-          initial={{ scale: 0.4, opacity: 0 }}
+          initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: "spring", stiffness: 220, damping: 18, duration: 0.4 }}
-          className="w-20 h-20 rounded-full bg-emerald-100 flex items-center justify-center mb-4 ring-8 ring-emerald-50"
+          transition={{ duration: 0.2, times: [0, 0.6, 1], ease: "easeOut" }}
+          className="w-[90px] h-[90px] rounded-full bg-emerald-50 flex items-center justify-center mb-5"
         >
-          <CheckCircle2 className="h-10 w-10 text-emerald-600" />
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: [0, 1.05, 1] }}
+            transition={{ delay: 0.05, duration: 0.2, times: [0, 0.6, 1] }}
+          >
+            <CheckCircle2 className="h-12 w-12 text-emerald-600" strokeWidth={2.2} />
+          </motion.div>
         </motion.div>
-        <motion.h2
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.18, duration: 0.3 }}
-          className="text-2xl font-display font-bold text-slate-900"
-        >
+
+        <h1 className="text-3xl font-display font-bold text-slate-900">
           {isInstant ? "Booking Confirmed" : "Request Submitted"}
-        </motion.h2>
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.28, duration: 0.3 }}
-          className="text-sm text-slate-500 mt-1 max-w-md"
-        >
-          {isInstant
-            ? "Your bay is reserved — show up at the scheduled time and you're set."
-            : "The provider will review and respond shortly."}
-          <span className="block font-mono text-[11px] text-slate-400 mt-1">#{bookingResult.id.split("-")[0].toUpperCase()}</span>
-        </motion.p>
-      </div>
+        </h1>
 
-      <div className="p-6 grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-5">
-        <div className="aspect-square w-full sm:w-30 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400">
-          <MapPin className="h-7 w-7" />
+        <div className="mt-4">
+          <p className="font-semibold text-slate-900">{locData?.name || "—"}</p>
+          <p className="text-sm text-slate-500 mt-0.5">
+            {[locData?.addressLine1, locData?.city, locData?.stateCode].filter(Boolean).join(", ")}
+          </p>
         </div>
-        <div className="space-y-4 min-w-0">
-          <div>
-            <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Provider</p>
-            <p className="font-bold text-slate-900 truncate">{locData?.name || "—"}</p>
-            <p className="text-sm text-slate-500 truncate">
-              {[locData?.addressLine1, locData?.city, locData?.stateCode].filter(Boolean).join(", ")}
-            </p>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">When</p>
-              <p className="font-semibold text-slate-900">{dateLine}</p>
-              <p className="text-sm text-slate-500">{timeLine}</p>
-            </div>
-            <div>
-              <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Vehicle</p>
-              {vehicle && VehicleIcon && vehicleStyle ? (
-                <div className="flex items-center gap-2 mt-0.5">
-                  <div className={`h-7 w-7 ${vehicleStyle.chipBg} rounded-lg flex items-center justify-center shrink-0`}>
-                    <VehicleIcon className={`h-4 w-4 ${vehicleStyle.chipFg}`} />
-                  </div>
-                  <span className="font-semibold text-slate-900 truncate">{vehicleDisplayName(vehicle)}</span>
-                </div>
-              ) : (
-                <p className="font-semibold text-slate-900">—</p>
+
+        <div className="w-full max-w-sm mt-7 space-y-3 text-sm">
+          <ReceiptRow label="Date & time" value={
+            <>
+              <span className="block text-slate-900 font-medium">{dateLine}</span>
+              <span className="block text-slate-500 text-xs mt-0.5">{timeLine}</span>
+            </>
+          } />
+          <ReceiptRow label="Service" value={
+            <>
+              <span className="block text-slate-900 font-medium">{service?.name || "—"}</span>
+              {service?.durationMins != null && (
+                <span className="block text-slate-500 text-xs mt-0.5">{service.durationMins} min</span>
               )}
-            </div>
-          </div>
-          <div>
-            <p className="text-[11px] uppercase tracking-wider font-bold text-slate-400">Service</p>
-            <p className="font-semibold text-slate-900">{service?.name || "—"}</p>
-            {service?.durationMins != null && (
-              <p className="text-sm text-slate-500">{service.durationMins} min</p>
-            )}
+            </>
+          } />
+          <ReceiptRow label="Vehicle" value={
+            vehicle ? (
+              <div className="flex items-center gap-2 justify-end">
+                {VehicleIcon && vehicleStyle && (
+                  <div className={`h-6 w-6 ${vehicleStyle.chipBg} rounded-md flex items-center justify-center shrink-0`}>
+                    <VehicleIcon className={`h-3.5 w-3.5 ${vehicleStyle.chipFg}`} />
+                  </div>
+                )}
+                <div className="text-right">
+                  <span className="block text-slate-900 font-medium">{vehicleDisplayName(vehicle)}</span>
+                  {vehicleClass && (
+                    <span className="block text-slate-500 text-xs mt-0.5">{SIZE_CLASS_LABEL[vehicleClass]}</span>
+                  )}
+                </div>
+              </div>
+            ) : <span className="text-slate-900 font-medium">—</span>
+          } />
+          <div className="border-t border-slate-100 pt-3 flex items-center justify-between">
+            <span className="text-slate-500">Total</span>
+            <span className="font-display font-bold text-xl text-slate-900">{formatCurrency(totalPrice)}</span>
           </div>
         </div>
-      </div>
 
-      <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
-        <span className="text-sm text-slate-500">Total</span>
-        <span className="font-display font-bold text-2xl text-slate-900">{formatCurrency(totalPrice)}</span>
-      </div>
+        <p className="font-mono text-[11px] text-slate-400 mt-6 tracking-wider">
+          #{bookingResult.id.split("-")[0].toUpperCase()}
+        </p>
 
-      <div className="px-6 pb-6">
-        <Button variant="outline" className="w-full h-11" onClick={onDone}>View My Bookings</Button>
+        <button
+          onClick={onDone}
+          className="mt-6 text-sm font-semibold text-primary hover:text-primary/80 transition-colors"
+        >
+          View My Bookings →
+        </button>
       </div>
     </Card>
+  );
+}
+
+function ReceiptRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <span className="text-slate-500 shrink-0 pt-0.5">{label}</span>
+      <div className="text-right min-w-0">{value}</div>
+    </div>
   );
 }
 
