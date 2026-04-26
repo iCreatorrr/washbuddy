@@ -839,9 +839,12 @@ function ActiveVehicleContextCard() {
   const Icon = BODY_TYPE_ICON[bt];
   const cls = deriveSizeClassFromLengthInches(activeVehicle.lengthInches);
   const lengthFeet = inchesToFeet(activeVehicle.lengthInches);
+  // The pill below opens an absolutely-positioned dropdown — `overflow-hidden`
+  // on the outer Card would clip it. We render the colored stripe via a
+  // pseudo border instead, so the pill can grow downward freely.
   return (
-    <Card className="relative overflow-hidden p-0">
-      <div className={`absolute left-0 top-0 bottom-0 w-1 ${style.stripe}`} aria-hidden />
+    <Card className="relative p-0">
+      <div className={`absolute left-0 top-0 bottom-0 w-1 ${style.stripe} rounded-l-2xl`} aria-hidden />
       <div className="px-5 pl-6 py-3 flex items-center gap-3">
         <div className={`h-10 w-10 ${style.chipBg} rounded-xl flex items-center justify-center shrink-0`}>
           <Icon className={`h-5 w-5 ${style.chipFg}`} />

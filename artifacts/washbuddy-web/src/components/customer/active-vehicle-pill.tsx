@@ -73,7 +73,7 @@ export function ActiveVehiclePill({ className }: { className?: string }) {
       </button>
 
       {open && (
-        <div className="absolute z-30 mt-2 w-80 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
+        <div className="absolute right-0 z-50 mt-2 w-80 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
           <div className="px-4 py-3 border-b text-xs font-bold uppercase tracking-wider text-slate-500">Switch Vehicle</div>
           <ul role="listbox" className="max-h-72 overflow-y-auto">
             {eligibleVehicles.map((v) => (

@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "washbuddy-web",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["artifacts/washbuddy-web/start-dev.mjs"],
+      "port": 5173
+    },
+    {
+      "name": "api-server",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--enable-source-maps", "artifacts/api-server/dist/index.mjs"],
+      "port": 8080
+    }
+  ]
+}
