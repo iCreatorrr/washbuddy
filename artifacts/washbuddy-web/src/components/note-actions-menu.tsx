@@ -1,14 +1,16 @@
 /**
- * Kebab menu for editing/deleting a single note. Visible only when the
- * caller decides — typically when the note's authorRole is PROVIDER and
- * the viewer is from the same provider org. Driver- and fleet-authored
- * notes never get this affordance (append-only enforcement is the
- * server's job; we just don't render the controls here).
+ * Two pieces for note mutation:
+ *   - NoteKebabMenu: the ⋮ trigger + dropdown (Edit / Delete). Parent
+ *     owns the "is this note in edit mode?" flag — so when the user
+ *     clicks Edit, the parent can swap the note's text region for a
+ *     full-width <NoteEditor>, leaving the kebab itself in place.
+ *   - NoteEditor: a controlled textarea + Save/Cancel block that
+ *     replaces a single note's display text inline. POSTs the PATCH
+ *     directly so callers don't have to thread mutation logic through.
  *
- * The edit flow swaps the note's text for an inline textarea; submit
- * PATCHes; cancel reverts. Delete confirms inline (one-click reveal,
- * second click confirms) to keep the surface compact on Daily Board
- * rows where dialogs would dominate.
+ * Driver- and fleet-authored notes never get either component
+ * (append-only enforcement is the server's job; we just don't render
+ * the controls).
  */
 
 import React, { useEffect, useRef, useState } from "react";
@@ -23,20 +25,19 @@ interface Note {
   content: string;
 }
 
-interface Props {
-  note: Note;
-  onChanged: () => void;
-}
-
-export function NoteActionsMenu({ note, onChanged }: Props) {
+export function NoteKebabMenu({
+  noteId,
+  onRequestEdit,
+  onDeleted,
+}: {
+  noteId: string;
+  onRequestEdit: () => void;
+  onDeleted: () => void;
+}) {
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [draft, setDraft] = useState(note.content);
   const [submitting, setSubmitting] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => { setDraft(note.content); }, [note.content]);
 
   useEffect(() => {
     if (!open) return;
@@ -50,35 +51,10 @@ export function NoteActionsMenu({ note, onChanged }: Props) {
     return () => window.removeEventListener("mousedown", onClick);
   }, [open]);
 
-  const submitEdit = async () => {
-    const trimmed = draft.trim();
-    if (!trimmed) return;
-    setSubmitting(true);
-    try {
-      const r = await fetch(`${API_BASE}/api/notes/${note.id}`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: trimmed }),
-      });
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        throw new Error(d.message || "Failed to update note");
-      }
-      toast.success("Note updated");
-      setEditing(false);
-      onChanged();
-    } catch (e: any) {
-      toast.error(e.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const submitDelete = async () => {
     setSubmitting(true);
     try {
-      const r = await fetch(`${API_BASE}/api/notes/${note.id}`, {
+      const r = await fetch(`${API_BASE}/api/notes/${noteId}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -87,7 +63,7 @@ export function NoteActionsMenu({ note, onChanged }: Props) {
         throw new Error(d.message || "Failed to delete note");
       }
       toast.success("Note deleted");
-      onChanged();
+      onDeleted();
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -97,28 +73,8 @@ export function NoteActionsMenu({ note, onChanged }: Props) {
     }
   };
 
-  if (editing) {
-    return (
-      <div className="mt-1">
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value.slice(0, 2000))}
-          rows={3}
-          autoFocus
-          className="w-full border border-slate-200 rounded-md p-2 text-sm bg-white focus:border-primary focus:outline-none resize-none"
-        />
-        <div className="flex justify-end gap-2 mt-1">
-          <Button size="sm" variant="outline" onClick={() => { setEditing(false); setDraft(note.content); }}>Cancel</Button>
-          <Button size="sm" onClick={submitEdit} disabled={!draft.trim() || submitting} isLoading={submitting} className="gap-1">
-            <Check className="h-3.5 w-3.5" /> Save
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative shrink-0">
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); setConfirmingDelete(false); }}
@@ -133,7 +89,7 @@ export function NoteActionsMenu({ note, onChanged }: Props) {
             <>
               <button
                 type="button"
-                onClick={() => { setOpen(false); setEditing(true); }}
+                onClick={() => { setOpen(false); onRequestEdit(); }}
                 className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center gap-2 text-slate-700"
               >
                 <Pencil className="h-3.5 w-3.5" /> Edit
@@ -171,5 +127,101 @@ export function NoteActionsMenu({ note, onChanged }: Props) {
         </div>
       )}
     </div>
+  );
+}
+
+/** Inline editor that replaces the note's text region. Auto-grows
+ * with content (no `resize-none` lock); Save/Cancel sit underneath
+ * right-aligned so the destructive option is the right-most. */
+export function NoteEditor({
+  note,
+  onSaved,
+  onCancel,
+}: {
+  note: Note;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState(note.content);
+  const [submitting, setSubmitting] = useState(false);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grow as the user types — keeps the editing UX equivalent to
+  // long-form notes that originally used the inline-textarea kebab
+  // version. Re-runs on every keystroke so the height tracks content.
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.max(el.scrollHeight, 80)}px`;
+  }, [draft]);
+
+  const submit = async () => {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    setSubmitting(true);
+    try {
+      const r = await fetch(`${API_BASE}/api/notes/${note.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: trimmed }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.message || "Failed to update note");
+      }
+      toast.success("Note updated");
+      onSaved();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="w-full">
+      <textarea
+        ref={taRef}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value.slice(0, 2000))}
+        autoFocus
+        onClick={(e) => e.stopPropagation()}
+        className="w-full min-h-[80px] border border-slate-300 rounded-md p-2 text-sm bg-white focus:border-primary focus:outline-none resize-none leading-relaxed"
+      />
+      <div className="flex justify-end items-center gap-2 mt-2">
+        <span className="text-[11px] text-slate-400 mr-auto">{draft.length}/2000</span>
+        <Button size="sm" variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button size="sm" onClick={submit} disabled={!draft.trim() || submitting} isLoading={submitting} className="gap-1">
+          <Check className="h-3.5 w-3.5" /> Save
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Backward-compatible wrapper for any caller that hasn't migrated to
+ * the split components yet. Renders the kebab; when Edit is clicked
+ * the editor pops up next to it (legacy behavior). New callers should
+ * use NoteKebabMenu + NoteEditor directly so the editor can replace
+ * the note's text region. */
+export function NoteActionsMenu({ note, onChanged }: { note: Note; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false);
+  if (editing) {
+    return (
+      <NoteEditor
+        note={note}
+        onSaved={() => { setEditing(false); onChanged(); }}
+        onCancel={() => setEditing(false)}
+      />
+    );
+  }
+  return (
+    <NoteKebabMenu
+      noteId={note.id}
+      onRequestEdit={() => setEditing(true)}
+      onDeleted={onChanged}
+    />
   );
 }

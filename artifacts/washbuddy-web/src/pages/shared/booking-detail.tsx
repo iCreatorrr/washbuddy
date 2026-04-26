@@ -12,7 +12,7 @@ import { toast, Toaster } from "sonner";
 import { BODY_TYPE_ICON, BODY_TYPE_LABEL, BODY_TYPE_STYLE, normalizeBodyType, vehicleDisplayName } from "@/lib/vehicleBodyType";
 import { groupNotesByAuthorRole, noteSectionLabel, noteMetaLine, type NoteViewerRole } from "@/lib/noteLabels";
 import { Send } from "lucide-react";
-import { NoteActionsMenu } from "@/components/note-actions-menu";
+import { NoteEditor, NoteKebabMenu } from "@/components/note-actions-menu";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -608,12 +608,13 @@ function NoteSections({
   onNoteChanged: () => void;
 }) {
   const groups = groupNotesByAuthorRole(notes);
+  // Editor state lives in NoteSections so the edit textarea fully
+  // replaces the note's text region (full-width); the kebab stays in
+  // place beside it. Only one note edits at a time.
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   return (
     <>
       {groups.map(({ role, notes: groupNotes }) => {
-        // Provider-context notes (the operator's own org's notes) read
-        // in a quieter slate card. Notes from drivers / fleet keep the
-        // amber treatment so they read as "from outside, attention".
         const incoming = role !== "PROVIDER";
         const cardClass = incoming
           ? "p-6 md:p-8 border-amber-100 bg-amber-50/40"
@@ -632,13 +633,30 @@ function NoteSections({
             <div className="space-y-3">
               {groupNotes.map((n: any) => {
                 const meta = noteMetaLine(n, (d) => formatDate(typeof d === "string" ? d : d.toISOString(), "MMM d, yyyy"));
+                const isEditing = editingNoteId === n.id;
                 return (
                   <div key={n.id} className="flex items-start gap-2">
                     <div className="flex-1 min-w-0">
-                      <p className="text-slate-800 whitespace-pre-wrap leading-relaxed">{n.content}</p>
-                      {meta && <p className="text-xs text-slate-500 mt-1">{meta}</p>}
+                      {isEditing ? (
+                        <NoteEditor
+                          note={n}
+                          onSaved={() => { setEditingNoteId(null); onNoteChanged(); }}
+                          onCancel={() => setEditingNoteId(null)}
+                        />
+                      ) : (
+                        <>
+                          <p className="text-slate-800 whitespace-pre-wrap leading-relaxed">{n.content}</p>
+                          {meta && <p className="text-xs text-slate-500 mt-1">{meta}</p>}
+                        </>
+                      )}
                     </div>
-                    {editable && <NoteActionsMenu note={n} onChanged={onNoteChanged} />}
+                    {editable && !isEditing && (
+                      <NoteKebabMenu
+                        noteId={n.id}
+                        onRequestEdit={() => setEditingNoteId(n.id)}
+                        onDeleted={onNoteChanged}
+                      />
+                    )}
                   </div>
                 );
               })}

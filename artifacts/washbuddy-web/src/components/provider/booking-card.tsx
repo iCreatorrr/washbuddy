@@ -7,7 +7,7 @@ import { PhotoPrompt } from "./photo-prompt";
 import { BODY_TYPE_ICON, BODY_TYPE_STYLE, deriveSizeClassFromLengthInches, normalizeBodyType, type BodyType } from "@/lib/vehicleBodyType";
 import { groupNotesByAuthorRole, noteSectionLabel, noteMetaLine } from "@/lib/noteLabels";
 import { resolveBookingDisplayName } from "@/lib/bookingDisplay";
-import { NoteActionsMenu } from "@/components/note-actions-menu";
+import { NoteEditor, NoteKebabMenu } from "@/components/note-actions-menu";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -97,6 +97,10 @@ export function BookingCard({
   };
   const [actionLoading, setActionLoading] = useState(false);
   const [showPhotoPrompt, setShowPhotoPrompt] = useState<"BEFORE" | "AFTER" | null>(null);
+  // Which note in this booking is currently being edited inline. The
+  // editor replaces the note's text region (full-width); the kebab
+  // stays put. Null when nothing is being edited.
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
 
   const b = booking;
   const vc = classBadgeFor(b);
@@ -230,13 +234,30 @@ export function BookingCard({
                       // bookings surfaced here, so PROVIDER notes get
                       // the kebab unconditionally.
                       const editable = role === "PROVIDER";
+                      const isEditing = editingNoteId === n.id;
                       return (
                         <div key={n.id} className="flex items-start gap-1">
                           <div className="flex-1 min-w-0">
-                            <p className={`text-sm whitespace-pre-wrap ${textClr}`}>{n.content}</p>
-                            {meta && <p className="text-[10px] text-slate-500 mt-0.5">{meta}</p>}
+                            {isEditing ? (
+                              <NoteEditor
+                                note={n}
+                                onSaved={() => { setEditingNoteId(null); onStatusChange(); }}
+                                onCancel={() => setEditingNoteId(null)}
+                              />
+                            ) : (
+                              <>
+                                <p className={`text-sm whitespace-pre-wrap ${textClr}`}>{n.content}</p>
+                                {meta && <p className="text-[10px] text-slate-500 mt-0.5">{meta}</p>}
+                              </>
+                            )}
                           </div>
-                          {editable && <NoteActionsMenu note={n} onChanged={onStatusChange} />}
+                          {editable && !isEditing && (
+                            <NoteKebabMenu
+                              noteId={n.id}
+                              onRequestEdit={() => setEditingNoteId(n.id)}
+                              onDeleted={onStatusChange}
+                            />
+                          )}
                         </div>
                       );
                     })}
