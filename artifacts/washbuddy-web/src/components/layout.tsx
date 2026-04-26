@@ -3,7 +3,7 @@ import { useAuth } from "@/contexts/auth";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui";
-import { LogOut, Menu, User, MapPin, Calendar, Truck, LayoutDashboard, Settings, Users, Droplets, Route, Star, Shield, ClipboardList, RotateCcw, Building2, BarChart3 } from "lucide-react";
+import { LogOut, Menu, User, MapPin, Calendar, Truck, LayoutDashboard, Settings, Users, Droplets, Route, Star, Shield, ClipboardList, RotateCcw, Building2, BarChart3, X, ArrowLeft } from "lucide-react";
 import { NotificationBell } from "./notification-bell";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -142,42 +142,65 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         {/* Mobile Header */}
         <header className="lg:hidden flex items-center justify-between p-4 bg-white border-b border-slate-200 sticky top-0 z-30 glass-panel">
           <div className="flex items-center gap-2">
+            {/* In-app back button — popped browser history when there's
+                in-session navigation, otherwise stays hidden so the
+                landing page doesn't show a confusing "back to nothing". */}
+            {window.history.length > 1 && location !== "/" && (
+              <button
+                type="button"
+                onClick={() => window.history.back()}
+                aria-label="Back"
+                className="p-2 -ml-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                <ArrowLeft className="h-5 w-5" />
+              </button>
+            )}
             <Droplets className="h-6 w-6 text-blue-600" />
             <span className="text-xl font-display font-bold text-slate-900">WashBuddy</span>
           </div>
           <div className="flex items-center gap-1">
             <NotificationBell />
-            <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
-              <Menu className="h-6 w-6" />
+            <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}>
+              {isMobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
             </Button>
           </div>
         </header>
 
-        {/* Mobile Menu Dropdown */}
+        {/* Mobile Menu Dropdown — backdrop dismisses on tap */}
         <AnimatePresence>
           {isMobileMenuOpen && (
-            <motion.div 
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="lg:hidden bg-slate-900 text-white overflow-hidden border-b border-slate-800 sticky top-[73px] z-20"
-            >
-              <nav className="p-4 space-y-2">
-                {navItems.map((item) => (
-                  <Link key={item.href} href={item.href} className="block" onClick={() => setIsMobileMenuOpen(false)}>
-                    <div className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-slate-800 text-slate-300">
-                      <item.icon className="h-5 w-5" />
-                      {item.label}
-                    </div>
-                  </Link>
-                ))}
-                <div className="pt-4 mt-4 border-t border-slate-800">
-                  <Button variant="ghost" className="w-full text-slate-300 hover:bg-slate-800 hover:text-white" onClick={logout}>
-                    <LogOut className="h-4 w-4 mr-2" /> Sign Out
-                  </Button>
-                </div>
-              </nav>
-            </motion.div>
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="lg:hidden fixed inset-0 top-[73px] bg-black/40 z-10"
+                aria-hidden
+              />
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="lg:hidden bg-slate-900 text-white overflow-hidden border-b border-slate-800 sticky top-[73px] z-20"
+              >
+                <nav className="p-4 space-y-2">
+                  {navItems.map((item) => (
+                    <Link key={item.href} href={item.href} className="block" onClick={() => setIsMobileMenuOpen(false)}>
+                      <div className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-slate-800 text-slate-300">
+                        <item.icon className="h-5 w-5" />
+                        {item.label}
+                      </div>
+                    </Link>
+                  ))}
+                  <div className="pt-4 mt-4 border-t border-slate-800">
+                    <Button variant="ghost" className="w-full text-slate-300 hover:bg-slate-800 hover:text-white" onClick={logout}>
+                      <LogOut className="h-4 w-4 mr-2" /> Sign Out
+                    </Button>
+                  </div>
+                </nav>
+              </motion.div>
+            </>
           )}
         </AnimatePresence>
 
