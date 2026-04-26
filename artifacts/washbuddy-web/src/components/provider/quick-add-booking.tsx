@@ -45,10 +45,23 @@ function ServiceIcon({ name, className }: { name: string; className?: string }) 
   return <Droplets className={className} />;
 }
 
+interface OperatingWindow {
+  dayOfWeek: number; // 0 = Sun
+  openTime: string;
+  closeTime: string;
+}
+
 interface QuickAddProps {
   providerId: string;
   locationId: string;
+  locationName?: string;
   locationTimezone: string;
+  // When provided, the form checks the picked date against the
+  // location's open days and surfaces a soft warning if the date
+  // falls on a closed day. Driver-side flows hard-filter closed days
+  // upstream; the walk-in form is a provider override path so we
+  // confirm rather than block.
+  operatingWindows?: OperatingWindow[];
   onClose: () => void;
   onSuccess: () => void;
   prefillBayId?: string;
@@ -64,7 +77,7 @@ interface SelectedAddOn {
   isCustomOneOff: boolean;
 }
 
-export function QuickAddBooking({ providerId, locationId, locationTimezone, onClose, onSuccess, prefillBayId, prefillDate, prefillTime }: QuickAddProps) {
+export function QuickAddBooking({ providerId, locationId, locationName, locationTimezone, operatingWindows, onClose, onSuccess, prefillBayId, prefillDate, prefillTime }: QuickAddProps) {
   const [step, setStep] = useState<1 | 2>(1);
   const [source, setSource] = useState<"DIRECT" | "WALK_IN">("DIRECT");
   const [clientName, setClientName] = useState("");
@@ -208,8 +221,37 @@ export function QuickAddBooking({ providerId, locationId, locationTimezone, onCl
     });
   };
 
-  const handleSubmit = async () => {
-    if (!clientName.trim() || selectedServiceIds.length === 0) { toast.error("Client name and at least one service required"); return; }
+  // Closed-day soft warning state. The form intercepts the first
+  // submit when the picked date falls on a closed day and asks for
+  // confirmation; "Book anyway" sets a flag and re-submits without
+  // re-asking. The driver-side flow already hard-filters closed days
+  // upstream, so this is only relevant on the operator override path.
+  const [closedDayPending, setClosedDayPending] = useState(false);
+
+  const isClosedOnPickedDay = (() => {
+    if (!Array.isArray(operatingWindows) || operatingWindows.length === 0) return false;
+    // Parse the date in the *location's* timezone, not the operator's.
+    // localDateTimeToUtc gives us the UTC instant; we re-derive the day
+    // index from the location's wall clock for that instant.
+    try {
+      const utc = localDateTimeToUtc(date, "12:00", locationTimezone);
+      const fmt = new Intl.DateTimeFormat("en-US", { timeZone: locationTimezone, weekday: "short" });
+      const wd = fmt.format(utc).slice(0, 3).toLowerCase();
+      const map: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+      const dow = map[wd];
+      if (dow == null) return false;
+      return !operatingWindows.some((w) => w.dayOfWeek === dow);
+    } catch { return false; }
+  })();
+
+  const closedDayName = (() => {
+    try {
+      const utc = localDateTimeToUtc(date, "12:00", locationTimezone);
+      return new Intl.DateTimeFormat("en-US", { timeZone: locationTimezone, weekday: "long" }).format(utc);
+    } catch { return "this day"; }
+  })();
+
+  const submitBooking = async () => {
     setSaving(true);
     try {
       // startTime is wall-clock in the location's timezone; convert to true UTC.
@@ -252,6 +294,15 @@ export function QuickAddBooking({ providerId, locationId, locationTimezone, onCl
       onClose();
     } catch (err: any) { toast.error(err.message); }
     finally { setSaving(false); }
+  };
+
+  const handleSubmit = async () => {
+    if (!clientName.trim() || selectedServiceIds.length === 0) { toast.error("Client name and at least one service required"); return; }
+    if (isClosedOnPickedDay) {
+      setClosedDayPending(true);
+      return;
+    }
+    await submitBooking();
   };
 
   // Group add-ons by category
@@ -448,6 +499,25 @@ export function QuickAddBooking({ providerId, locationId, locationTimezone, onCl
           )}
         </div>
       </div>
+
+      {/* Closed-day soft warning. We don't block the booking — operators
+          override hours all the time (early-morning fleet detail, after-
+          hours emergency wash) — but we make sure they're doing it on
+          purpose. */}
+      {closedDayPending && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={() => setClosedDayPending(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-slate-900">Location closed on this day</h3>
+            <p className="text-sm text-slate-600 mt-2">
+              {locationName ? <><span className="font-semibold">{locationName}</span></> : "This location"} is closed on <span className="font-semibold">{closedDayName}</span>. Are you sure you want to book on this day?
+            </p>
+            <div className="flex gap-2 mt-5 justify-end">
+              <Button variant="outline" onClick={() => setClosedDayPending(false)}>Cancel</Button>
+              <Button onClick={async () => { setClosedDayPending(false); await submitBooking(); }} isLoading={saving}>Book anyway</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
