@@ -288,6 +288,20 @@ const locationIcon = L.divIcon({
   popupAnchor: [0, -30],
 });
 
+/** Greyed-out pin used for locations that physically can't host the
+ * driver's active vehicle. Same shape so the map still reads as a
+ * location pin, but the saturated blue collapses to slate so the eye
+ * skips it the way the dimmed Find a Wash cards do. */
+const incompatibleLocationIcon = L.divIcon({
+  className: "",
+  html: `<div style="width:28px;height:28px;background:linear-gradient(135deg,#cbd5e1,#94a3b8);border:3px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;opacity:0.85;">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+  </div>`,
+  iconSize: [28, 28],
+  iconAnchor: [14, 28],
+  popupAnchor: [0, -30],
+});
+
 const startIcon = L.divIcon({
   className: "",
   html: `<div style="width:36px;height:36px;background:linear-gradient(135deg,#22c55e,#16a34a);border:3px solid white;border-radius:50%;box-shadow:0 2px 10px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;">
@@ -708,13 +722,20 @@ export default function RoutePlanner() {
 
     locsToShow.forEach((loc) => {
       if (loc.latitude == null || loc.longitude == null) return;
-      const marker = L.marker([loc.latitude, loc.longitude], { icon: locationIcon }).addTo(map);
+      // Pick the icon based on whether the active vehicle can fit any
+      // bay at this location. The dimmed pin tells the driver at a
+      // glance "I see this location but I can't book here right now"
+      // without making them tap through to find out.
+      const incompatible = (loc as any).fitsActiveVehicle === false;
+      const marker = L.marker([loc.latitude, loc.longitude], {
+        icon: incompatible ? incompatibleLocationIcon : locationIcon,
+      }).addTo(map);
 
       const popup = L.DomUtil.create("div");
       popup.style.cssText = "font-family:system-ui;min-width:180px;";
 
       const nameEl = L.DomUtil.create("div", "", popup);
-      nameEl.style.cssText = "font-weight:700;font-size:14px;margin-bottom:4px;color:#0f172a;";
+      nameEl.style.cssText = `font-weight:700;font-size:14px;margin-bottom:4px;color:${incompatible ? "#475569" : "#0f172a"};`;
       nameEl.textContent = loc.name;
 
       if (loc.provider?.name) {
@@ -728,6 +749,21 @@ export default function RoutePlanner() {
       addrEl.textContent = route
         ? `${loc.city} — ${Math.round(loc.distanceToRoute)} km from route`
         : `${loc.city} — ${Math.round(loc.distFromOrigin)} km away`;
+
+      if (incompatible) {
+        // Replace the standard "X services" line + Book button with a
+        // prominent incompatibility badge and a helper line. No CTA —
+        // the driver's only path forward is swapping their active
+        // vehicle, which lives outside this popup.
+        const badge = L.DomUtil.create("div", "", popup);
+        badge.style.cssText = "margin-top:6px;padding:6px 8px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;font-size:11px;font-weight:600;color:#92400e;display:flex;align-items:center;gap:4px;";
+        badge.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> No bay fits your active vehicle`;
+
+        const helpEl = L.DomUtil.create("div", "", popup);
+        helpEl.style.cssText = "margin-top:6px;font-size:11px;color:#64748b;";
+        helpEl.textContent = "Change your active vehicle to book at this location.";
+        return;
+      }
 
       const etaMins = etas[loc.id];
       if (etaMins != null) {
