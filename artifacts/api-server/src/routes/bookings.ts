@@ -485,6 +485,14 @@ router.get("/bookings/:bookingId", requireAuth, async (req, res) => {
         service: { select: { id: true, name: true, durationMins: true } },
         customer: { select: { id: true, email: true, firstName: true, lastName: true } },
         vehicle: true,
+        // Bay was missing from this projection — the detail page was
+        // rendering "Unassigned" for every booking, even ones with a
+        // washBayId set, because b.washBay was always undefined here.
+        washBay: { select: { id: true, name: true } },
+        // Operator is needed for the "Booked by" line on walk-in /
+        // off-platform bookings on the standalone detail page (matches
+        // the Daily Board expanded view).
+        assignedOperator: { select: { id: true, firstName: true, lastName: true } },
         statusHistory: { orderBy: { createdAt: "asc" } },
         // Surface notes + add-ons inline so the detail page can render
         // them without a second round-trip; both are bookings-of-truth

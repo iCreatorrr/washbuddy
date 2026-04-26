@@ -453,6 +453,15 @@ function ProviderBody({ booking: b, canEditProviderNotes, onNoteChanged }: { boo
             </p>
           </div>
         </div>
+        {/* "Booked by" line — same rule as Daily Board: only shown for
+            off-platform / walk-in / direct bookings, where the customer
+            primary doesn't already attribute who entered the booking. */}
+        {(b.isOffPlatform || b.bookingSource === "WALK_IN" || b.bookingSource === "DIRECT") && b.assignedOperator && (
+          <p className="text-xs text-slate-400 mt-3 pt-3 border-t border-slate-200">
+            Booked by {[b.assignedOperator.firstName, b.assignedOperator.lastName].filter(Boolean).join(" ") || "operator"}
+            {" · "}{b.bookingSource === "WALK_IN" ? "Walk-in" : b.bookingSource === "DIRECT" ? "Direct" : "Off-platform"}
+          </p>
+        )}
       </Card>
 
       {Array.isArray(b.statusHistory) && b.statusHistory.length > 0 && (
