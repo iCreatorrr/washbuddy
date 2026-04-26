@@ -486,6 +486,17 @@ router.get("/bookings/:bookingId", requireAuth, async (req, res) => {
         customer: { select: { id: true, email: true, firstName: true, lastName: true } },
         vehicle: true,
         statusHistory: { orderBy: { createdAt: "asc" } },
+        // Surface notes + add-ons inline so the detail page can render
+        // them without a second round-trip; both are bookings-of-truth
+        // signals the operator needs at a glance.
+        washNotes: {
+          select: { id: true, content: true, noteType: true, createdAt: true, author: { select: { firstName: true, lastName: true } } },
+          orderBy: { createdAt: "asc" },
+        },
+        addOns: {
+          select: { id: true, name: true, priceMinor: true, quantity: true, totalMinor: true, isCustomOneOff: true },
+          orderBy: { createdAt: "asc" },
+        },
       },
     });
 

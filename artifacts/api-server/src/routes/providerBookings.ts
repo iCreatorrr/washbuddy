@@ -160,7 +160,19 @@ router.get("/providers/:providerId/locations/:locationId/daily-board", requireAu
         service: { select: { name: true } },
         washBay: { select: { id: true, name: true } },
         assignedOperator: { select: { id: true, firstName: true, lastName: true } },
-        _count: { select: { photos: true, messages: true, washNotes: true } },
+        // Inline notes + add-ons so the Daily Board expanded view can
+        // render them without a per-row round-trip. Limited to a small
+        // number per booking to keep the payload sane.
+        washNotes: {
+          select: { id: true, content: true, noteType: true, createdAt: true },
+          orderBy: { createdAt: "asc" },
+          take: 5,
+        },
+        addOns: {
+          select: { id: true, name: true, priceMinor: true, quantity: true, totalMinor: true },
+          orderBy: { createdAt: "asc" },
+        },
+        _count: { select: { photos: true, messages: true, washNotes: true, addOns: true } },
       },
       orderBy: { scheduledStartAtUtc: "asc" },
     });
@@ -203,7 +215,10 @@ router.get("/providers/:providerId/locations/:locationId/daily-board", requireAu
         assignedOperator: b.assignedOperator ? { id: b.assignedOperator.id, firstName: b.assignedOperator.firstName, lastName: b.assignedOperator.lastName } : null,
         washBay: b.washBay ? { id: b.washBay.id, name: b.washBay.name } : null,
         clientTags,
+        washNotes: b.washNotes,
         washNoteCount: b._count.washNotes,
+        addOns: b.addOns,
+        addOnCount: b._count.addOns,
         photoCount: b._count.photos,
         messageCount: b._count.messages,
       };
@@ -340,7 +355,7 @@ router.post("/providers/:providerId/bookings/off-platform", requireAuth, require
   try {
     const user = req.user as SessionUser;
     const { providerId } = req.params;
-    const { locationId, serviceId, serviceIds, vehicleClass, bayId, clientName, clientPhone, clientEmail, scheduledStartAtUtc, scheduledEndAtUtc, notes, processPayment, bookingSource } = req.body;
+    const { locationId, serviceId, serviceIds, vehicleClass, bayId, clientName, clientPhone, clientEmail, scheduledStartAtUtc, scheduledEndAtUtc, notes, processPayment, bookingSource, addOns } = req.body;
 
     if (!locationId || !serviceId || !clientName || !scheduledStartAtUtc || !scheduledEndAtUtc) {
       res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "locationId, serviceId, clientName, scheduledStartAtUtc, scheduledEndAtUtc are required" });
@@ -484,6 +499,42 @@ router.post("/providers/:providerId/bookings/off-platform", requireAuth, require
       await prisma.washNote.create({
         data: { bookingId: booking.id, locationId, authorId: user.id, noteType: "BOOKING_INSTRUCTION", content: notes },
       });
+    }
+
+    // Persist add-ons (catalog or custom one-offs). The quick-add UI sends
+    // these as part of the body; previously they were silently dropped.
+    if (Array.isArray(addOns) && addOns.length > 0) {
+      const catalogIds = addOns
+        .map((a: any) => a?.addOnId)
+        .filter((id: unknown): id is string => typeof id === "string" && id.length > 0);
+      const catalog = catalogIds.length > 0
+        ? await prisma.providerAddOn.findMany({
+            where: { id: { in: catalogIds }, providerId },
+            select: { id: true, name: true, priceMinor: true },
+          })
+        : [];
+      const catalogById = new Map(catalog.map((c) => [c.id, c]));
+
+      for (const ao of addOns as any[]) {
+        const fromCatalog = ao?.addOnId ? catalogById.get(ao.addOnId) : null;
+        const name = ao?.isCustomOneOff ? (typeof ao?.name === "string" ? ao.name.trim() : "") : (fromCatalog?.name || "");
+        if (!name) continue;
+        const priceMinor = ao?.isCustomOneOff
+          ? (Number.isFinite(ao?.priceMinor) ? Number(ao.priceMinor) : 0)
+          : (fromCatalog?.priceMinor ?? 0);
+        const quantity = Math.max(1, Number.isFinite(ao?.quantity) ? Number(ao.quantity) : 1);
+        await prisma.bookingAddOn.create({
+          data: {
+            bookingId: booking.id,
+            addOnId: ao?.isCustomOneOff ? null : (ao?.addOnId || null),
+            name,
+            priceMinor,
+            quantity,
+            totalMinor: priceMinor * quantity,
+            isCustomOneOff: !!ao?.isCustomOneOff,
+          },
+        });
+      }
     }
 
     // Update client profile

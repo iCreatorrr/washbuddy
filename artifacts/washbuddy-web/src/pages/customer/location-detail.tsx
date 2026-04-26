@@ -493,8 +493,17 @@ export default function LocationDetail() {
                       </div>
                     ) : !(availabilityData as any)?.slots?.length ? (
                       <div className="p-8 bg-slate-50 rounded-xl text-center border border-dashed border-slate-300">
-                        <p className="text-slate-500 font-medium">No slots available on this date.</p>
-                        <p className="text-slate-400 text-sm mt-1">Try selecting a different day.</p>
+                        <p className="text-slate-500 font-medium">{(availabilityData as any)?.message || "No slots on this date."}</p>
+                        <p className="text-slate-400 text-sm mt-1">Try a different day or location.</p>
+                      </div>
+                    ) : !((availabilityData as any).slots as any[]).some((s: any) => s.available) ? (
+                      <div className="p-8 bg-amber-50 rounded-xl text-center border border-dashed border-amber-300">
+                        <p className="text-amber-800 font-medium">No bay can host your active vehicle on this date.</p>
+                        <p className="text-amber-700/80 text-sm mt-1">
+                          {activeVehicle
+                            ? `Every slot is blocked for ${activeVehicleClass ? activeVehicleClass.toLowerCase().replace("_", " ") : "your"} vehicles. Try a different day, or pick a vehicle with a smaller class via the pill above.`
+                            : "Try a different day, or pick a vehicle from the pill above."}
+                        </p>
                       </div>
                     ) : (
                       <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
