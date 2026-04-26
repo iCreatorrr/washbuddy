@@ -490,7 +490,10 @@ router.get("/bookings/:bookingId", requireAuth, async (req, res) => {
         // them without a second round-trip; both are bookings-of-truth
         // signals the operator needs at a glance.
         washNotes: {
-          select: { id: true, content: true, noteType: true, createdAt: true, author: { select: { firstName: true, lastName: true } } },
+          select: {
+            id: true, content: true, noteType: true, authorRole: true, createdAt: true,
+            author: { select: { firstName: true, lastName: true } },
+          },
           orderBy: { createdAt: "asc" },
         },
         addOns: {
@@ -519,6 +522,83 @@ router.get("/bookings/:bookingId", requireAuth, async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Failed to get booking");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to get booking" });
+  }
+});
+
+// Append-only note attachment. Drivers can attach to their own bookings,
+// provider staff/admin to bookings at their location, platform admins
+// anywhere. There is intentionally NO PATCH or DELETE handler — once a
+// note lands, it's frozen. The append-only contract is enforced at the
+// route surface; protecting the provider from mid-flight rewrites by the
+// driver matters more than supporting edits.
+router.post("/bookings/:bookingId/notes", requireAuth, async (req, res) => {
+  try {
+    const user = req.user as SessionUser;
+    const { content } = req.body as { content?: unknown };
+    if (typeof content !== "string" || content.trim().length === 0) {
+      res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "content is required" });
+      return;
+    }
+    if (content.length > 2000) {
+      res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "content must be 2000 characters or fewer" });
+      return;
+    }
+
+    const booking = await prisma.booking.findUnique({
+      where: { id: req.params.bookingId },
+      select: { id: true, locationId: true, customerId: true, location: { select: { providerId: true } } },
+    });
+    if (!booking) {
+      res.status(404).json({ errorCode: "NOT_FOUND", message: "Booking not found" });
+      return;
+    }
+
+    const isAdmin = isPlatformAdmin(user);
+    const isCustomer = booking.customerId === user.id;
+    const isProvider = isProviderRole(user, booking.location.providerId);
+    if (!isAdmin && !isCustomer && !isProvider) {
+      res.status(403).json({ errorCode: "FORBIDDEN", message: "Access denied" });
+      return;
+    }
+
+    // Resolve the author's role *now*, freeze on the row. Customer of a
+    // booking authoring a note is by definition the driver (or a fleet
+    // admin who booked on behalf of a driver — distinguish via fleet
+    // membership). Provider role wins on multi-membership for the same
+    // user (a provider operator who happens to also be a driver is here
+    // in their provider capacity).
+    let authorRole: "PROVIDER" | "DRIVER" | "FLEET" = "PROVIDER";
+    if (isProvider || isAdmin) {
+      authorRole = "PROVIDER";
+    } else if (isCustomer) {
+      // Distinguish driver vs fleet admin booking on behalf of a driver
+      const fleetMemberships = await prisma.fleetMembership.findMany({
+        where: { userId: user.id, isActive: true },
+        select: { role: true },
+      });
+      const isFleetAdmin = fleetMemberships.some((m) => m.role === "FLEET_ADMIN");
+      authorRole = isFleetAdmin ? "FLEET" : "DRIVER";
+    }
+
+    const note = await prisma.washNote.create({
+      data: {
+        bookingId: booking.id,
+        locationId: booking.locationId,
+        authorId: user.id,
+        authorRole,
+        noteType: "BOOKING_INSTRUCTION",
+        content: content.trim(),
+      },
+      select: {
+        id: true, content: true, noteType: true, authorRole: true, createdAt: true,
+        author: { select: { firstName: true, lastName: true } },
+      },
+    });
+
+    res.status(201).json({ note });
+  } catch (err) {
+    req.log.error({ err }, "Failed to add booking note");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to add note" });
   }
 });
 

@@ -164,7 +164,10 @@ router.get("/providers/:providerId/locations/:locationId/daily-board", requireAu
         // render them without a per-row round-trip. Limited to a small
         // number per booking to keep the payload sane.
         washNotes: {
-          select: { id: true, content: true, noteType: true, createdAt: true },
+          select: {
+            id: true, content: true, noteType: true, authorRole: true, createdAt: true,
+            author: { select: { firstName: true, lastName: true } },
+          },
           orderBy: { createdAt: "asc" },
           take: 5,
         },
@@ -496,8 +499,10 @@ router.post("/providers/:providerId/bookings/off-platform", requireAuth, require
     });
 
     if (notes) {
+      // Off-platform / walk-in booking entry is always done by provider
+      // staff/admin, so the note's authorRole is PROVIDER. Frozen here.
       await prisma.washNote.create({
-        data: { bookingId: booking.id, locationId, authorId: user.id, noteType: "BOOKING_INSTRUCTION", content: notes },
+        data: { bookingId: booking.id, locationId, authorId: user.id, authorRole: "PROVIDER", noteType: "BOOKING_INSTRUCTION", content: notes },
       });
     }
 
