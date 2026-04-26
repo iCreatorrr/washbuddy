@@ -951,11 +951,15 @@ async function main() {
   // ── Step 4.6: V2 seed data — wash bays, clients, subscriptions, discounts ──
   console.log("Step 4.6: Creating V2 seed data...");
 
-  // Fetch all approved locations for wash bay creation
+  // Fetch all approved locations for wash bay creation. Earlier this
+  // had a `take: 45` cap that pre-dated the provider-pool growing past
+  // 50 — the seed creates ~95-110 locations, the cap meant locations
+  // past index 44 got zero bays, and they showed up as "No bay fits
+  // your active vehicle" on Find a Wash regardless of vehicle. Drop
+  // the cap so every approved location gets a default bay set.
   const allApprovedLocations = await prisma.location.findMany({
     where: { isVisible: true, provider: { approvalStatus: "APPROVED" } },
     include: { services: { select: { id: true, capacityPerSlot: true } } },
-    take: 45,
   });
 
   // Wash Bays — 1-4 per location based on capacity
