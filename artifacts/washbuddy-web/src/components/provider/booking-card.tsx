@@ -434,22 +434,24 @@ export function BookingCard({
             {!b.isOffPlatform && (
               <Button size="sm" variant="outline" className="gap-1"><MessageSquare className="h-3.5 w-3.5" />Message Driver</Button>
             )}
-            {/* Cancel Booking — muted outline, expanded view only, only
-                while the booking is still cancellable. Status set
-                hand-aligned with the server's cancellableStatuses
-                check (REQUESTED, HELD, PROVIDER_CONFIRMED, LATE);
-                CHECKED_IN onward isn't reversible from here. */}
-            {(b.status === "REQUESTED" || b.status === "PROVIDER_CONFIRMED") && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={(e) => { e.stopPropagation(); setCancelDialogOpen(true); }}
-                className="border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300"
-              >
-                Cancel Booking
-              </Button>
-            )}
           </div>
+          {/* Cancel booking — muted text link aligned right. Same
+              weight as "+ Add note" affordance on this card; the
+              destructive action shouldn't compete visually with the
+              positive primary actions (Check In, Start Wash, etc).
+              Visible only while the booking is still cancellable —
+              CHECKED_IN onward isn't reversible from here. */}
+          {(b.status === "REQUESTED" || b.status === "PROVIDER_CONFIRMED") && (
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setCancelDialogOpen(true); }}
+                className="text-sm font-medium text-slate-500 hover:text-slate-700 hover:underline underline-offset-2"
+              >
+                Cancel booking
+              </button>
+            </div>
+          )}
         </div>
       )}
 
