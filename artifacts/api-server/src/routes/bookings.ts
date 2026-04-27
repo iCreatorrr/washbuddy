@@ -558,9 +558,13 @@ router.get("/bookings/:bookingId", requireAuth, async (req, res) => {
       include: {
         // Address fields are needed by the booking detail page to render
         // a "Get Directions" link (Google Maps URL) without a second
-        // round-trip. Mirrors the shape used by /api/locations/:id and
-        // search results, so client-side helpers stay uniform.
-        location: { select: { id: true, name: true, timezone: true, providerId: true, addressLine1: true, city: true, stateCode: true, postalCode: true, latitude: true, longitude: true, provider: { select: { id: true, name: true } } } },
+        // round-trip. The schema field is `regionCode`, not `stateCode`
+        // — selecting `stateCode` was crashing Prisma with PrismaClient
+        // ValidationError "Unknown field" and 500-ing every booking
+        // detail fetch. /api/locations/* endpoints expose this column
+        // as `stateCode` for backwards-compat on the wire; this endpoint
+        // returns `regionCode` directly and the client reads that.
+        location: { select: { id: true, name: true, timezone: true, providerId: true, addressLine1: true, city: true, regionCode: true, postalCode: true, latitude: true, longitude: true, provider: { select: { id: true, name: true } } } },
         service: { select: { id: true, name: true, durationMins: true } },
         bookingServices: {
           select: { id: true, serviceId: true, nameSnapshot: true, priceMinor: true, durationMins: true, displayOrder: true },

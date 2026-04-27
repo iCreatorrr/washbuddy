@@ -544,7 +544,12 @@ function CustomerBody({ booking: b, canAddNote, onNoteAdded }: { booking: any; c
               // Build the full street address for both display and the
               // Google Maps deep link. Skip the link when we don't have
               // an address — better than a button that opens an empty map.
-              const parts = [b.location?.addressLine1, b.location?.city, b.location?.stateCode, b.location?.postalCode]
+              // Tolerate both wire formats: this endpoint returns
+              // `regionCode` (the schema column) but `/api/locations/*`
+              // aliases it to `stateCode`. Read whichever one is present
+              // so a future server change can't silently drop the address.
+              const region = (b.location as any)?.regionCode ?? (b.location as any)?.stateCode;
+              const parts = [b.location?.addressLine1, b.location?.city, region, b.location?.postalCode]
                 .filter((p) => typeof p === "string" && p.trim().length > 0);
               const fullAddress = parts.join(", ");
               if (!fullAddress) return null;
