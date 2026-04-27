@@ -31,14 +31,55 @@ export function ActiveVehiclePill({ className }: { className?: string }) {
   const [, setNav] = useLocation();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // The menu is rendered with position:fixed at JS-computed coordinates so
+  // it never gets cropped by an inline-block parent or pulled off-screen
+  // by a simple `right-0` anchor. Coordinates are recomputed on resize and
+  // any ancestor scroll while the menu is open.
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && ref.current.contains(e.target as Node)) return;
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
+      setOpen(false);
     };
     window.addEventListener("mousedown", onClick);
     return () => window.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  // Position the menu under the trigger, anchored to the trigger's right edge
+  // when there's room on the left, otherwise clamped to a safe viewport gutter.
+  // Width caps at min(320, viewport - 16) so the menu always fits with breathing
+  // room. Recomputes on resize / scroll so the menu tracks the trigger.
+  useEffect(() => {
+    if (!open) { setMenuPos(null); return; }
+    const compute = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const gutter = 8;
+      const idealWidth = 320;
+      const width = Math.min(idealWidth, Math.max(240, vw - gutter * 2));
+      let left = rect.right - width; // try to right-align to the trigger
+      if (left < gutter) left = gutter;
+      if (left + width > vw - gutter) left = vw - gutter - width;
+      const top = rect.bottom + 8;
+      setMenuPos({ top, left, width });
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    // Capture-phase scroll listener so we react to any scrolling ancestor,
+    // not just the window — Find a Wash sometimes sits inside a flex-column
+    // that scrolls.
+    window.addEventListener("scroll", compute, true);
+    return () => {
+      window.removeEventListener("resize", compute);
+      window.removeEventListener("scroll", compute, true);
+    };
   }, [open]);
 
   if (loading) {
@@ -63,22 +104,27 @@ export function ActiveVehiclePill({ className }: { className?: string }) {
   return (
     <div ref={ref} className={`relative inline-block ${className || ""}`}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-3 pl-3 pr-4 py-2 bg-white border-2 border-slate-200 rounded-2xl hover:border-slate-300 transition-colors"
+        className="flex items-center gap-3 pl-3 pr-4 py-2 bg-white border-2 border-slate-200 rounded-2xl hover:border-slate-300 transition-colors max-w-full"
         aria-haspopup="listbox"
         aria-expanded={open}
       >
         {activeVehicle ? <PillContent vehicle={activeVehicle} active /> : <span className="text-sm text-slate-500">No active vehicle</span>}
-        <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${open ? "rotate-180" : ""}`} />
+        <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
       </button>
 
-      {open && (
-        // Width clamps to (viewport - 1rem) so the dropdown can never
-        // overflow the screen on narrow phones, even if the trigger
-        // button sits in a tight column. Right-anchored to the trigger;
-        // text inside truncates to keep long nicknames inside the box.
-        <div className="absolute right-0 z-50 mt-2 w-80 max-w-[calc(100vw-1rem)] bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
+      {open && menuPos && (
+        // position:fixed at JS-computed coords; `left` is clamped to the
+        // viewport's safe gutter so the menu can never have a negative
+        // left, which is the trap right-anchored absolute dropdowns fall
+        // into when the trigger sits in the left half of a narrow phone.
+        <div
+          ref={menuRef}
+          style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: menuPos.width }}
+          className="z-50 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden"
+        >
           <div className="px-4 py-3 border-b text-xs font-bold uppercase tracking-wider text-slate-500">Switch Vehicle</div>
           <ul role="listbox" className="max-h-72 overflow-y-auto">
             {eligibleVehicles.map((v) => (
