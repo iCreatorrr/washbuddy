@@ -4,7 +4,7 @@ import { useGetBooking, useConfirmBooking, useCheckinBooking, useStartService, u
 import { useAuth } from "@/contexts/auth";
 import { Card, Badge, Button } from "@/components/ui";
 import { formatCurrency, formatDate, getStatusColor, getStatusLabel } from "@/lib/utils";
-import { MapPin, Calendar, Truck, User, CreditCard, ChevronRight, CheckCircle2, Star, ArrowLeft, Shield, AlertTriangle, X, StickyNote, Package } from "lucide-react";
+import { MapPin, Calendar, Truck, User, CreditCard, ChevronRight, CheckCircle2, Star, ArrowLeft, Shield, AlertTriangle, X, StickyNote, Package, Navigation } from "lucide-react";
 import { motion } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
 import { ReviewForm } from "@/components/review-form";
@@ -536,10 +536,37 @@ function CustomerBody({ booking: b, canAddNote, onNoteAdded }: { booking: any; c
 
         <div className="flex gap-4 items-start">
           <div className="bg-slate-100 p-3 rounded-xl text-slate-500"><MapPin className="h-5 w-5" /></div>
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Location</p>
             <p className="font-bold text-slate-900">{b.location?.name}</p>
             <p className="text-sm text-slate-500">{b.location?.provider?.name}</p>
+            {(() => {
+              // Build the full street address for both display and the
+              // Google Maps deep link. Skip the link when we don't have
+              // an address — better than a button that opens an empty map.
+              const parts = [b.location?.addressLine1, b.location?.city, b.location?.stateCode, b.location?.postalCode]
+                .filter((p) => typeof p === "string" && p.trim().length > 0);
+              const fullAddress = parts.join(", ");
+              if (!fullAddress) return null;
+              const dest = encodeURIComponent(fullAddress);
+              // Universal Google Maps directions URL: prompts "Open in
+              // Maps" on iOS, opens Google Maps app on Android, opens a
+              // browser tab on desktop.
+              const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+              return (
+                <>
+                  <p className="text-sm text-slate-500 mt-0.5 break-words">{fullAddress}</p>
+                  <a
+                    href={mapsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 mt-2 text-sm font-semibold text-primary hover:underline"
+                  >
+                    <Navigation className="h-3.5 w-3.5" /> Get Directions →
+                  </a>
+                </>
+              );
+            })()}
           </div>
         </div>
 
