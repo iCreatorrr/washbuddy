@@ -3,6 +3,7 @@ import { useRoute, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useCreateBookingHold, useCreateBooking } from "@workspace/api-client-react";
 import { Card, Button, Badge, ErrorState } from "@/components/ui";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { MapPin, CheckCircle2, ChevronLeft, ArrowRight, Star, AlertTriangle, StickyNote, Send, Check } from "lucide-react";
 import { LocationReviews } from "@/components/location-reviews";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -74,6 +75,7 @@ export default function LocationDetail() {
   const [etaMins, setEtaMins] = useState<number | null>(null);
   const [driverNote, setDriverNote] = useState<string>("");
   const [driverNoteOpen, setDriverNoteOpen] = useState<boolean>(false);
+  const [reviewsOpen, setReviewsOpen] = useState<boolean>(false);
 
   // Persist the receipt across remounts (back-then-forward navigation,
   // tab refocus). Keyed by locationId so booking at one location doesn't
@@ -412,7 +414,11 @@ export default function LocationDetail() {
     || locationIncompatible;
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 pb-32 lg:pb-12 space-y-6">
+    // No horizontal padding here — the AppLayout already adds p-4 md:p-8.
+    // Doubling padding here was the regression that pushed the time grid
+    // and sticky footer off the edge at 375px. pb-32 reserves room for
+    // the fixed footer; max-w-3xl caps line length on tablet+.
+    <div className="max-w-3xl mx-auto pb-32 lg:pb-12 space-y-6">
       <button onClick={() => setNav(backUrl)} className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900 transition-colors font-medium pt-2">
         <ChevronLeft className="h-4 w-4" /> {backLabel}
       </button>
@@ -425,18 +431,16 @@ export default function LocationDetail() {
           <h1 className="text-2xl sm:text-3xl font-display font-bold text-slate-900 leading-tight">{locData.name}</h1>
         </div>
         {(averageRating != null || reviewCount > 0) && (
-          <a
-            href="#location-reviews"
-            onClick={(e) => {
-              e.preventDefault();
-              document.getElementById("location-reviews")?.scrollIntoView({ behavior: "smooth", block: "start" });
-            }}
-            className="inline-flex items-center gap-1 text-sm text-slate-700 hover:text-slate-900"
+          <button
+            type="button"
+            onClick={() => setReviewsOpen(true)}
+            className="inline-flex items-center gap-1 text-sm text-slate-700 hover:text-slate-900 underline-offset-2 hover:underline"
+            aria-label="Read reviews"
           >
             <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
             <span className="font-semibold">{averageRating != null ? averageRating.toFixed(1) : "—"}</span>
             <span className="text-slate-500">({reviewCount} review{reviewCount === 1 ? "" : "s"})</span>
-          </a>
+          </button>
         )}
         <p className="text-sm text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="inline-flex items-center gap-1 min-w-0">
@@ -544,7 +548,11 @@ export default function LocationDetail() {
           {/* ────────── Day picker (horizontally scrollable) ────────── */}
           <section className="space-y-3">
             <h2 className="text-lg font-bold text-slate-900">Pick a date</h2>
-            <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-2 sm:mx-0 sm:px-0">
+            {/* Bleed the strip to the layout's outer padding edges (–p-4
+                at mobile, –p-8 at md+) so the first/last day don't visually
+                hug the content gutter. The matching px-* puts the inner
+                buttons back on the gutter. */}
+            <div className="flex gap-2 overflow-x-auto -mx-4 px-4 md:-mx-8 md:px-8 pb-2">
               {Array.from({ length: 14 }).map((_, offset) => {
                 const d = addDays(new Date(), offset);
                 const dStr = format(d, "yyyy-MM-dd");
@@ -660,19 +668,17 @@ export default function LocationDetail() {
         </>
       )}
 
-      {/* ────────── Reviews ────────── */}
-      <section id="location-reviews" className="pt-4 space-y-3 scroll-mt-4">
-        <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-          <Star className="h-5 w-5 text-amber-400 fill-amber-400" />
-          Customer Reviews
-        </h2>
-        <LocationReviews locationId={locationId} />
-      </section>
+      {/* Reviews moved behind the star tap (Sheet at end of tree). The
+          booking page is focus-only now — no scroll past the time grid. */}
 
       {/* ────────── Sticky footer ────────── */}
       {!locationIncompatible && hasAnyVehicle && (
+        // Mobile: pinned to viewport edges (left:0, right:0) — full width.
+        // lg+: float as a centered pill — needs `right-auto + w-full` to
+        // CANCEL the inset-x-0 right:0, otherwise the box collapses to a
+        // left-quarter strip.
         <div
-          className="fixed inset-x-0 bottom-0 z-40 bg-white border-t border-slate-200 shadow-[0_-4px_24px_-12px_rgba(0,0,0,0.15)] lg:max-w-3xl lg:left-1/2 lg:-translate-x-1/2 lg:rounded-t-2xl"
+          className="fixed inset-x-0 bottom-0 z-40 bg-white border-t border-slate-200 shadow-[0_-4px_24px_-12px_rgba(0,0,0,0.15)] lg:left-1/2 lg:right-auto lg:w-full lg:max-w-3xl lg:-translate-x-1/2 lg:rounded-t-2xl"
           style={{ paddingBottom: "max(env(safe-area-inset-bottom), 0px)" }}
         >
           <div className="px-4 sm:px-6 py-3 flex items-center gap-3 sm:gap-4">
@@ -706,6 +712,27 @@ export default function LocationDetail() {
           </p>
         </div>
       )}
+
+      {/* ────────── Reviews sheet ────────── */}
+      {/* Bottom-sheet on every viewport — feels native on mobile and
+          sits as a clean side-panel on desktop. Capped height so the
+          inner list scrolls and the page underneath stays anchored. */}
+      <Sheet open={reviewsOpen} onOpenChange={setReviewsOpen}>
+        <SheetContent
+          side="bottom"
+          className="h-[85vh] sm:h-[80vh] sm:max-w-2xl sm:left-1/2 sm:-translate-x-1/2 sm:rounded-t-2xl flex flex-col p-0"
+        >
+          <SheetHeader className="px-6 pt-6 pb-3 border-b border-slate-100 shrink-0">
+            <SheetTitle className="flex items-center gap-2 text-base font-bold text-slate-900">
+              <Star className="h-5 w-5 text-amber-400 fill-amber-400" />
+              Customer Reviews
+            </SheetTitle>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4">
+            <LocationReviews locationId={locationId} />
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* ────────── Short-notice modal ────────── */}
       {shortNoticePending && (
