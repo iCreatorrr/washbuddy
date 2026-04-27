@@ -107,12 +107,17 @@ export function ActiveVehiclePill({ className }: { className?: string }) {
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-3 pl-3 pr-4 py-2 bg-white border-2 border-slate-200 rounded-2xl hover:border-slate-300 transition-colors max-w-full"
+        // Single-line pill, ~44px tall: small size-class badge + nickname
+        // · body type + chevron. Drops the prior 2-line layout (icon chip
+        // + 2 lines of text + py-2 + border-2 ≈ 53px) so the pill costs
+        // less above-the-fold real estate on phones. py-2.5 keeps the
+        // tap target above the 44px iOS floor.
+        className="flex items-center gap-2 pl-2 pr-3 py-2.5 bg-white border border-slate-200 rounded-full hover:border-slate-300 transition-colors max-w-full"
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        {activeVehicle ? <PillContent vehicle={activeVehicle} active /> : <span className="text-sm text-slate-500">No active vehicle</span>}
-        <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
+        {activeVehicle ? <PillContentCompact vehicle={activeVehicle} /> : <span className="text-sm text-slate-500 px-2">No active vehicle</span>}
+        <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform shrink-0 ${open ? "rotate-180" : ""}`} />
       </button>
 
       {open && menuPos && (
@@ -152,6 +157,36 @@ export function ActiveVehiclePill({ className }: { className?: string }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** Compact, single-line trigger content — small size-class badge on
+ * the left, "nickname · body type" inline. The body-type chip is gone
+ * (it duplicated the colour signal of the size badge); long names
+ * truncate via min-w-0 so the trigger never grows past the row width. */
+function PillContentCompact({ vehicle }: { vehicle: ActiveVehicleRow }) {
+  const bt = normalizeBodyType(vehicle.bodyType);
+  const sizeClass = deriveSizeClassFromLengthInches(vehicle.lengthInches);
+  // Size-class abbreviations: S / M / L / XL — matches Daily Board's
+  // booking-card size avatar so providers and drivers see the same
+  // shorthand for vehicle scale.
+  const sizeAbbrev: Record<string, string> = { SMALL: "S", MEDIUM: "M", LARGE: "L", EXTRA_LARGE: "XL" };
+  const sizeBadge = sizeClass ? sizeAbbrev[sizeClass] : null;
+  // Reuse the size-class colour palette from BODY_TYPE_STYLE, scaled
+  // down to a small inline chip.
+  const style = BODY_TYPE_STYLE[bt];
+  return (
+    <>
+      {sizeBadge && (
+        <span className={`inline-flex items-center justify-center h-6 min-w-[28px] px-1 rounded-full text-[11px] font-bold shrink-0 ${style.chipBg} ${style.chipFg}`}>
+          {sizeBadge}
+        </span>
+      )}
+      <span className="text-sm font-semibold text-slate-900 truncate min-w-0">
+        {vehicleDisplayName(vehicle)}
+        <span className="font-normal text-slate-500">{` · ${BODY_TYPE_LABEL[bt]}`}</span>
+      </span>
+    </>
   );
 }
 
