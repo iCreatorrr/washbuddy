@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useRoute, useLocation } from "wouter";
-import { useGetAvailability, useCreateBookingHold, useCreateBooking } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
+import { useCreateBookingHold, useCreateBooking } from "@workspace/api-client-react";
 import { Card, Button, Badge, ErrorState } from "@/components/ui";
-import { MapPin, Clock, ShieldCheck, CheckCircle2, ChevronLeft, ArrowRight, Navigation, Star, Zap, AlertTriangle, Timer } from "lucide-react";
+import { MapPin, CheckCircle2, ChevronLeft, ArrowRight, Star, AlertTriangle, StickyNote, Send, Check } from "lucide-react";
 import { LocationReviews } from "@/components/location-reviews";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { format, addDays } from "date-fns";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { useActiveVehicle } from "@/contexts/activeVehicle";
 import {
   BODY_TYPE_ICON,
@@ -19,6 +20,9 @@ import {
   vehicleDisplayName,
   vehicleFitsService,
 } from "@/lib/vehicleBodyType";
+import { toast } from "sonner";
+
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 async function fetchSingleETA(
   fromLat: number, fromLng: number, toLat: number, toLng: number
@@ -60,18 +64,23 @@ export default function LocationDetail() {
     : "/search";
   const backLabel = fromRoute ? "Back to route" : "Back to search";
 
-  const [selectedService, setSelectedService] = useState<string | null>(null);
+  // Multi-service: ordered list, the order the driver picked. Empty
+  // when nothing's selected. Slot grid + sticky footer + booking
+  // creation all read this.
+  const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>(format(new Date(), "yyyy-MM-dd"));
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
-  const [bookingStep, setBookingStep] = useState(1);
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [etaMins, setEtaMins] = useState<number | null>(null);
+  const [driverNote, setDriverNote] = useState<string>("");
+  const [driverNoteOpen, setDriverNoteOpen] = useState<boolean>(false);
+
   // Persist the receipt across remounts (back-then-forward navigation,
   // tab refocus). Keyed by locationId so booking at one location doesn't
   // pre-fill the receipt at another. Cleared after the user clicks "View
   // My Bookings" or after 30 minutes (whichever comes first).
   const receiptStorageKey = locationId ? `wb.receipt.${locationId}` : null;
-  const [bookingResult, setBookingResult] = useState<{ id: string; status: string; slotUtc?: string; serviceId?: string } | null>(() => {
+  const [bookingResult, setBookingResult] = useState<{ id: string; status: string; slotUtc?: string; serviceIds?: string[] } | null>(() => {
     if (!receiptStorageKey) return null;
     try {
       const raw = sessionStorage.getItem(receiptStorageKey);
@@ -82,7 +91,7 @@ export default function LocationDetail() {
         sessionStorage.removeItem(receiptStorageKey);
         return null;
       }
-      return { id: parsed.id, status: parsed.status, slotUtc: parsed.slotUtc, serviceId: parsed.serviceId };
+      return { id: parsed.id, status: parsed.status, slotUtc: parsed.slotUtc, serviceIds: parsed.serviceIds };
     } catch {
       return null;
     }
@@ -98,98 +107,92 @@ export default function LocationDetail() {
   const [isSearchError, setIsSearchError] = useState(false);
   const [fetchErrorDetails, setFetchErrorDetails] = useState<string | null>(null);
 
-  const API_BASE = import.meta.env.VITE_API_URL || "";
   const fetchLocation = React.useCallback(async () => {
     if (!locationId) return;
     setIsSearchLoading(true);
     setIsSearchError(false);
     setFetchErrorDetails(null);
-    console.log("[LocationDetail] Fetching location:", locationId);
 
-    // Try dedicated detail endpoint first
     try {
       const r = await fetch(`${API_BASE}/api/locations/${locationId}`, { credentials: "include" });
       if (r.ok) {
         const d = await r.json();
         if (d?.location) {
-          console.log("[LocationDetail] Loaded from /api/locations/:id");
           setLocData(d.location);
           setIsSearchLoading(false);
           return;
         }
-      } else {
-        console.warn(`[LocationDetail] /api/locations/${locationId} returned ${r.status}, falling back to search`);
       }
-    } catch (err: any) {
-      console.warn("[LocationDetail] Detail endpoint threw, falling back to search:", err?.message);
-    }
+    } catch { /* fall through to search fallback */ }
 
-    // Fallback: search endpoint (works even if dedicated endpoint isn't deployed yet)
     try {
       const r = await fetch(`${API_BASE}/api/locations/search`, { credentials: "include" });
       if (!r.ok) {
-        const msg = `HTTP ${r.status} on search fallback`;
-        console.error("[LocationDetail] Search fallback failed:", msg);
-        setFetchErrorDetails(msg);
+        setFetchErrorDetails(`HTTP ${r.status} on search fallback`);
         setIsSearchError(true);
         return;
       }
       const d = await r.json();
       const match = (d?.locations || []).find((l: any) => l.id === locationId);
       if (!match) {
-        const msg = `Location ${locationId} not found in search results (${(d?.locations || []).length} locations returned)`;
-        console.error("[LocationDetail]", msg);
         setFetchErrorDetails("Location not in search results");
         setIsSearchError(true);
         return;
       }
-      console.log("[LocationDetail] Loaded from search fallback");
       setLocData(match);
     } catch (err: any) {
-      console.error("[LocationDetail] Both endpoints failed:", err);
       setFetchErrorDetails(err?.message || "Network error");
       setIsSearchError(true);
     } finally {
       setIsSearchLoading(false);
     }
-  }, [locationId, API_BASE]);
+  }, [locationId]);
 
   useEffect(() => { fetchLocation(); }, [fetchLocation]);
 
-  const services = locData?.services || [];
+  const services: any[] = locData?.services || [];
 
   const { activeVehicle, hasAnyVehicle, loading: vehicleLoading } = useActiveVehicle();
   const activeVehicleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
 
-  // Swapping the active vehicle mid-booking can change bay compatibility
-  // and slot pricing, so reset the in-flight selection back to step 1
-  // whenever the underlying vehicle changes. Skip the very first render
-  // (initial pickup of activeVehicle on mount) by tracking the last
-  // observed id.
-  // (Mid-flow vehicle-swap reset effect removed — the pill that
-  // changed the active vehicle from this page is gone, so the
-  // active-vehicle id can no longer change without leaving the page.)
-
-  // Availability is class-aware: passing the active vehicle's size class
-  // filters slots to those a compatible bay can host. Without an active
-  // vehicle the booking column is gated, so we don't even fire the query.
-  const { data: availabilityData, isLoading: isLoadingSlots } = useGetAvailability(
-    locationId,
-    {
-      date: selectedDate,
-      serviceId: selectedService || "",
-      ...(activeVehicleClass ? { vehicleClass: activeVehicleClass } : {}),
-    } as any,
-    {
-      query: { enabled: !!selectedService && !!selectedDate && !!activeVehicle },
-      request: { credentials: 'include' }
-    }
+  // Aggregates derived from the multi-select. Pure functions of the
+  // selection so React re-derives on every render — no stale state.
+  const selectedServices = useMemo(
+    () => selectedServiceIds.map((id) => services.find((s) => s.id === id)).filter(Boolean),
+    [selectedServiceIds, services],
   );
+  const totalDurationMins = selectedServices.reduce((sum, s: any) => sum + (s.durationMins || 0), 0);
+  const totalPriceMinor = selectedServices.reduce((sum, s: any) => sum + ((s.allInPriceMinor ?? s.basePriceMinor) || 0), 0);
+
+  // Slot availability — raw useQuery so vehicleClass + the ordered
+  // serviceIds bake into the URL. Every change to either the active
+  // vehicle or the service selection triggers a fresh, observable
+  // network request. The smart-slot guarantee lives server-side: each
+  // returned slot has a contiguous block of (sum of durations) on a
+  // single compatible bay.
+  const availabilityUrl = useMemo(() => {
+    if (selectedServiceIds.length === 0 || !selectedDate) return null;
+    const params = new URLSearchParams();
+    params.set("date", selectedDate);
+    params.set("serviceIds", selectedServiceIds.join(","));
+    if (activeVehicleClass) params.set("vehicleClass", activeVehicleClass);
+    return `${API_BASE}/api/locations/${locationId}/availability?${params.toString()}`;
+  }, [locationId, selectedDate, selectedServiceIds, activeVehicleClass]);
+
+  const { data: availabilityData, isLoading: isLoadingSlots } = useQuery({
+    queryKey: ["/availability", locationId, selectedDate, selectedServiceIds.join(","), activeVehicleClass ?? "ANY"],
+    queryFn: async () => {
+      if (!availabilityUrl) return null;
+      const r = await fetch(availabilityUrl, { credentials: "include" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    },
+    enabled: !!availabilityUrl && !!activeVehicle,
+    staleTime: 30_000,
+  });
 
   const holdMutation = useCreateBookingHold({ request: { credentials: 'include' } });
   const bookMutation = useCreateBooking({ request: { credentials: 'include' } });
-
-  const selectedSvc = services.find(s => s.id === selectedService);
 
   const [detectedLat, setDetectedLat] = useState<number | null>(userLat);
   const [detectedLng, setDetectedLng] = useState<number | null>(userLng);
@@ -198,10 +201,7 @@ export default function LocationDetail() {
     if (detectedLat != null && detectedLng != null) return;
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setDetectedLat(pos.coords.latitude);
-        setDetectedLng(pos.coords.longitude);
-      },
+      (pos) => { setDetectedLat(pos.coords.latitude); setDetectedLng(pos.coords.longitude); },
       () => {},
       { timeout: 5000, maximumAge: 300000 }
     );
@@ -229,45 +229,56 @@ export default function LocationDetail() {
     return () => clearInterval(interval);
   }, [holdExpiresAt]);
 
-  // Pure length-based service compatibility. Body type / subtype is
-  // visual only now: a service has a single maxVehicleClass cap, and a
-  // vehicle's length-derived class must fit under it. The legacy
-  // ServiceCompatibility table still exists in the schema but is no
-  // longer consulted by the driver flow.
+  // Pure length-based service compatibility (no subtype check —
+  // body type is visual only).
   const isVehicleCompatible = (vehicle: any, service: any): boolean => {
     return vehicleFitsService(vehicle?.lengthInches, service?.maxVehicleClass);
   };
 
-  // After hold succeeds, drivers go straight to confirm — vehicle is the
-  // pre-selected active one. The old "Step 3: Vehicle Selection" branch is
-  // gone entirely; fleet-admin booking still has its own picker page.
-  const advanceFromSlot = () => {
-    setBookingStep(3);
+  // Toggling a service picks/unpicks it. Picking a new service
+  // invalidates the picked slot — the slot grid recomputes around
+  // a different total duration, and the previously-picked time may
+  // no longer fit a contiguous block.
+  const toggleService = (serviceId: string) => {
+    setBookingError(null);
+    setSelectedSlot(null);
+    setHoldExpiresAt(null);
+    setSelectedServiceIds((prev) =>
+      prev.includes(serviceId)
+        ? prev.filter((id) => id !== serviceId)
+        : [...prev, serviceId]
+    );
   };
 
   const [holdId, setHoldId] = useState<string | null>(null);
 
-  if (isSearchError) return <div className="max-w-5xl mx-auto py-8"><ErrorState message={fetchErrorDetails ? `Could not load location details (${fetchErrorDetails})` : "Could not load location details."} onRetry={fetchLocation} /></div>;
+  if (isSearchError) return <div className="max-w-5xl mx-auto py-8 px-4"><ErrorState message={fetchErrorDetails ? `Could not load location details (${fetchErrorDetails})` : "Could not load location details."} onRetry={fetchLocation} /></div>;
   if (isSearchLoading) return <div className="p-12 text-center text-slate-500"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mx-auto" /></div>;
-  if (!locData) return <div className="max-w-5xl mx-auto py-8"><ErrorState message="Location not found. It may have been removed." /></div>;
+  if (!locData) return <div className="max-w-5xl mx-auto py-8 px-4"><ErrorState message="Location not found. It may have been removed." /></div>;
 
   const proceedWithHold = async () => {
-    if (!selectedService || !selectedSlot) return;
+    if (selectedServiceIds.length === 0 || !selectedSlot) return;
     setBookingError(null);
     try {
       const holdRes = await holdMutation.mutateAsync({
-        data: { locationId, serviceId: selectedService, slotStartUtc: selectedSlot }
+        // The generated client's typed payload only knows `serviceId`,
+        // so cast to bypass — we're sending serviceIds (ordered array)
+        // which the server consumes when present and falls back to
+        // serviceId if not.
+        data: { locationId, serviceId: selectedServiceIds[0], serviceIds: selectedServiceIds, slotStartUtc: selectedSlot } as any,
       });
       setHoldId(holdRes.hold.id);
       setHoldExpiresAt(new Date(holdRes.hold.expiresAtUtc));
-      advanceFromSlot();
+      // Auto-confirm right after the hold lands — no manual third step
+      // anymore. Errors here flow to bookingError exactly like before.
+      await confirmBooking(holdRes.hold.id);
     } catch (err: any) {
       setBookingError(err?.message || "This slot is no longer available. Please select another time.");
     }
   };
 
-  const handleCreateHold = async () => {
-    if (!selectedService || !selectedSlot) return;
+  const handleConfirmTap = async () => {
+    if (selectedServiceIds.length === 0 || !selectedSlot) return;
     const minutesUntilSlot = Math.round((new Date(selectedSlot).getTime() - Date.now()) / 60000);
     if (minutesUntilSlot >= 0 && minutesUntilSlot < SHORT_NOTICE_THRESHOLD_MINUTES) {
       setShortNoticePending({ slotUtc: selectedSlot, minutes: minutesUntilSlot });
@@ -286,70 +297,67 @@ export default function LocationDetail() {
     setSelectedSlot(null);
   };
 
-  const handleConfirmBooking = async () => {
-    if (!holdId || !activeVehicle) return;
+  const confirmBooking = async (holdIdToUse: string) => {
+    if (!holdIdToUse || !activeVehicle) return;
     setBookingError(null);
     try {
       const idempotencyKey = crypto.randomUUID();
       const bookRes = await bookMutation.mutateAsync({
-        data: {
-          holdId,
-          vehicleId: activeVehicle.id,
-          idempotencyKey
-        }
+        data: { holdId: holdIdToUse, vehicleId: activeVehicle.id, idempotencyKey } as any,
       });
       const receipt = {
         id: bookRes.booking.id,
         status: bookRes.booking.status,
         slotUtc: selectedSlot ?? undefined,
-        serviceId: selectedService ?? undefined,
+        serviceIds: [...selectedServiceIds],
       };
+
+      // If the driver typed a note inline, attach it to the new
+      // booking via the existing append-only notes endpoint. The
+      // server freezes authorRole=DRIVER so it shows up on the
+      // provider side as "Notes from driver". Best-effort — the
+      // booking is already created by this point, so we toast on
+      // failure rather than rolling back.
+      const trimmedNote = driverNote.trim();
+      if (trimmedNote) {
+        try {
+          const noteRes = await fetch(`${API_BASE}/api/bookings/${bookRes.booking.id}/notes`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: trimmedNote }),
+          });
+          if (!noteRes.ok) throw new Error(`HTTP ${noteRes.status}`);
+        } catch {
+          toast.warning("Booking confirmed, but your note couldn't be attached. You can add it from the booking detail page.");
+        }
+      }
+
       setBookingResult(receipt);
-      // Clear local hold state — the server has already consumed it
-      // server-side as part of bookings/from-hold. Drop selected service
-      // and slot too, so a back-button bringing us back to this page
-      // doesn't restore the bookable form: the receipt is the only
-      // thing the user can do here now. Persist to sessionStorage so a
-      // back-then-forward navigation re-renders the receipt instead of
-      // the bookable form (the hold is already consumed server-side).
       setHoldExpiresAt(null);
       setHoldId(null);
-      setSelectedService(null);
+      setSelectedServiceIds([]);
       setSelectedSlot(null);
+      setDriverNote("");
+      setDriverNoteOpen(false);
       if (receiptStorageKey) {
-        try {
-          sessionStorage.setItem(receiptStorageKey, JSON.stringify({ ...receipt, savedAt: Date.now() }));
-        } catch { /* quota / disabled storage — receipt still works in-session */ }
+        try { sessionStorage.setItem(receiptStorageKey, JSON.stringify({ ...receipt, savedAt: Date.now() })); }
+        catch { /* quota / disabled storage — receipt still works in-session */ }
       }
     } catch (err: any) {
       if (err?.message?.includes("hold") || err?.status === 410) {
         setBookingError("Your hold has expired. Please select a new time slot.");
         setHoldId(null);
         setHoldExpiresAt(null);
-        setBookingStep(2);
       } else {
         setBookingError(err?.message || "Failed to complete booking. Please try again.");
       }
     }
   };
 
-  const totalPrice = selectedSvc ? ((selectedSvc as any).allInPriceMinor ?? selectedSvc.basePriceMinor) : 0;
-
-  const stepComplete = (step: number) => {
-    if (step === 1) return !!selectedService;
-    if (step === 2) return !!selectedSlot;
-    return false;
-  };
-
-  // Hoisted so the upfront incompatibility warning AND the gate that
-  // hides the booking steps share the same boolean. Strict semantics:
-  // a location with no bay data, an empty bays array, or no bay
-  // supporting the active vehicle's class is incompatible. The earlier
-  // version required `bays.length > 0` as a precondition, which meant
-  // "no bays at all" silently fell through as compatible — the same
-  // permissive-fallback footgun we just closed in search.tsx and
-  // route-planner.tsx.
-  const locationIncompatibleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
+  // Hoisted incompatibility flag — drives both the upfront warning
+  // AND the gate that hides the booking flow steps.
+  const locationIncompatibleClass = activeVehicleClass;
   const locationBays: any[] = Array.isArray((locData as any)?.washBays) ? (locData as any).washBays : [];
   const locationIncompatible = !!activeVehicle && !!locationIncompatibleClass
     && !locationBays.some((b: any) => Array.isArray(b.supportedClasses) && b.supportedClasses.includes(locationIncompatibleClass));
@@ -357,23 +365,26 @@ export default function LocationDetail() {
     ? `${vehicleDisplayName(activeVehicle)}${inchesToFeet(activeVehicle.lengthInches) ? `, ${inchesToFeet(activeVehicle.lengthInches)}ft` : ""}${locationIncompatibleClass && SIZE_CLASS_LABEL[locationIncompatibleClass] ? ` ${SIZE_CLASS_LABEL[locationIncompatibleClass]}` : ""}`
     : "";
 
-  // When the booking has succeeded, the entire page collapses to a
-  // single centered receipt card — no header, no sidebar, no reviews.
-  // The receipt IS the page. Earlier we tried inlining the receipt as
-  // a step-3 card; that left the rest of the page (booking summary,
-  // operating hours, etc.) competing for the eye and made the success
-  // moment feel ambiguous.
+  // Receipt mode — single centered card, no header / footer / sidebar.
   if (bookingResult) {
-    const resolvedSvc = selectedSvc || services.find((s: any) => s.id === bookingResult.serviceId) || null;
+    const resolvedServices = bookingResult.serviceIds && bookingResult.serviceIds.length > 0
+      ? bookingResult.serviceIds.map((id) => services.find((s) => s.id === id)).filter(Boolean)
+      : selectedServices;
+    const receiptTotalPrice = resolvedServices.reduce(
+      (sum: number, s: any) => sum + ((s.allInPriceMinor ?? s.basePriceMinor) || 0),
+      0,
+    );
+    const receiptTotalDuration = resolvedServices.reduce((sum: number, s: any) => sum + (s.durationMins || 0), 0);
     return (
       <div className="max-w-xl mx-auto py-12 px-4">
         <BookingReceipt
           bookingResult={bookingResult}
           locData={locData}
-          service={resolvedSvc}
+          servicesList={resolvedServices}
+          totalDuration={receiptTotalDuration}
           slotUtc={selectedSlot || bookingResult.slotUtc || null}
           vehicle={activeVehicle}
-          totalPrice={totalPrice || ((resolvedSvc as any)?.allInPriceMinor ?? (resolvedSvc as any)?.basePriceMinor) || 0}
+          totalPrice={receiptTotalPrice}
           onDone={() => {
             if (receiptStorageKey) sessionStorage.removeItem(receiptStorageKey);
             setNav("/bookings");
@@ -383,396 +394,320 @@ export default function LocationDetail() {
     );
   }
 
+  // ────────── Header bits used by the slim header ──────────
+  const reviewCount: number = (locData as any).reviewCount ?? 0;
+  const averageRating: number | null = (locData as any).averageRating ?? null;
+  const isOpenNow: boolean = !!(locData as any).isOpenNow;
+  const addressLine = [locData.addressLine1, locData.city, locData.stateCode].filter(Boolean).join(", ");
+
+  const slots: any[] = Array.isArray((availabilityData as any)?.slots) ? (availabilityData as any).slots : [];
+  const availableSlots = slots.filter((s: any) => s.available);
+  const closedDayMessage = (availabilityData as any)?.message;
+
+  const confirmDisabled =
+    selectedServiceIds.length === 0
+    || !selectedSlot
+    || holdMutation.isPending
+    || bookMutation.isPending
+    || locationIncompatible;
+
   return (
-    <div className="max-w-5xl mx-auto space-y-8">
-      <button onClick={() => setNav(backUrl)} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors font-medium">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 pb-32 lg:pb-12 space-y-6">
+      <button onClick={() => setNav(backUrl)} className="inline-flex items-center gap-2 text-sm text-slate-500 hover:text-slate-900 transition-colors font-medium pt-2">
         <ChevronLeft className="h-4 w-4" /> {backLabel}
       </button>
 
-      <div className="bg-white rounded-3xl p-8 border border-slate-200 shadow-sm flex flex-col md:flex-row gap-8 justify-between items-start">
-        <div>
-          <div className="flex items-center gap-2 mb-4">
-            <Badge className="bg-blue-50 text-blue-700 border-blue-200">{locData.provider?.name}</Badge>
-            {(locData as any).isOpenNow ? (
-              <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200"><Clock className="h-3 w-3 mr-1" />Open Now</Badge>
-            ) : (
-              <Badge className="bg-slate-100 text-slate-500 border-slate-200">Closed</Badge>
-            )}
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 mb-2">{locData.name}</h1>
-          <p className="text-lg text-slate-500 flex items-center gap-2">
-            <MapPin className="h-5 w-5" />
-            {locData.addressLine1}, {locData.city}, {locData.stateCode} {locData.postalCode}
-          </p>
-          {etaMins != null && (
-            <div className="mt-3 inline-flex items-center gap-2 bg-purple-50 text-purple-700 px-4 py-2 rounded-xl border border-purple-200">
-              <Navigation className="h-4 w-4" />
-              <span className="font-semibold text-sm">You are {formatETA(etaMins)} away</span>
-            </div>
-          )}
+      {/* Slim header — title with stars+review count beside it,
+          single metadata line below. No Premium Facility card, no
+          provider banner chip. Stars link to the reviews section. */}
+      <header className="space-y-2">
+        <div className="flex items-start justify-between gap-3">
+          <h1 className="text-2xl sm:text-3xl font-display font-bold text-slate-900 leading-tight">{locData.name}</h1>
         </div>
-        <div className="bg-blue-50 rounded-2xl p-6 border border-blue-100 min-w-[250px]">
-          <div className="flex items-center gap-3 text-blue-700 font-bold mb-2">
-            <ShieldCheck className="h-6 w-6" />
-            Premium Facility
-          </div>
-          <p className="text-sm text-blue-600/80">All washes guaranteed by provider.</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-6">
-
-          {/* Active vehicle context — drives availability + pricing + bay
-              compatibility for the rest of the flow. The booking column is
-              gated on this; without an active vehicle we render an empty
-              state below instead of Steps 1-3. */}
-          <ActiveVehicleContextCard />
-
-          {/* Defense-in-depth incompatibility guard. When the active
-              vehicle's class can't fit any bay at this location, render
-              an upfront prominent warning IN PLACE OF the booking
-              steps below — the buried "no slots" message in step 2
-              was confusing and made the failure look like a date issue. */}
-          {locationIncompatible && activeVehicle ? (
-            <Card className="p-6 md:p-8 bg-amber-50 border-2 border-amber-200">
-              <div className="flex flex-col items-center text-center max-w-lg mx-auto">
-                <div className="h-14 w-14 bg-amber-100 rounded-2xl flex items-center justify-center mb-3">
-                  <AlertTriangle className="h-7 w-7 text-amber-600" />
-                </div>
-                <h3 className="text-lg font-bold text-amber-900">This location can't host your active vehicle</h3>
-                <p className="text-sm text-amber-800/90 mt-2">
-                  Your active vehicle (<span className="font-semibold">{incompatibleVehicleLine}</span>) doesn't fit any bay at <span className="font-semibold">{locData?.name || "this location"}</span>.
-                </p>
-                <p className="text-sm text-amber-800/80 mt-2">
-                  Change your active vehicle in the pill above to book here, or
-                  <button onClick={() => setNav("/search")} className="ml-1 font-semibold underline hover:no-underline">pick a different location</button>.
-                </p>
-              </div>
-            </Card>
+        {(averageRating != null || reviewCount > 0) && (
+          <a
+            href="#location-reviews"
+            onClick={(e) => {
+              e.preventDefault();
+              document.getElementById("location-reviews")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+            className="inline-flex items-center gap-1 text-sm text-slate-700 hover:text-slate-900"
+          >
+            <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
+            <span className="font-semibold">{averageRating != null ? averageRating.toFixed(1) : "—"}</span>
+            <span className="text-slate-500">({reviewCount} review{reviewCount === 1 ? "" : "s"})</span>
+          </a>
+        )}
+        <p className="text-sm text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="inline-flex items-center gap-1 min-w-0">
+            <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+            <span className="truncate">{addressLine}</span>
+          </span>
+          <span className="text-slate-300">·</span>
+          {isOpenNow ? (
+            <span className="text-emerald-600 font-medium">Open now</span>
           ) : (
-          !vehicleLoading && !hasAnyVehicle ? (
-            <Card className="p-8 text-center bg-amber-50 border-amber-200">
-              <div className="h-14 w-14 mx-auto bg-amber-100 rounded-2xl flex items-center justify-center mb-3">
-                <AlertTriangle className="h-7 w-7 text-amber-600" />
-              </div>
-              <h3 className="text-lg font-bold text-amber-900">Add a vehicle to book a wash</h3>
-              <p className="text-sm text-amber-800/80 mt-1 max-w-md mx-auto">Bay compatibility and pricing are determined by your vehicle's size class. Add one to continue.</p>
-              <Button className="mt-4" onClick={() => setNav("/vehicles")}>Manage Vehicles</Button>
-            </Card>
-          ) : (<>
+            <span className="text-slate-400 font-medium">Closed</span>
+          )}
+          {etaMins != null && (
+            <>
+              <span className="text-slate-300">·</span>
+              <span>{formatETA(etaMins)} away</span>
+            </>
+          )}
+        </p>
+      </header>
 
-          {/* Step 1: Select Service */}
-          <Card className={`transition-all duration-300 ${bookingStep !== 1 && !stepComplete(1) ? "opacity-50" : ""}`}>
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="text-xl font-bold flex items-center gap-3">
-                <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${stepComplete(1) && bookingStep > 1 ? 'bg-green-500 text-white' : 'bg-slate-900 text-white'}`}>
-                  {stepComplete(1) && bookingStep > 1 ? <CheckCircle2 className="h-5 w-5" /> : "1"}
-                </span>
-                Select Service
-              </h2>
-              {bookingStep > 1 && stepComplete(1) && (
-                <button onClick={() => { setBookingStep(1); setSelectedSlot(null); }} className="text-sm font-semibold text-primary hover:text-primary/80">Change</button>
-              )}
+      <ActiveVehicleContextCard />
+
+      {/* Defense-in-depth: location can't host the active vehicle —
+          stop the booking flow upfront with a clear explanation. */}
+      {locationIncompatible && activeVehicle ? (
+        <Card className="p-6 bg-amber-50 border-2 border-amber-200">
+          <div className="flex flex-col items-center text-center max-w-lg mx-auto">
+            <div className="h-12 w-12 bg-amber-100 rounded-2xl flex items-center justify-center mb-3">
+              <AlertTriangle className="h-6 w-6 text-amber-600" />
             </div>
-            <AnimatePresence>
-              {bookingStep === 1 && (
-                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                  <div className="p-6 space-y-3">
-                    {services.length === 0 ? (
-                      <div className="text-center py-8 text-slate-400">No services available at this location.</div>
-                    ) : services.map(svc => {
-                      const compatible = !activeVehicle || isVehicleCompatible(activeVehicle, svc);
-                      return (
-                        <div
-                          key={svc.id}
-                          onClick={() => { if (!compatible) return; setSelectedService(svc.id); setBookingStep(2); setSelectedSlot(null); setHoldId(null); setHoldExpiresAt(null); setBookingResult(null); }}
-                          className={`p-5 rounded-2xl border-2 transition-all ${
-                            !compatible
-                              ? 'opacity-60 cursor-not-allowed border-slate-200 bg-slate-50'
-                              : selectedService === svc.id
-                                ? 'cursor-pointer border-primary bg-blue-50/50 shadow-sm'
-                                : 'cursor-pointer border-slate-200 hover:border-primary/40 hover:shadow-md'
-                          }`}
-                        >
-                          <div className="flex justify-between items-start mb-1">
-                            <div className="flex items-center gap-2">
-                              <h3 className="font-bold text-lg text-slate-900">{svc.name}</h3>
-                              {(svc as any).requiresConfirmation === false ? (
-                                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-xs"><Zap className="h-3 w-3 mr-0.5" />Instant Book</Badge>
-                              ) : (
-                                <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-xs">Request</Badge>
-                              )}
-                            </div>
-                            <span className="font-display font-bold text-xl text-primary">{formatCurrency((svc as any).allInPriceMinor ?? svc.basePriceMinor)}</span>
-                          </div>
-                          {(svc as any).description && (
-                            <p className="text-sm text-slate-500 mb-2">{(svc as any).description}</p>
+            <h3 className="text-base font-bold text-amber-900">This location can't host your active vehicle</h3>
+            <p className="text-sm text-amber-800/90 mt-2">
+              <span className="font-semibold">{incompatibleVehicleLine}</span> doesn't fit any bay at <span className="font-semibold">{locData?.name || "this location"}</span>.
+            </p>
+            <p className="text-sm text-amber-800/80 mt-2">
+              Change your active vehicle in the pill above, or
+              <button onClick={() => setNav("/search")} className="ml-1 font-semibold underline hover:no-underline">pick a different location</button>.
+            </p>
+          </div>
+        </Card>
+      ) : !vehicleLoading && !hasAnyVehicle ? (
+        <Card className="p-6 text-center bg-amber-50 border-amber-200">
+          <div className="h-12 w-12 mx-auto bg-amber-100 rounded-2xl flex items-center justify-center mb-3">
+            <AlertTriangle className="h-6 w-6 text-amber-600" />
+          </div>
+          <h3 className="text-base font-bold text-amber-900">Add a vehicle to book a wash</h3>
+          <p className="text-sm text-amber-800/80 mt-1">Bay compatibility is determined by your vehicle's class.</p>
+          <Button className="mt-4" onClick={() => setNav("/vehicles")}>Manage Vehicles</Button>
+        </Card>
+      ) : (
+        <>
+          {/* ────────── Service selection (multi-select) ────────── */}
+          <section className="space-y-3">
+            <h2 className="text-lg font-bold text-slate-900">Select Services</h2>
+            {services.length === 0 ? (
+              <Card className="p-6 text-center text-sm text-slate-500">No services available at this location.</Card>
+            ) : (
+              <div className="space-y-2">
+                {services.map((svc: any) => {
+                  const compatible = !activeVehicle || isVehicleCompatible(activeVehicle, svc);
+                  const isSelected = selectedServiceIds.includes(svc.id);
+                  const price = (svc.allInPriceMinor ?? svc.basePriceMinor);
+                  return (
+                    <button
+                      key={svc.id}
+                      type="button"
+                      disabled={!compatible}
+                      onClick={() => toggleService(svc.id)}
+                      className={`w-full text-left p-4 rounded-2xl border-2 transition-all ${
+                        !compatible
+                          ? "opacity-60 cursor-not-allowed border-slate-200 bg-slate-50"
+                          : isSelected
+                            ? "border-primary bg-primary/5 shadow-sm"
+                            : "border-slate-200 bg-white hover:border-primary/40 hover:shadow-sm"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-bold text-slate-900 leading-tight">{svc.name}</h3>
+                          <p className="text-xs text-slate-500 mt-0.5">{svc.durationMins} min</p>
+                          {svc.description && (
+                            <p className="text-sm text-slate-600 mt-2 leading-snug line-clamp-2">{svc.description}</p>
                           )}
-                          <div className="flex gap-4 text-xs font-semibold text-slate-400">
-                            <span className="flex items-center gap-1"><Clock className="h-4 w-4" /> {svc.durationMins} min</span>
-                          </div>
-                          {!compatible && activeVehicle && (
-                            <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 px-3 py-1.5 rounded-lg">
-                              <AlertTriangle className="h-3.5 w-3.5" />
-                              {(() => {
-                                const cls = deriveSizeClassFromLengthInches(activeVehicle.lengthInches);
-                                const cap = (svc as any).maxVehicleClass;
-                                const capLabel = cap && SIZE_CLASS_LABEL[cap as keyof typeof SIZE_CLASS_LABEL];
-                                const myLabel = cls && SIZE_CLASS_LABEL[cls];
-                                return capLabel
-                                  ? `This service supports up to ${capLabel} vehicles${myLabel ? `; your ${myLabel} bus exceeds it` : ""}.`
-                                  : `Your vehicle exceeds this service's size limit.`;
-                              })()}
+                          {!compatible && activeVehicle && svc.maxVehicleClass && SIZE_CLASS_LABEL[svc.maxVehicleClass as keyof typeof SIZE_CLASS_LABEL] && (
+                            <p className="text-xs text-amber-700 mt-2">Supports up to {SIZE_CLASS_LABEL[svc.maxVehicleClass as keyof typeof SIZE_CLASS_LABEL]} vehicles.</p>
+                          )}
+                        </div>
+                        <div className="flex flex-col items-end gap-2 shrink-0">
+                          <span className="font-display font-bold text-lg text-slate-900">{formatCurrency(price)}</span>
+                          {isSelected && (
+                            <div className="h-6 w-6 rounded-full bg-primary flex items-center justify-center">
+                              <Check className="h-4 w-4 text-white" strokeWidth={3} />
                             </div>
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-            {bookingStep > 1 && selectedSvc && (
-              <div className="px-6 py-4 bg-slate-50 text-sm text-slate-600 flex items-center justify-between">
-                <span><span className="font-semibold text-slate-900">{selectedSvc.name}</span> — {formatCurrency((selectedSvc as any).allInPriceMinor ?? selectedSvc.basePriceMinor)} · {selectedSvc.durationMins} min</span>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
-          </Card>
+          </section>
 
-          {/* Step 2: Date & Time */}
-          <Card className={`transition-all duration-300 ${bookingStep < 2 ? "opacity-50 pointer-events-none" : bookingStep !== 2 && !stepComplete(2) ? "opacity-50" : ""}`}>
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="text-xl font-bold flex items-center gap-3">
-                <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${stepComplete(2) && bookingStep > 2 ? 'bg-green-500 text-white' : bookingStep >= 2 ? 'bg-slate-900 text-white' : 'bg-slate-300 text-white'}`}>
-                  {stepComplete(2) && bookingStep > 2 ? <CheckCircle2 className="h-5 w-5" /> : "2"}
-                </span>
-                Date & Time
-              </h2>
-              {bookingStep > 2 && stepComplete(2) && (
-                <button onClick={() => setBookingStep(2)} className="text-sm font-semibold text-primary hover:text-primary/80">Change</button>
+          {/* ────────── Day picker (horizontally scrollable) ────────── */}
+          <section className="space-y-3">
+            <h2 className="text-lg font-bold text-slate-900">Pick a date</h2>
+            <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-2 sm:mx-0 sm:px-0">
+              {Array.from({ length: 14 }).map((_, offset) => {
+                const d = addDays(new Date(), offset);
+                const dStr = format(d, "yyyy-MM-dd");
+                const isSel = dStr === selectedDate;
+                return (
+                  <button
+                    key={dStr}
+                    onClick={() => { setSelectedDate(dStr); setSelectedSlot(null); }}
+                    className={`shrink-0 w-[52px] sm:w-[72px] py-3 rounded-xl border-2 flex flex-col items-center justify-center transition-all ${
+                      isSel
+                        ? "border-primary bg-primary text-white"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-primary/40"
+                    }`}
+                  >
+                    <span className="text-[10px] font-bold uppercase tracking-wider opacity-80">{format(d, "EEE")}</span>
+                    <span className="text-xl font-display font-bold leading-tight">{format(d, "d")}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* ────────── Time grid ────────── */}
+          <section className="space-y-3">
+            <div className="flex items-baseline justify-between">
+              <h2 className="text-lg font-bold text-slate-900">Pick a time</h2>
+              {totalDurationMins > 0 && (
+                <p className="text-xs text-slate-500">{totalDurationMins} min total</p>
               )}
             </div>
-            <AnimatePresence>
-              {bookingStep === 2 && selectedService && (
-                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                  <div className="p-6">
-                    <div className="flex gap-2 overflow-x-auto pb-4 mb-6">
-                      {[0,1,2,3,4,5,6].map(offset => {
-                        const d = addDays(new Date(), offset);
-                        const dStr = format(d, "yyyy-MM-dd");
-                        const isSel = dStr === selectedDate;
-                        return (
-                          <button
-                            key={dStr}
-                            onClick={() => { setSelectedDate(dStr); setSelectedSlot(null); }}
-                            className={`flex-shrink-0 w-20 h-24 rounded-2xl border-2 flex flex-col items-center justify-center transition-all ${isSel ? 'border-primary bg-primary text-white shadow-lg shadow-primary/25' : 'border-slate-200 bg-white text-slate-600 hover:border-primary/50'}`}
-                          >
-                            <span className="text-xs font-bold uppercase tracking-wider mb-1 opacity-80">{format(d, "EEE")}</span>
-                            <span className="text-2xl font-display font-bold">{format(d, "d")}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <h3 className="font-bold text-slate-900 mb-4">Available Slots</h3>
-                    {isLoadingSlots ? (
-                      <div className="h-32 flex items-center justify-center">
-                        <div className="animate-spin h-6 w-6 border-3 border-primary border-t-transparent rounded-full" />
-                      </div>
-                    ) : !(availabilityData as any)?.slots?.length ? (
-                      <div className="p-8 bg-slate-50 rounded-xl text-center border border-dashed border-slate-300">
-                        <p className="text-slate-500 font-medium">{(availabilityData as any)?.message || "No slots on this date."}</p>
-                        <p className="text-slate-400 text-sm mt-1">Try a different day or location.</p>
-                      </div>
-                    ) : !((availabilityData as any).slots as any[]).some((s: any) => s.available) ? (
-                      // Structural vehicle/location incompatibility is
-                      // now caught upfront — by the time we reach this
-                      // branch the location *can* host the active
-                      // vehicle, just not on this date. So the right
-                      // framing is "fully booked today" or "closed".
-                      <div className="p-8 bg-slate-50 rounded-xl text-center border border-dashed border-slate-300">
-                        <p className="text-slate-700 font-medium">No availability on this date.</p>
-                        <p className="text-slate-500 text-sm mt-1">All compatible bays are booked or the location is closed. Try a different day.</p>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
-                        {(availabilityData as any).slots.map((slot: any) => (
-                          <button
-                            key={slot.startUtc}
-                            disabled={!slot.available}
-                            onClick={() => setSelectedSlot(slot.startUtc)}
-                            className={`p-3 rounded-xl border-2 font-bold text-sm transition-all ${
-                              !slot.available
-                                ? 'opacity-30 bg-slate-50 border-slate-200 cursor-not-allowed line-through'
-                                : selectedSlot === slot.startUtc
-                                  ? 'bg-primary text-white border-primary ring-2 ring-primary/20 shadow-md'
-                                  : 'bg-white border-slate-200 hover:border-primary/50 text-slate-700 hover:shadow-sm'
-                            }`}
-                          >
-                            {slot.startTime}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="mt-8 flex justify-end">
-                      <Button
-                        disabled={!selectedSlot || holdMutation.isPending}
-                        isLoading={holdMutation.isPending}
-                        onClick={handleCreateHold}
-                        className="gap-2"
-                      >
-                        Hold Slot & Continue <ArrowRight className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-            {bookingStep > 2 && selectedSlot && (
-              <div className="px-6 py-4 bg-slate-50 text-sm text-slate-600">
-                <span className="font-semibold text-slate-900">{formatDate(selectedSlot, "EEEE, MMM d, yyyy")}</span> at <span className="font-semibold text-slate-900">{formatDate(selectedSlot, "h:mm a")}</span>
-              </div>
-            )}
-          </Card>
-
-          {/* Hold countdown banner */}
-          {holdTimeLeft != null && holdTimeLeft > 0 && bookingStep >= 3 && (
-            <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm">
-              <Timer className="h-4 w-4 text-amber-600" />
-              <span className="text-amber-800 font-medium">
-                Slot held for <span className="font-bold">{Math.floor(holdTimeLeft / 60)}:{String(holdTimeLeft % 60).padStart(2, "0")}</span> — complete your booking before the hold expires.
-              </span>
-            </div>
-          )}
-          {holdTimeLeft === 0 && bookingStep >= 3 && !bookingResult && (
-            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-sm">
-              <AlertTriangle className="h-4 w-4 text-red-600" />
-              <span className="text-red-800 font-medium">Your hold has expired. <button onClick={() => { setBookingStep(2); setHoldId(null); setSelectedSlot(null); }} className="underline font-bold">Select a new time slot</button></span>
-            </div>
-          )}
-
-          {/* Step 3: Confirm Booking — vehicle is the active one, set above.
-              When bookingResult is set, the page-level early-return upstream
-              swaps in a centered receipt instead of this card. */}
-          <Card className={`transition-all duration-300 ${bookingStep < 3 ? "opacity-50 pointer-events-none" : ""}`}>
-            <div className="p-6">
-              {bookingError && (
-                <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm font-medium">
-                  {bookingError}
-                </div>
-              )}
-              <Button
-                size="lg"
-                className="w-full h-14 text-lg gap-2"
-                onClick={handleConfirmBooking}
-                disabled={!holdId || holdTimeLeft === 0 || bookMutation.isPending}
-                isLoading={bookMutation.isPending}
-              >
-                <CheckCircle2 className="h-5 w-5" /> Confirm Booking
-              </Button>
-              <p className="text-center text-xs text-slate-400 mt-3">
-                {selectedSvc && (selectedSvc as any).requiresConfirmation === false
-                  ? "This is an instant booking — it will be confirmed immediately."
-                  : "The provider will review and confirm your booking request."}
-              </p>
-            </div>
-          </Card>
-          </>)
-        )}
-        </div>
-
-        {/* Right Col - Booking Summary. Hidden when the location can't
-            host the active vehicle — the upfront warning replaces the
-            entire booking flow including the summary sidebar. */}
-        {!locationIncompatible && (
-        <div className="lg:col-span-1">
-          <div className="sticky top-24 space-y-4">
-            <Card className="bg-gradient-to-br from-slate-900 to-slate-800 text-white border-slate-700 overflow-hidden">
-              <div className="p-6 border-b border-slate-700/50">
-                <h3 className="font-display font-bold text-xl">Booking Summary</h3>
-              </div>
-              <div className="p-6 space-y-5">
-                <div>
-                  <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">Service</p>
-                  <p className="font-bold text-lg">{selectedSvc?.name || "—"}</p>
-                  {selectedSvc && <p className="text-slate-400 text-sm">{selectedSvc.durationMins} min</p>}
-                </div>
-                <div>
-                  <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">Date & Time</p>
-                  <p className="font-bold text-lg">{selectedSlot ? formatDate(selectedSlot, "MMM d, yyyy") : "—"}</p>
-                  {selectedSlot && <p className="text-slate-400 text-sm">{formatDate(selectedSlot, "h:mm a")}</p>}
-                </div>
-                {activeVehicle && (
-                  <div>
-                    <p className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-1">Vehicle</p>
-                    <p className="font-bold text-lg">{vehicleDisplayName(activeVehicle)}</p>
-                    {activeVehicleClass && <p className="text-slate-400 text-sm">{SIZE_CLASS_LABEL[activeVehicleClass]}</p>}
-                  </div>
-                )}
-                <div className="pt-5 border-t border-slate-700/50 flex justify-between items-end">
-                  <span className="text-slate-300 text-sm">Total Price</span>
-                  <span className="text-3xl font-display font-bold text-blue-400">
-                    {selectedSvc ? formatCurrency(totalPrice) : "$0.00"}
-                  </span>
-                </div>
-              </div>
-            </Card>
-
-            {/* Operating Hours Schedule */}
-            {locData.operatingWindows && locData.operatingWindows.length > 0 && (
-              <Card className="p-5">
-                <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-slate-500" />
-                  Operating Hours
-                </h3>
-                <div className="space-y-1.5 text-sm">
-                  {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((dayName, dayIdx) => {
-                    const dayWindows = (locData.operatingWindows || [])
-                      .filter((w: any) => w.dayOfWeek === dayIdx)
-                      .sort((a: any, b: any) => a.openTime.localeCompare(b.openTime));
-                    const isToday = new Date().getDay() === dayIdx;
-                    return (
-                      <div key={dayIdx} className={`flex justify-between py-1 px-2 rounded ${isToday ? "bg-blue-50 font-semibold" : ""}`}>
-                        <span className={isToday ? "text-blue-700" : "text-slate-600"}>{dayName.slice(0, 3)}</span>
-                        <span className={isToday ? "text-blue-700" : "text-slate-500"}>
-                          {dayWindows.length === 0 ? "Closed" : dayWindows.map((w: any) => {
-                            const fmt = (t: string) => {
-                              const [h, m] = t.split(":").map(Number);
-                              const ampm = h >= 12 ? "PM" : "AM";
-                              const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-                              return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
-                            };
-                            return `${fmt(w.openTime)} – ${fmt(w.closeTime)}`;
-                          }).join(", ")}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
+            {selectedServiceIds.length === 0 ? (
+              <Card className="p-6 text-center text-sm text-slate-500">Select at least one service to see available times.</Card>
+            ) : isLoadingSlots ? (
+              <Card className="p-8 flex items-center justify-center">
+                <div className="animate-spin h-6 w-6 border-3 border-primary border-t-transparent rounded-full" />
               </Card>
+            ) : closedDayMessage ? (
+              <Card className="p-6 text-center text-sm text-slate-500">{closedDayMessage}</Card>
+            ) : availableSlots.length === 0 ? (
+              <Card className="p-6 text-center bg-slate-50 border-dashed">
+                <p className="text-sm text-slate-700 font-medium">
+                  No slots available for {totalDurationMins} min on {format(new Date(selectedDate + "T12:00:00"), "MMM d")}.
+                </p>
+                <p className="text-xs text-slate-500 mt-1">Try fewer services or a different date.</p>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 sm:gap-3">
+                {availableSlots.map((slot: any) => (
+                  <button
+                    key={slot.startUtc}
+                    onClick={() => setSelectedSlot(slot.startUtc)}
+                    className={`p-3 rounded-xl border-2 font-bold text-sm transition-all ${
+                      selectedSlot === slot.startUtc
+                        ? "bg-primary text-white border-primary shadow-sm"
+                        : "bg-white border-slate-200 hover:border-primary/40 text-slate-700"
+                    }`}
+                  >
+                    {slot.startTime}
+                  </button>
+                ))}
+              </div>
             )}
+          </section>
 
-            <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200">
-              <p className="text-xs text-slate-500 leading-relaxed">
-                <span className="font-bold text-slate-700">Free cancellation</span> up to 2 hours before your scheduled wash. Your card won't be charged until the wash is completed.
-              </p>
+          {/* ────────── Inline driver note ────────── */}
+          {selectedServiceIds.length > 0 && (
+            <section className="space-y-2">
+              {!driverNoteOpen ? (
+                <button
+                  type="button"
+                  onClick={() => setDriverNoteOpen(true)}
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+                >
+                  <StickyNote className="h-4 w-4" /> + Add a note for the provider
+                </button>
+              ) : (
+                <Card className="p-4 border-amber-100 bg-amber-50/30">
+                  <p className="text-xs text-amber-800 mb-2">Visible to the provider on this booking. Notes can't be edited once added.</p>
+                  <textarea
+                    value={driverNote}
+                    onChange={(e) => setDriverNote(e.target.value.slice(0, 2000))}
+                    autoFocus
+                    rows={3}
+                    placeholder="Anything the provider should know? E.g., extra dirty, specific bay preference."
+                    className="w-full border border-amber-200 rounded-lg p-2 text-sm bg-white focus:border-amber-400 focus:outline-none resize-none"
+                  />
+                  <div className="flex justify-between items-center mt-2">
+                    <span className="text-[11px] text-slate-500">{driverNote.length}/2000</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => { setDriverNoteOpen(false); setDriverNote(""); }}
+                    >
+                      {driverNote.trim() ? "Clear" : "Cancel"}
+                    </Button>
+                  </div>
+                </Card>
+              )}
+            </section>
+          )}
+
+          {bookingError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-800 font-medium">
+              {bookingError}
             </div>
-          </div>
-        </div>
-        )}
-      </div>
+          )}
 
-      <div>
-        <h2 className="text-2xl font-display font-bold text-slate-900 mb-4 flex items-center gap-2">
-          <Star className="h-6 w-6 text-amber-400" />
+          {holdTimeLeft != null && holdTimeLeft > 0 && (
+            <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800">
+              Slot held for <span className="font-bold">{Math.floor(holdTimeLeft / 60)}:{String(holdTimeLeft % 60).padStart(2, "0")}</span>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ────────── Reviews ────────── */}
+      <section id="location-reviews" className="pt-4 space-y-3 scroll-mt-4">
+        <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+          <Star className="h-5 w-5 text-amber-400 fill-amber-400" />
           Customer Reviews
         </h2>
         <LocationReviews locationId={locationId} />
-      </div>
+      </section>
 
-      {/* shortNoticePending modal — declared inline below */}
+      {/* ────────── Sticky footer ────────── */}
+      {!locationIncompatible && hasAnyVehicle && (
+        <div
+          className="fixed inset-x-0 bottom-0 z-40 bg-white border-t border-slate-200 shadow-[0_-4px_24px_-12px_rgba(0,0,0,0.15)] lg:max-w-3xl lg:left-1/2 lg:-translate-x-1/2 lg:rounded-t-2xl"
+          style={{ paddingBottom: "max(env(safe-area-inset-bottom), 0px)" }}
+        >
+          <div className="px-4 sm:px-6 py-3 flex items-center gap-3 sm:gap-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-slate-500 leading-tight">
+                {selectedServiceIds.length} service{selectedServiceIds.length === 1 ? "" : "s"}
+                {totalDurationMins > 0 ? <> · {totalDurationMins} min</> : null}
+              </p>
+              <p className="font-display font-bold text-lg text-slate-900 leading-tight">
+                {formatCurrency(totalPriceMinor)}
+              </p>
+              <p className="text-[10px] text-slate-400 mt-0.5 hidden sm:block">
+                Free cancellation up to 2 hours before your scheduled wash.
+              </p>
+            </div>
+            <Button
+              size="lg"
+              className="gap-2 shrink-0"
+              onClick={handleConfirmTap}
+              disabled={confirmDisabled}
+              isLoading={holdMutation.isPending || bookMutation.isPending}
+            >
+              <CheckCircle2 className="h-5 w-5" />
+              <span className="hidden sm:inline">Confirm Booking</span>
+              <span className="sm:hidden">Confirm</span>
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+          <p className="px-4 sm:px-6 pb-2 text-[10px] text-slate-400 sm:hidden">
+            Free cancellation up to 2 hours before your scheduled wash.
+          </p>
+        </div>
+      )}
+
+      {/* ────────── Short-notice modal ────────── */}
       {shortNoticePending && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={cancelShortNotice}>
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
@@ -785,7 +720,7 @@ export default function LocationDetail() {
                   <span className="font-semibold text-slate-900">
                     {formatDate(shortNoticePending.slotUtc, "h:mm a", (locData as any)?.timezone)}
                   </span>{" "}
-                  — that's in <span className="font-semibold text-slate-900">{shortNoticePending.minutes} minute{shortNoticePending.minutes === 1 ? "" : "s"}</span>. Please make sure you can arrive on time. The bay will be reserved for you.
+                  — that's in <span className="font-semibold text-slate-900">{shortNoticePending.minutes} minute{shortNoticePending.minutes === 1 ? "" : "s"}</span>. Make sure you can arrive on time. The bay will be reserved for you.
                 </p>
               </div>
             </div>
@@ -802,12 +737,12 @@ export default function LocationDetail() {
 
 /** Inline receipt-style success state. Replaces the older two-button
  * "Booking Confirmed!" / "View Booking Details" intermediate screen —
- * the success page IS the receipt now. Photo placeholder slot will be
- * wired to real provider photos in a later prompt. */
+ * the success page IS the receipt now. */
 function BookingReceipt({
   bookingResult,
   locData,
-  service,
+  servicesList,
+  totalDuration,
   slotUtc,
   vehicle,
   totalPrice,
@@ -815,7 +750,8 @@ function BookingReceipt({
 }: {
   bookingResult: { id: string; status: string };
   locData: any;
-  service: any;
+  servicesList: any[];
+  totalDuration: number;
   slotUtc: string | null;
   vehicle: ReturnType<typeof useActiveVehicle>["activeVehicle"];
   totalPrice: number;
@@ -827,9 +763,6 @@ function BookingReceipt({
   const VehicleIcon = bt ? BODY_TYPE_ICON[bt] : null;
   const vehicleStyle = bt ? BODY_TYPE_STYLE[bt] : null;
 
-  // Render the slot in the location's local timezone with the (EST/EDT)
-  // suffix so drivers can't mistake it for their own clock when they're
-  // travelling. Falls back gracefully if Intl can't resolve the zone.
   const dateLine = slotUtc ? formatDate(slotUtc, "EEEE, MMM d, yyyy", tz) : "—";
   const timeLine = slotUtc ? renderTimeWithZone(slotUtc, tz) : "—";
 
@@ -837,23 +770,17 @@ function BookingReceipt({
 
   return (
     <Card className="bg-white border border-slate-200 shadow-sm">
-      <div className="px-8 py-10 flex flex-col items-center text-center">
+      <div className="px-6 sm:px-8 py-10 flex flex-col items-center text-center">
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.2, times: [0, 0.6, 1], ease: "easeOut" }}
+          transition={{ duration: 0.2, ease: "easeOut" }}
           className="w-[90px] h-[90px] rounded-full bg-emerald-50 flex items-center justify-center mb-5"
         >
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: [0, 1.05, 1] }}
-            transition={{ delay: 0.05, duration: 0.2, times: [0, 0.6, 1] }}
-          >
-            <CheckCircle2 className="h-12 w-12 text-emerald-600" strokeWidth={2.2} />
-          </motion.div>
+          <CheckCircle2 className="h-12 w-12 text-emerald-600" strokeWidth={2.2} />
         </motion.div>
 
-        <h1 className="text-3xl font-display font-bold text-slate-900">
+        <h1 className="text-2xl sm:text-3xl font-display font-bold text-slate-900">
           {isInstant ? "Booking Confirmed" : "Request Submitted"}
         </h1>
 
@@ -871,13 +798,17 @@ function BookingReceipt({
               <span className="block text-slate-500 text-xs mt-0.5">{timeLine}</span>
             </>
           } />
-          <ReceiptRow label="Service" value={
-            <>
-              <span className="block text-slate-900 font-medium">{service?.name || "—"}</span>
-              {service?.durationMins != null && (
-                <span className="block text-slate-500 text-xs mt-0.5">{service.durationMins} min</span>
-              )}
-            </>
+          <ReceiptRow label={servicesList.length > 1 ? "Services" : "Service"} value={
+            servicesList.length === 0 ? <span className="text-slate-900 font-medium">—</span> : (
+              <div className="space-y-1">
+                {servicesList.map((s) => (
+                  <div key={s.id} className="text-slate-900 font-medium">{s.name}</div>
+                ))}
+                {totalDuration > 0 && (
+                  <div className="text-slate-500 text-xs">{totalDuration} min total</div>
+                )}
+              </div>
+            )
           } />
           <ReceiptRow label="Vehicle" value={
             vehicle ? (
@@ -938,16 +869,15 @@ function renderTimeWithZone(slotUtc: string, timezone?: string): string {
       timeZone: timezone,
       timeZoneName: "short",
     }).format(new Date(slotUtc));
-    // "10:30 AM EDT" → "10:30 AM (EDT)"
     return formatted.replace(/\s+([A-Z]{2,5})$/, " ($1)");
   } catch {
     return formatDate(slotUtc, "h:mm a", timezone);
   }
 }
 
-/** Top-of-flow context card showing the driver's active vehicle. The
- * "Change" link reuses the same popover the global pill uses, so the
- * affordance is consistent everywhere a swap can happen. */
+/** Top-of-flow context card showing the driver's active vehicle.
+ * Read-only — drivers swap the active vehicle via the global pill on
+ * Find a Wash / Route Planner, not mid-booking. */
 function ActiveVehicleContextCard() {
   const { activeVehicle, hasAnyVehicle, loading } = useActiveVehicle();
   if (loading || !hasAnyVehicle || !activeVehicle) return null;
@@ -956,20 +886,20 @@ function ActiveVehicleContextCard() {
   const Icon = BODY_TYPE_ICON[bt];
   const cls = deriveSizeClassFromLengthInches(activeVehicle.lengthInches);
   const lengthFeet = inchesToFeet(activeVehicle.lengthInches);
-  // Read-only context. The clickable pill that previously sat at the
-  // right edge of this card is gone — drivers swap vehicles via the
-  // global pill on Find a Wash / Route Planner, not mid-booking.
   return (
     <Card className="relative p-0 overflow-hidden">
       <div className={`absolute left-0 top-0 bottom-0 w-1 ${style.stripe}`} aria-hidden />
-      <div className="px-5 pl-6 py-3 flex items-center gap-3">
+      <div className="px-4 pl-5 py-3 flex items-center gap-3">
         <div className={`h-10 w-10 ${style.chipBg} rounded-xl flex items-center justify-center shrink-0`}>
           <Icon className={`h-5 w-5 ${style.chipFg}`} />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-xs uppercase tracking-wider font-bold text-slate-500">Booking for</p>
+          <p className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Booking for</p>
           <p className="font-bold text-slate-900 truncate">
-            {vehicleDisplayName(activeVehicle)} <span className="text-slate-400 font-normal">·</span> <span className="font-medium text-slate-600">{BODY_TYPE_LABEL[bt]}{cls ? ` · ${SIZE_CLASS_LABEL[cls]}` : ""}{lengthFeet ? ` · ${lengthFeet} ft` : ""}</span>
+            {vehicleDisplayName(activeVehicle)}
+          </p>
+          <p className="text-xs text-slate-500 truncate">
+            {BODY_TYPE_LABEL[bt]}{cls ? ` · ${SIZE_CLASS_LABEL[cls]}` : ""}{lengthFeet ? ` · ${lengthFeet} ft` : ""}
           </p>
         </div>
       </div>
