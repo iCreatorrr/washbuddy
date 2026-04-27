@@ -26,6 +26,29 @@ async function getProviderAdmins(providerId: string): Promise<Array<{ userId: st
   return members.map((m) => ({ userId: m.user.id, email: m.user.email, firstName: m.user.firstName }));
 }
 
+/** Admins + staff for the provider org. Booking notifications go to
+ * the whole front-of-house team: anyone who might check the new
+ * booking in. Same shape as getProviderAdmins so callers can swap
+ * helpers without restructuring their loops. Filtered to active
+ * memberships only — terminated staff don't get pinged. */
+async function getProviderTeam(providerId: string): Promise<Array<{ userId: string; email: string; firstName: string }>> {
+  const members = await prisma.providerMembership.findMany({
+    where: { providerId, role: { in: ["PROVIDER_ADMIN", "PROVIDER_STAFF"] }, isActive: true },
+    include: { user: { select: { id: true, email: true, firstName: true } } },
+  });
+  // Dedupe by userId — a staff member with multiple location memberships
+  // at the same provider would otherwise receive the same notification
+  // once per membership.
+  const seen = new Set<string>();
+  const out: Array<{ userId: string; email: string; firstName: string }> = [];
+  for (const m of members) {
+    if (seen.has(m.user.id)) continue;
+    seen.add(m.user.id);
+    out.push({ userId: m.user.id, email: m.user.email, firstName: m.user.firstName });
+  }
+  return out;
+}
+
 async function loadBookingFull(bookingId: string) {
   return prisma.booking.findUnique({
     where: { id: bookingId },
@@ -73,10 +96,14 @@ export async function notifyBookingRequested(bookingId: string): Promise<void> {
     const b = await loadBookingFull(bookingId);
     if (!b || !b.location || !b.customer) return;
 
-    const admins = await getProviderAdmins(b.location.providerId);
+    // Notify the whole provider team (admins + staff) — staff need to
+    // know a request has landed since either role might respond. The
+    // prior shape only notified PROVIDER_ADMIN, which left staff blind
+    // to incoming requests on locations they operate.
+    const admins = await getProviderTeam(b.location.providerId);
     const customerName = `${b.customer.firstName} ${b.customer.lastName}`;
 
-    // In-app + email to provider admins
+    // In-app + email to provider team
     const bookingUrl = `/bookings/${b.id}`;
     for (const admin of admins) {
       await createNotification(admin.userId, {
@@ -125,6 +152,58 @@ export async function notifyBookingConfirmed(bookingId: string): Promise<void> {
         scheduledDate: fmtDate(b.scheduledStartAtUtc), scheduledTime: fmtTime(b.scheduledStartAtUtc),
         actionUrl: `/bookings/${b.id}`,
       })});
+    }
+
+    // Provider-side fan-out: PROVIDER_CONFIRMED is the instant-book
+    // path — the prior shape only notified the customer, so providers
+    // had no idea a booking had landed until they happened to open Bay
+    // Timeline. Skip for off-platform / walk-in bookings since the
+    // provider IS the creator there (no self-notify). Both PROVIDER_ADMIN
+    // and PROVIDER_STAFF receive the notification; everyone with an
+    // active membership at this provider org needs to know.
+    if (b.bookingSource === "PLATFORM" && !b.isOffPlatform) {
+      const team = await getProviderTeam(b.location.providerId);
+      if (team.length > 0) {
+        const customerName = `${b.customer.firstName} ${b.customer.lastName}`.trim();
+        const dateStr = fmtDate(b.scheduledStartAtUtc);
+        const timeStr = fmtTime(b.scheduledStartAtUtc);
+        // "today" vs "for <date>" body wording — same-day awareness is
+        // the load-bearing signal for providers; calling it out
+        // explicitly avoids the "is this today?" mental tax.
+        const today = new Date();
+        const start = new Date(b.scheduledStartAtUtc);
+        const isSameDay =
+          today.getFullYear() === start.getFullYear() &&
+          today.getMonth() === start.getMonth() &&
+          today.getDate() === start.getDate();
+        const whenPhrase = isSameDay ? `today at ${timeStr}` : `for ${dateStr} at ${timeStr}`;
+        const body = `${customerName} booked ${b.serviceNameSnapshot} ${whenPhrase}.`;
+        const actionUrl = `/bookings/${b.id}`;
+
+        for (const member of team) {
+          // In-app notification creation must succeed regardless of email
+          // outcome. Email is fire-and-forget by sendEmail's contract;
+          // if a single member's createNotification throws we still want
+          // the others to receive theirs, so the loop body is wrapped.
+          try {
+            await createNotification(member.userId, {
+              subject: "New booking",
+              body,
+              actionUrl,
+              metadata: { bookingId: b.id, type: "BOOKING_RECEIVED_BY_PROVIDER", isSameDay },
+            });
+          } catch (perMemberErr) {
+            logger.error({ err: perMemberErr, bookingId: b.id, userId: member.userId }, "createNotification failed for provider team member");
+          }
+          if (member.email && isSameDay) {
+            await sendEmail({ to: member.email, ...templates.newBookingForProvider({
+              recipientName: member.firstName, customerName, serviceName: b.serviceNameSnapshot,
+              locationName: b.location.name, scheduledDate: dateStr, scheduledTime: timeStr,
+              isSameDay, actionUrl,
+            })});
+          }
+        }
+      }
     }
   } catch (err) { logger.error({ err, bookingId }, "notifyBookingConfirmed failed"); }
 }

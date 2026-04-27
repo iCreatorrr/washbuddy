@@ -99,6 +99,38 @@ export function bookingConfirmed(params: {
   };
 }
 
+// 2b. New booking confirmed → Provider team (PROVIDER_ADMIN + PROVIDER_STAFF)
+// Fires for instant-confirm (PROVIDER_CONFIRMED status) bookings — the
+// flow that previously had NO provider notification at all and led to
+// James missing Mike's booking at MetroClean Bronx until he happened
+// to open Bay Timeline. Same-day bookings get a "today at HH:MM"
+// subject; future bookings get "Date at HH:MM".
+export function newBookingForProvider(params: {
+  recipientName: string;
+  customerName: string;
+  serviceName: string;
+  locationName: string;
+  scheduledDate: string;
+  scheduledTime: string;
+  isSameDay: boolean;
+  actionUrl: string;
+}): EmailContent {
+  const { recipientName, customerName, serviceName, locationName, scheduledDate, scheduledTime, isSameDay, actionUrl } = params;
+  const whenLine = isSameDay ? `today at ${scheduledTime}` : `${scheduledDate} at ${scheduledTime}`;
+  const subject = isSameDay
+    ? `New booking today at ${scheduledTime} — ${locationName}`
+    : `New booking on ${scheduledDate} — ${locationName}`;
+  return {
+    subject,
+    html: wrapInLayout("New Booking", [
+      p(`Hi ${recipientName},`),
+      p(`<strong>${customerName}</strong> just booked <strong>${serviceName}</strong> at <strong>${locationName}</strong> for ${whenLine}.`),
+      ctaButton("View Booking", actionUrl),
+    ].join("")),
+    text: `Hi ${recipientName},\n\n${customerName} just booked ${serviceName} at ${locationName} for ${whenLine}.\n\nView booking: ${actionUrl}`,
+  };
+}
+
 // 3. Booking declined → Customer
 export function bookingDeclined(params: {
   customerName: string;
