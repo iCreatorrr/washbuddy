@@ -119,7 +119,12 @@ export default function BookingDetail() {
   })();
   const activeStatuses = ["REQUESTED", "HELD", "PROVIDER_CONFIRMED", "CHECKED_IN", "IN_SERVICE", "LATE"];
   const isCompleted = b.status === "COMPLETED" || b.status === "COMPLETED_PENDING_WINDOW" || b.status === "SETTLED";
-  const showReviewForm = isCustomer && isCompleted && !reviewSubmitted;
+  // Walk-in bookings created by a provider have customerId pointing at the
+  // provider's own user row, so isCustomer alone is true for the provider —
+  // we'd then surface "Rate Your Experience" to the staff member who ran
+  // the wash, which is wrong. Reviews are a driver-side affordance only,
+  // so explicitly exclude provider and platform-admin roles.
+  const showReviewForm = isCustomer && !isProvider && !isAdmin && isCompleted && !reviewSubmitted;
 
   // Role-based fallback when there's no in-app history (deep-link, fresh
   // tab). When there *is* history we just pop it, which gets users back to
