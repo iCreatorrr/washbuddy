@@ -13,6 +13,8 @@ import { BODY_TYPE_ICON, BODY_TYPE_LABEL, BODY_TYPE_STYLE, normalizeBodyType, ve
 import { groupNotesByAuthorRole, noteSectionLabel, noteMetaLine, type NoteViewerRole } from "@/lib/noteLabels";
 import { NoteEditor, NoteKebabMenu } from "@/components/note-actions-menu";
 import { AddNoteForm } from "@/components/add-note-form";
+import { CancelBookingDialog, type CancellationReasonCode } from "@/components/provider/cancel-booking-dialog";
+import { customerFacingCancellationLabel } from "@/lib/cancellationReasons";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -60,17 +62,47 @@ export default function BookingDetail() {
   const completeMut = useCompleteBooking({ request: { credentials: 'include' } });
   const cancelMut = useCancelBooking({ request: { credentials: 'include' } });
 
+  // Cancellation dialog state. Both ProviderBody and CustomerBody open
+  // the same component; the role at click-time decides whether the
+  // dialog runs in "reason" mode (provider — pick a code) or "confirm"
+  // mode (driver — simple Keep/Cancel). Using one component everywhere
+  // means the dialog's portal + body-scroll-lock + escape behaviour is
+  // consistent across surfaces, instead of a one-click action that
+  // bypassed any confirmation at all.
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+
   const handleAction = async (action: any) => {
     try {
       if (action === "confirm") await confirmMut.mutateAsync({ bookingId });
       if (action === "checkin") await checkinMut.mutateAsync({ bookingId });
       if (action === "start") await startMut.mutateAsync({ bookingId });
       if (action === "complete") await completeMut.mutateAsync({ bookingId });
-      if (action === "cancel") await cancelMut.mutateAsync({ bookingId, data: { reasonCode: "USER_REQUESTED" } });
-      
+      if (action === "cancel") setCancelDialogOpen(true);
+
       queryClient.invalidateQueries({ queryKey: [`/api/bookings/${bookingId}`] });
     } catch (e) {
       alert("Action failed. Please try again.");
+    }
+  };
+
+  // Submit handler shared by the dialog regardless of mode. For
+  // provider-side cancellations the dialog supplies a reasonCode; for
+  // driver-side it passes null and we send no code (the server stamps
+  // the actor as CUSTOMER and leaves cancellationReasonCode null).
+  const handleCancelSubmit = async (reasonCode: CancellationReasonCode | null, note: string) => {
+    try {
+      await cancelMut.mutateAsync({
+        bookingId,
+        data: {
+          ...(reasonCode ? { reasonCode } : {}),
+          ...(note ? { note } : {}),
+        } as any,
+      });
+      setCancelDialogOpen(false);
+      queryClient.invalidateQueries({ queryKey: [`/api/bookings/${bookingId}`] });
+      toast.success("Booking cancelled");
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to cancel booking");
     }
   };
 
@@ -178,6 +210,20 @@ export default function BookingDetail() {
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div>
             <Badge className={getStatusColor(b.status)}>{getStatusLabel(b.status)}</Badge>
+            {/* Provider-side cancellation reason — surfaced on the
+                customer view only when the provider was the actor and
+                a known reason code is present. CUSTOMER_CANCELLED
+                (driver self-cancel) carries no reason; OTHER / unknown
+                codes return null from the helper and the line is
+                suppressed. The optional internal note is intentionally
+                NOT surfaced here — that stays in provider records. */}
+            {b.status === "PROVIDER_CANCELLED" && (() => {
+              const label = customerFacingCancellationLabel((b as any).cancellationReasonCode);
+              if (!label) return null;
+              return (
+                <p className="text-sm text-slate-600 mt-2">Reason: <span className="font-semibold text-slate-800">{label}</span></p>
+              );
+            })()}
             <h1 className="text-4xl font-display font-bold text-slate-900 mt-4 mb-2">{b.serviceNameSnapshot}</h1>
             <p className="text-slate-500 font-mono text-sm">ID: {b.id}</p>
           </div>
@@ -270,6 +316,18 @@ export default function BookingDetail() {
         />
       )}
 
+      {/* Mounted at page-root regardless of which body invoked it; the
+          dialog portals to document.body so this position doesn't
+          matter for layout. mode tracks the viewer role at click-time:
+          provider/admin viewers pick a reason code, drivers see a
+          simple Keep/Cancel confirm. */}
+      <CancelBookingDialog
+        open={cancelDialogOpen}
+        onClose={() => { if (!cancelMut.isPending) setCancelDialogOpen(false); }}
+        onSubmit={handleCancelSubmit}
+        isPending={cancelMut.isPending}
+        mode={(isProvider || isAdmin) ? "reason" : "confirm"}
+      />
     </div>
   );
 }
