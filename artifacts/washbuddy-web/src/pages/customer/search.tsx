@@ -326,13 +326,21 @@ export default function CustomerSearch() {
           ) : (
             <>
               {/* Rating · distance · open-now: single 14px line on mobile,
-                  truncates on the right via min-w-0 inside the flex row. */}
+                  truncates on the right via min-w-0 inside the flex row.
+                  Rating is ALWAYS rendered — locations with zero reviews
+                  show a muted "No reviews yet" so the row doesn't lose
+                  its leading element and shift other items left. */}
               <p className="text-sm text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
-                {(loc.averageRating != null || (loc.reviewCount ?? 0) > 0) && (
+                {(loc.reviewCount ?? 0) > 0 ? (
                   <span className="inline-flex items-center gap-1 shrink-0">
                     <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
                     <span className="font-semibold text-slate-700">{loc.averageRating != null ? loc.averageRating.toFixed(1) : "—"}</span>
-                    <span className="text-slate-400">({loc.reviewCount ?? 0})</span>
+                    <span className="text-slate-400">({loc.reviewCount})</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 shrink-0 text-slate-400">
+                    <Star className="h-3.5 w-3.5 text-slate-300" />
+                    No reviews yet
                   </span>
                 )}
                 {loc.distance != null && (
