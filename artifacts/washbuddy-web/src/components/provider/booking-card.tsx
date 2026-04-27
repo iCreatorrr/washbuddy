@@ -9,6 +9,7 @@ import { groupNotesByAuthorRole, noteSectionLabel, noteMetaLine } from "@/lib/no
 import { resolveBookingDisplayName } from "@/lib/bookingDisplay";
 import { NoteEditor, NoteKebabMenu } from "@/components/note-actions-menu";
 import { AddNoteForm } from "@/components/add-note-form";
+import { CancelBookingDialog, type CancellationReasonCode } from "./cancel-booking-dialog";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -98,6 +99,8 @@ export function BookingCard({
   };
   const [actionLoading, setActionLoading] = useState(false);
   const [showPhotoPrompt, setShowPhotoPrompt] = useState<"BEFORE" | "AFTER" | null>(null);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [cancelPending, setCancelPending] = useState(false);
   // Which note in this booking is currently being edited inline. The
   // editor replaces the note's text region (full-width); the kebab
   // stays put. Null when nothing is being edited.
@@ -122,6 +125,33 @@ export function BookingCard({
       onStatusChange();
     } catch { toast.error("Action failed. Please retry."); }
     finally { setActionLoading(false); }
+  };
+
+  // Cancel handler — POSTs to the existing /cancel endpoint with the
+  // reason captured in the dialog. Server-side actor priority maps a
+  // provider-role click to PROVIDER_CANCELLED status; the customer
+  // notification text branches on reasonCode (see notifyBookingCancelled).
+  const handleCancelSubmit = async (reasonCode: CancellationReasonCode, note: string) => {
+    setCancelPending(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/bookings/${b.id}/cancel`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reasonCode, note: note || undefined }),
+      });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        throw new Error(detail?.message || `HTTP ${res.status}`);
+      }
+      toast.success("Booking cancelled");
+      setCancelDialogOpen(false);
+      onStatusChange();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to cancel booking");
+    } finally {
+      setCancelPending(false);
+    }
   };
 
   // Mobile-first source accent: walk-in gets an orange left stripe,
@@ -404,9 +434,31 @@ export function BookingCard({
             {!b.isOffPlatform && (
               <Button size="sm" variant="outline" className="gap-1"><MessageSquare className="h-3.5 w-3.5" />Message Driver</Button>
             )}
+            {/* Cancel Booking — muted outline, expanded view only, only
+                while the booking is still cancellable. Status set
+                hand-aligned with the server's cancellableStatuses
+                check (REQUESTED, HELD, PROVIDER_CONFIRMED, LATE);
+                CHECKED_IN onward isn't reversible from here. */}
+            {(b.status === "REQUESTED" || b.status === "PROVIDER_CONFIRMED") && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={(e) => { e.stopPropagation(); setCancelDialogOpen(true); }}
+                className="border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300"
+              >
+                Cancel Booking
+              </Button>
+            )}
           </div>
         </div>
       )}
+
+      <CancelBookingDialog
+        open={cancelDialogOpen}
+        onClose={() => { if (!cancelPending) setCancelDialogOpen(false); }}
+        onSubmit={handleCancelSubmit}
+        isPending={cancelPending}
+      />
     </Card>
   );
 }
