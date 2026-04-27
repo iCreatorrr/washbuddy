@@ -124,26 +124,43 @@ export function BookingCard({
     finally { setActionLoading(false); }
   };
 
+  // Mobile-first source accent: walk-in gets an orange left stripe,
+  // direct gets a slate one, platform stays uncoloured (the body-type
+  // stripe still wins when present). At md+ we restore the source text
+  // badge; on mobile the stripe carries the signal alone.
+  const sourceStripe =
+    b.bookingSource === "WALK_IN" ? "bg-orange-400" :
+    b.bookingSource === "DIRECT" ? "bg-slate-300" : null;
+  // Status dot for "in flight" rows on mobile: replaces the verbose
+  // "Checked In" / "In Progress" / "Complete" badge that ate ~80px of
+  // row width. Provider-confirmed rows still live under the Upcoming
+  // header so they need no dot.
+  const statusDot =
+    b.status === "CHECKED_IN" ? "bg-amber-400" :
+    b.status === "IN_SERVICE" ? "bg-green-500" :
+    (b.status === "COMPLETED" || b.status === "COMPLETED_PENDING_WINDOW" || b.status === "SETTLED") ? "bg-emerald-500" :
+    null;
+
   return (
     <Card className="relative border hover:border-primary/30 transition-colors overflow-hidden">
-      {/* Body-type stripe — single accent per row, complements the size class
-          badge without competing with it. Stripe color keys on bodyType only. */}
-      {b.vehicle?.bodyType && <div className={`absolute left-0 top-0 bottom-0 w-1 ${accent.style.stripe}`} aria-hidden />}
-      {/* Collapsed row — driver / customer name leads. Service name
-          moves to the expanded view; the operator can scan a list of
-          names + times faster than a list of "Exterior Bus Wash". */}
-      <div className={`flex items-center gap-2 px-4 py-3 cursor-pointer ${b.vehicle?.bodyType ? "pl-5" : ""}`} onClick={() => setExpanded(!expanded)}>
-        <span className="text-sm font-medium text-slate-600 w-[70px] shrink-0">{time}</span>
+      {/* Stacked left stripes: body-type (vehicle visual signal) takes
+          priority when there's a vehicle; otherwise booking-source stripe
+          (walk-in vs direct vs platform) carries the visual id. */}
+      {b.vehicle?.bodyType ? (
+        <div className={`absolute left-0 top-0 bottom-0 w-1 ${accent.style.stripe}`} aria-hidden />
+      ) : sourceStripe ? (
+        <div className={`absolute left-0 top-0 bottom-0 w-1 ${sourceStripe}`} aria-hidden />
+      ) : null}
+      {/* Collapsed row — mobile keeps it ruthless: time, size avatar,
+          name (flex-1 truncate), bay (md+), source badge (md+), status
+          dot, chevron. Tags/addons/elapsed-timer all move to expanded. */}
+      <div className={`flex items-center gap-2 px-4 py-3 cursor-pointer ${b.vehicle?.bodyType || sourceStripe ? "pl-5" : ""}`} onClick={() => setExpanded(!expanded)}>
+        <span className="text-sm font-medium text-slate-600 w-[58px] sm:w-[70px] shrink-0">{time}</span>
         <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${vc.color}`}>
           <span className="text-xs font-bold">{vc.label}</span>
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            {b.vehicle?.bodyType && (
-              <BodyIcon className={`h-3.5 w-3.5 shrink-0 ${accent.style.text}`} aria-hidden />
-            )}
-            <p className="text-sm font-medium text-slate-900 truncate">{displayName}</p>
-          </div>
+          <p className="text-sm font-medium text-slate-900 truncate">{displayName}</p>
           {(() => {
             const parts = [b.fleetName, b.vehicle?.unitNumber].filter(Boolean) as string[];
             if (parts.length === 0) return null;
@@ -155,17 +172,34 @@ export function BookingCard({
             ? <span className="text-slate-600 font-medium">{b.washBay.name}</span>
             : <span className="text-orange-500">Unassigned</span>}
         </span>
-        <Badge className={`text-[10px] shrink-0 ${src.className || ""}`} variant={src.variant as any}>{src.label}</Badge>
-        {/* Suppress the "Scheduled" badge: PROVIDER_CONFIRMED rows live in
-            the Upcoming section, where the section header already conveys
-            the status. Other statuses still surface their badge. */}
+        {/* Source badge: md+ only — on mobile the left stripe conveys it
+            without text. Walk-in / Direct / Platform all stay legible at
+            tablet width and up. */}
+        <Badge className={`text-[10px] shrink-0 hidden md:inline-flex ${src.className || ""}`} variant={src.variant as any}>{src.label}</Badge>
+        {/* Status: text badge at md+ for full clarity, dot-only on mobile.
+            The Upcoming-section header already says "Scheduled" so we
+            drop the badge for PROVIDER_CONFIRMED at every breakpoint. */}
         {b.status !== "PROVIDER_CONFIRMED" && (
-          <Badge className={`text-[10px] shrink-0 ${st.className}`}>{st.label}</Badge>
+          <>
+            <Badge className={`text-[10px] shrink-0 hidden md:inline-flex ${st.className}`}>{st.label}</Badge>
+            {statusDot && (
+              <span
+                className={`md:hidden h-2 w-2 rounded-full shrink-0 ${statusDot}`}
+                aria-label={st.label}
+                title={st.label}
+              />
+            )}
+          </>
         )}
         {b.status === "IN_SERVICE" && b.serviceStartedAtUtc && (
-          <ElapsedTimer startedAt={b.serviceStartedAtUtc} durationMins={30} />
+          <span className="hidden md:inline">
+            <ElapsedTimer startedAt={b.serviceStartedAtUtc} durationMins={30} />
+          </span>
         )}
-        <div className="flex gap-0.5 w-[48px] shrink-0">
+        {/* Tags + add-on count: md+ only. The badges are useful context but
+            on a 375px row they push the customer name to truncate. They
+            still surface in the expanded view. */}
+        <div className="hidden md:flex gap-0.5 w-[48px] shrink-0">
           {b.clientTags?.includes("VIP") && <Star className="h-4 w-4 text-amber-400 fill-amber-400" />}
           {b.clientTags?.includes("SERVICE_RECOVERY") && <AlertTriangle className="h-4 w-4 text-red-400" />}
           {b.clientTags?.includes("NEW_CLIENT") && <Sparkles className="h-4 w-4 text-green-400" />}
@@ -201,6 +235,27 @@ export function BookingCard({
             <span>Price: {formatCurrency(b.totalPriceMinor, b.currencyCode)}</span>
             {b.discountAmountMinor > 0 && <span className="text-green-600">Discount: -{formatCurrency(b.discountAmountMinor)}</span>}
           </div>
+
+          {/* Tags + elapsed timer: surfaced in the expanded view because
+              mobile collapsed row dropped them to keep the customer name
+              from truncating. md+ still has them in the collapsed row but
+              they read fine here too. */}
+          {(b.clientTags?.length > 0 || (b.addOnCount ?? b.addOns?.length ?? 0) > 0 || (b.status === "IN_SERVICE" && b.serviceStartedAtUtc)) && (
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              {b.clientTags?.includes("VIP") && (
+                <span className="inline-flex items-center gap-1 text-amber-600 font-semibold"><Star className="h-3.5 w-3.5 fill-amber-400" />VIP</span>
+              )}
+              {b.clientTags?.includes("SERVICE_RECOVERY") && (
+                <span className="inline-flex items-center gap-1 text-red-600 font-semibold"><AlertTriangle className="h-3.5 w-3.5" />Service recovery</span>
+              )}
+              {b.clientTags?.includes("NEW_CLIENT") && (
+                <span className="inline-flex items-center gap-1 text-green-600 font-semibold"><Sparkles className="h-3.5 w-3.5" />New client</span>
+              )}
+              {b.status === "IN_SERVICE" && b.serviceStartedAtUtc && (
+                <span className="inline-flex items-center gap-1 text-slate-600">Elapsed: <ElapsedTimer startedAt={b.serviceStartedAtUtc} durationMins={30} /></span>
+              )}
+            </div>
+          )}
 
           {/* "Booked by" line — only for off-platform bookings, since
               for platform bookings the customer name in the primary
