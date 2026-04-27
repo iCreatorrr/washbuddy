@@ -141,6 +141,19 @@ export function BookingCard({
     (b.status === "COMPLETED" || b.status === "COMPLETED_PENDING_WINDOW" || b.status === "SETTLED") ? "bg-emerald-500" :
     null;
 
+  // "NEW" badge: arrived in the last hour and not cancelled. Pure
+  // function of (createdAt, status, now) — re-evaluated every render,
+  // no localStorage. Within a long-lived Daily Board view, the badge
+  // self-fades after 60 min as React refetches and re-derives.
+  const isCancelled = b.status === "CUSTOMER_CANCELLED" || b.status === "PROVIDER_CANCELLED" || b.status === "PROVIDER_DECLINED" || b.status === "EXPIRED" || b.status === "NO_SHOW";
+  const isNew = (() => {
+    if (isCancelled) return false;
+    if (!b.createdAt) return false;
+    const created = new Date(b.createdAt).getTime();
+    if (Number.isNaN(created)) return false;
+    return Date.now() - created < 60 * 60 * 1000;
+  })();
+
   return (
     <Card className="relative border hover:border-primary/30 transition-colors overflow-hidden">
       {/* Stacked left stripes: body-type (vehicle visual signal) takes
@@ -160,7 +173,21 @@ export function BookingCard({
           <span className="text-xs font-bold">{vc.label}</span>
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-slate-900 truncate">{displayName}</p>
+          <p className="text-sm font-medium text-slate-900 truncate">
+            {/* "NEW" badge sits inline with the customer name so it
+                doesn't claim a separate column at narrow widths. The
+                wrapper p truncates if the combined width overflows; the
+                badge itself stays whole. */}
+            {isNew && (
+              <span
+                className="inline-flex items-center align-[1px] mr-1.5 px-1.5 py-px rounded-full text-[10px] font-bold leading-none bg-orange-500 text-white shrink-0"
+                title="Booked in the last hour"
+              >
+                NEW
+              </span>
+            )}
+            {displayName}
+          </p>
           {(() => {
             const parts = [b.fleetName, b.vehicle?.unitNumber].filter(Boolean) as string[];
             if (parts.length === 0) return null;

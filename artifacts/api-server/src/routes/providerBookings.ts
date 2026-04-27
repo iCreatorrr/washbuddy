@@ -199,6 +199,12 @@ router.get("/providers/:providerId/locations/:locationId/daily-board", requireAu
         id: b.id,
         status: b.status,
         bookingSource: b.bookingSource,
+        // createdAt drives the "NEW" badge on the Daily Board row
+        // (rendered when Date.now() - createdAt < 60 minutes). Required
+        // here — the model has it but the projection didn't include it
+        // before, so the client had no way to tell freshly-arrived
+        // bookings from older ones.
+        createdAt: b.createdAt,
         scheduledStartAtUtc: b.scheduledStartAtUtc,
         scheduledEndAtUtc: b.scheduledEndAtUtc,
         serviceStartedAtUtc: b.serviceStartedAtUtc,
