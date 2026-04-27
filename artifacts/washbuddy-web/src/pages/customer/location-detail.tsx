@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useCreateBookingHold, useCreateBooking } from "@workspace/api-client-react";
 import { Card, Button, Badge, ErrorState } from "@/components/ui";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { MapPin, CheckCircle2, ChevronLeft, ArrowRight, Star, AlertTriangle, StickyNote, Send, Check } from "lucide-react";
+import { MapPin, CheckCircle2, ChevronLeft, ArrowRight, Star, AlertTriangle, StickyNote, Send, Check, Calendar } from "lucide-react";
 import { LocationReviews } from "@/components/location-reviews";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { format, addDays } from "date-fns";
@@ -192,6 +192,38 @@ export default function LocationDetail() {
     enabled: !!availabilityUrl && !!activeVehicle,
     staleTime: 30_000,
   });
+
+  // Defensive gate: if the user already has an upcoming-unfulfilled
+  // booking at this location within 7 days, we surface it above the
+  // form so a back-button-edge-case or notification deep-link doesn't
+  // accidentally double-book. Doesn't block — driver can still book a
+  // new slot. Per-status filter is client-side because GET /bookings
+  // only accepts a single status param.
+  const { data: locationBookingsData } = useQuery({
+    queryKey: ["/api/bookings", "location-upcoming", locationId],
+    queryFn: async () => {
+      const r = await fetch(`${API_BASE}/api/bookings?locationId=${locationId}&limit=20`, { credentials: "include" });
+      if (!r.ok) return { bookings: [] };
+      return r.json();
+    },
+    enabled: !!locationId,
+    staleTime: 30_000,
+  });
+  const upcomingBookingAtThisLocation = useMemo(() => {
+    const list = (locationBookingsData as any)?.bookings || [];
+    const now = Date.now();
+    const sevenDaysOut = now + 7 * 24 * 60 * 60 * 1000;
+    const upcoming = list
+      .filter((b: any) =>
+        ["REQUESTED", "PROVIDER_CONFIRMED", "CHECKED_IN"].includes(b.status)
+        && b.scheduledStartAtUtc
+        && new Date(b.scheduledStartAtUtc).getTime() >= now
+        && new Date(b.scheduledStartAtUtc).getTime() <= sevenDaysOut)
+      // Most-recently-scheduled wins so the surfaced booking is the
+      // next one the driver will encounter, not the soonest-created.
+      .sort((a: any, b: any) => new Date(b.scheduledStartAtUtc).getTime() - new Date(a.scheduledStartAtUtc).getTime());
+    return upcoming[0] || null;
+  }, [locationBookingsData]);
 
   const holdMutation = useCreateBookingHold({ request: { credentials: 'include' } });
   const bookMutation = useCreateBooking({ request: { credentials: 'include' } });
@@ -473,6 +505,35 @@ export default function LocationDetail() {
       </header>
 
       <ActiveVehicleContextCard />
+
+      {/* Defensive gate: there's already an upcoming booking at this
+          location within 7 days. Surface it but don't block — driver
+          may intentionally book another slot for a different vehicle
+          or a different day. Hidden once the receipt is showing. */}
+      {upcomingBookingAtThisLocation && !bookingResult && (
+        <Card className="p-3 bg-blue-50 border-blue-200">
+          <div className="flex items-start gap-3">
+            <div className="h-9 w-9 bg-blue-100 rounded-xl flex items-center justify-center shrink-0">
+              <Calendar className="h-4 w-4 text-blue-700" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-blue-900 leading-tight">
+                You have an upcoming wash here on{" "}
+                {formatDate(upcomingBookingAtThisLocation.scheduledStartAtUtc, "MMM d", (locData as any)?.timezone)}
+                {" at "}
+                {formatDate(upcomingBookingAtThisLocation.scheduledStartAtUtc, "h:mm a", (locData as any)?.timezone)}
+              </p>
+              <button
+                type="button"
+                onClick={() => setNav(`/bookings/${upcomingBookingAtThisLocation.id}`)}
+                className="mt-1 text-xs font-semibold text-blue-700 hover:text-blue-900 inline-flex items-center gap-0.5"
+              >
+                View booking <ArrowRight className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Defense-in-depth: location can't host the active vehicle —
           stop the booking flow upfront with a clear explanation. */}
