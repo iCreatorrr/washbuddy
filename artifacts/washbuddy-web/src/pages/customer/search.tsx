@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 import { Card, Input, Button, Badge, ErrorState } from "@/components/ui";
-import { MapPin, Search, Navigation, Map, List, Clock, Filter, X, Zap, Star, Truck } from "lucide-react";
+import { MapPin, Search, Navigation, Map, List, ArrowRight, X, Zap, Star, Truck } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { formatCurrency } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -239,9 +239,6 @@ export default function CustomerSearch() {
     return result;
   }, [enrichedLocations, searchTerm, filterOpenNow, filterAvailNow, filterTopRated, availNowIds]);
 
-  const hasIncompatibleVisible = activeVehicleClass != null
-    && filtered.some((l) => l.fitsActiveVehicle === false);
-
   const sortLocations = (a: LocationWithMeta, b: LocationWithMeta) => {
     if (filterTopRated) {
       return (b.averageRating ?? 0) - (a.averageRating ?? 0);
@@ -287,183 +284,163 @@ export default function CustomerSearch() {
 
   const renderLocationCard = (loc: LocationWithMeta, idx: number) => {
     const incompatible = !!activeVehicleClass && loc.fitsActiveVehicle === false;
-    // Incompatible cards are non-clickable. Render the inner Card as a
-    // div so there's no Link, the cursor stays default, and a tap does
-    // nothing — the helper text above the list explains how to fix it.
+
+    // "From $X" — cheapest service at this location. Reads from the
+    // `services` array already in the search response, so no extra
+    // round-trip; null if the location has no services attached.
+    const minPriceMinor = (() => {
+      const svcs = loc.services || [];
+      if (svcs.length === 0) return null;
+      let m = Infinity;
+      for (const s of svcs) {
+        const p = (s.allInPriceMinor ?? s.basePriceMinor) ?? Infinity;
+        if (p < m) m = p;
+      }
+      return Number.isFinite(m) ? m : null;
+    })();
+
+    // Compact card — ~120-130px target on mobile. Collapsed details
+    // (no services subsection, no separate distance row) so the first
+    // listing fits above the fold at 375px after the slim header.
     const cardInner = (
       <Card
-        className={`h-full flex flex-col border-2 ${
+        className={`flex flex-col border-2 ${
           incompatible
             ? "bg-slate-50 border-slate-200 cursor-default"
-            : "group cursor-pointer hover:border-primary/30"
+            : "group cursor-pointer hover:border-primary/30 hover:shadow-sm transition-all"
         }`}
         title={incompatible ? "Change your active vehicle to book at this location" : undefined}
       >
-        <div className="p-6 flex-1">
-          <div className="flex justify-between items-start mb-2">
-            <h3 className={`text-xl font-bold ${incompatible ? "text-slate-500" : "text-slate-900"}`}>{loc.name}</h3>
+        <div className="p-4 sm:p-5 space-y-1.5">
+          <div className="flex items-start justify-between gap-2">
+            <h3 className={`text-base sm:text-lg font-bold leading-tight truncate ${incompatible ? "text-slate-500" : "text-slate-900"}`}>{loc.name}</h3>
             {!incompatible && (
-              <div className="bg-slate-50 p-2 rounded-full text-slate-400 group-hover:bg-primary group-hover:text-white transition-colors shrink-0 ml-2">
-                <Navigation className="h-4 w-4" />
-              </div>
+              <ArrowRight className="h-4 w-4 text-slate-300 group-hover:text-primary transition-colors shrink-0 mt-1" />
             )}
           </div>
-          {incompatible && (
-            <div className="mb-2 inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 text-amber-800 border border-amber-300 text-xs font-medium">
+
+          {incompatible ? (
+            <div className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 text-amber-800 border border-amber-300 text-xs font-medium">
               <Truck className="h-3 w-3" /> No bay fits your active vehicle
             </div>
-          )}
-
-            {/* Star rating */}
-            <div className="flex items-center gap-1.5 mb-2">
-              <div className="flex items-center gap-0.5">{renderStars(loc.averageRating)}</div>
-              {loc.averageRating != null ? (
-                <>
-                  <span className="text-sm font-bold text-slate-700">{loc.averageRating}</span>
-                  <span className="text-xs text-slate-400">({loc.reviewCount ?? 0} review{(loc.reviewCount ?? 0) !== 1 ? "s" : ""})</span>
-                </>
-              ) : (
-                <span className="text-xs text-slate-400">No reviews yet</span>
-              )}
-            </div>
-
-            {/* Open/closed + address */}
-            <div className="flex items-start gap-2 text-sm mb-1">
-              {loc.isOpen ? (
-                <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold text-xs shrink-0 mt-0.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Open Now
-                </span>
-              ) : (
-                <span className="text-xs text-slate-400 font-medium shrink-0 mt-0.5">
-                  Closed{loc.nextOpenAt ? ` · Opens ${new Date(loc.nextOpenAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}
-                </span>
-              )}
-            </div>
-            <p className="text-slate-500 flex items-start gap-2 text-sm leading-relaxed">
-              <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
-              <span>
-                {loc.addressLine1}, {loc.city}, {loc.stateCode} {loc.postalCode}
-              </span>
-            </p>
-
-            {loc.distance != null && (
-              <p className="mt-2 text-sm font-semibold text-purple-600 flex items-center gap-1.5">
-                <Navigation className="h-3.5 w-3.5" />
-                {formatDistance(loc.distance)} away
+          ) : (
+            <>
+              {/* Rating · distance · open-now: single 14px line on mobile,
+                  truncates on the right via min-w-0 inside the flex row. */}
+              <p className="text-sm text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
+                {(loc.averageRating != null || (loc.reviewCount ?? 0) > 0) && (
+                  <span className="inline-flex items-center gap-1 shrink-0">
+                    <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                    <span className="font-semibold text-slate-700">{loc.averageRating != null ? loc.averageRating.toFixed(1) : "—"}</span>
+                    <span className="text-slate-400">({loc.reviewCount ?? 0})</span>
+                  </span>
+                )}
+                {loc.distance != null && (
+                  <>
+                    <span className="text-slate-300">·</span>
+                    <span className="shrink-0">{formatDistance(loc.distance)}</span>
+                  </>
+                )}
+                <span className="text-slate-300">·</span>
+                {loc.isOpen ? (
+                  <span className="inline-flex items-center gap-1 text-emerald-600 font-medium shrink-0">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Open Now
+                  </span>
+                ) : (
+                  <span className="text-slate-400 font-medium shrink-0">Closed</span>
+                )}
               </p>
-            )}
-          </div>
 
-          <div className="p-6 bg-slate-50 border-t border-slate-100 mt-auto">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Available Services</p>
-            <div className="space-y-2">
-              {loc.services?.slice(0, 2).map((svc) => (
-                <div key={svc.id} className="flex justify-between items-center text-sm">
-                  <span className={`font-medium ${incompatible ? "text-slate-400" : "text-slate-700"}`}>{svc.name}</span>
-                  <span className={`font-bold ${incompatible ? "text-slate-500" : "text-slate-900"}`}>{formatCurrency(svc.allInPriceMinor ?? svc.basePriceMinor)}</span>
-                </div>
-              ))}
-              {(loc.services?.length || 0) > 2 && (
-                <p className={`text-xs font-semibold pt-1 ${incompatible ? "text-slate-400" : "text-primary"}`}>+{(loc.services?.length || 0) - 2} more services</p>
+              {/* Address: single line, truncate. min-w-0 on the wrapper
+                  flex item is what lets `truncate` actually clip — without
+                  it the address would push the card past viewport. */}
+              <p className="text-sm text-slate-500 flex items-center gap-1.5 min-w-0">
+                <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                <span className="truncate">{loc.addressLine1}, {loc.city}, {loc.stateCode}{loc.postalCode ? ` ${loc.postalCode}` : ""}</span>
+              </p>
+
+              {minPriceMinor != null && (
+                <p className="text-sm font-semibold text-slate-700">From {formatCurrency(minPriceMinor)}</p>
               )}
-            </div>
-          </div>
-        </Card>
+            </>
+          )}
+        </div>
+      </Card>
     );
 
     return (
-      <motion.div key={loc.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.03 }}>
+      <motion.div key={loc.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.02 }}>
         {incompatible ? (
-          <div className="block h-full">{cardInner}</div>
+          <div className="block">{cardInner}</div>
         ) : (
-          <Link href={`/location/${loc.id}`} className="block h-full">{cardInner}</Link>
+          <Link href={`/location/${loc.id}`} className="block">{cardInner}</Link>
         )}
       </motion.div>
     );
   };
 
   return (
-    <div className="space-y-6">
-      {/* Pill wrapper allows the trigger to shrink on narrow screens
-          and the dropdown (right-anchored, z-50) to stay reachable
-          without horizontal overflow on the page. */}
+    <div className="space-y-4">
+      {/* Active vehicle pill — primary affordance for swapping the
+          active vehicle. The persistent "Some locations don't fit"
+          banner that used to live below it is gone — per-card "No
+          bay fits" badges already communicate this contextually. */}
       <div className="flex items-center gap-3 max-w-full">
         <div className="min-w-0 max-w-full">
           <ActiveVehiclePill />
         </div>
       </div>
-      {/* When at least one visible card is grayed out as incompatible,
-          surface a small helper that points the driver at the pill —
-          otherwise the gray-out is silent and the user wonders why
-          half the list looks dead. */}
-      {hasIncompatibleVisible && activeVehicle && (
-        <p className="text-sm text-slate-500">
-          Some locations don't fit <span className="font-semibold text-slate-700">{activeVehicle.nickname || activeVehicle.unitNumber}</span>.
-          Change your active vehicle above to see more options.
-        </p>
-      )}
-      <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-slate-900 via-blue-900 to-cyan-900 text-white p-8 sm:p-12">
-        <div
-          className="absolute inset-0 opacity-30"
-          style={{
-            backgroundImage:
-              "radial-gradient(circle at 20% 50%, rgba(59,130,246,0.4) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(6,182,212,0.3) 0%, transparent 40%)",
-          }}
-        />
-        <div className="relative z-10 max-w-2xl">
-          <h1 className="text-4xl sm:text-5xl font-display font-bold mb-4">Find your next wash</h1>
-          <p className="text-lg text-slate-300 mb-8">Search our network of premium commercial bus washing facilities.</p>
 
-          <div className="flex gap-3">
-            <div className="relative flex-1 min-w-0">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
-              <Input
-                placeholder="Search by facility name or city..."
-                className="pl-12 h-14 text-base sm:text-lg bg-white/10 border-white/20 text-white placeholder:text-slate-400 focus-visible:bg-white focus-visible:text-slate-900 transition-all rounded-2xl"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <Button
-              size="lg"
-              className="h-14 rounded-2xl px-4 sm:px-8 shadow-blue-500/25 shrink-0"
-              onClick={() => refetch()}
-              aria-label="Search"
-            >
-              <Search className="h-5 w-5 sm:hidden" />
-              <span className="hidden sm:inline">Search</span>
-            </Button>
-          </div>
-        </div>
-      </div>
+      {/* Slim search bar — Uber-style. ~60px tall, full bleed minus the
+          layout's outer p-4. No hero card, no headline, no description.
+          The first listing renders above the fold at 375px. */}
+      <form
+        onSubmit={(e) => { e.preventDefault(); refetch(); }}
+        className="relative"
+      >
+        <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+        <Input
+          placeholder="Find a wash near you"
+          className="h-12 pl-11 pr-12 text-base rounded-2xl border-2 border-slate-200 bg-white focus-visible:border-primary"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+        <button
+          type="submit"
+          aria-label="Search"
+          className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex items-center justify-center"
+        >
+          <ArrowRight className="h-4 w-4" />
+        </button>
+      </form>
 
       {geoStatus === "denied" && (
-        <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl text-sm">
+        <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm">
           <Navigation className="h-5 w-5 text-amber-600 shrink-0" />
           <p className="text-amber-800">
-            <span className="font-semibold">Enable location services</span> to see wash facilities sorted by distance from you. Showing all locations alphabetically.
+            <span className="font-semibold">Enable location services</span> to sort by distance.
           </p>
         </div>
       )}
 
-      <div className="space-y-6">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3 flex-wrap">
-            <h2 className="text-2xl font-bold font-display text-slate-900">
-              {userLat != null ? "Nearby Locations" : "Available Locations"}
-            </h2>
+      <div className="space-y-4">
+        {/* Filter strip: three chips in one row, scrollable if a future
+            translation makes them not fit. Each chip is compact (px-3
+            py-2) so all three fit at 375px without wrapping. */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex gap-2 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0 scrollbar-hide">
             <button
               onClick={() => { if (!filterAvailNow) setFilterOpenNow(!filterOpenNow); }}
               disabled={filterAvailNow}
-              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium border transition-all ${
+              className={`shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-full text-sm font-medium border transition-all ${
                 filterAvailNow
                   ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed"
                   : filterOpenNow
-                    ? "bg-emerald-50 text-emerald-700 border-emerald-300 shadow-sm"
-                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background text-slate-600 border-border hover:border-slate-300"
               }`}
             >
-              {filterOpenNow && !filterAvailNow ? <X className="h-3.5 w-3.5" /> : <Filter className="h-3.5 w-3.5" />}
+              {filterOpenNow && !filterAvailNow && <X className="h-3.5 w-3.5" />}
               Open Now
             </button>
             <button
@@ -472,54 +449,77 @@ export default function CustomerSearch() {
                 setFilterAvailNow(next);
                 if (next) setFilterOpenNow(false);
               }}
-              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium border transition-all ${
+              className={`shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-full text-sm font-medium border transition-all ${
                 filterAvailNow
-                  ? "bg-amber-50 text-amber-700 border-amber-300 shadow-sm"
-                  : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-background text-slate-600 border-border hover:border-slate-300"
               }`}
             >
               {filterAvailNow ? <X className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
-              Wash Bay Avail this Hour
+              Avail Now
               {filterAvailNow && availNowLoading && (
-                <span className="ml-1 h-3 w-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin inline-block" />
+                <span className="ml-1 h-3 w-3 border-2 border-current border-t-transparent rounded-full animate-spin inline-block" />
               )}
             </button>
             <button
               onClick={() => setFilterTopRated(!filterTopRated)}
-              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium border transition-all ${
+              className={`shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-full text-sm font-medium border transition-all ${
                 filterTopRated
-                  ? "bg-amber-50 text-amber-700 border-amber-300 shadow-sm"
-                  : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-background text-slate-600 border-border hover:border-slate-300"
               }`}
             >
               {filterTopRated ? <X className="h-3.5 w-3.5" /> : <Star className="h-3.5 w-3.5" />}
               Top Rated
             </button>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
-              {filtered.length} found
-            </span>
-            <div className="flex bg-slate-100 rounded-xl p-1">
-              <button
-                onClick={() => setViewMode("list")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                  viewMode === "list" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                <List className="h-4 w-4" />
-                List
-              </button>
-              <button
-                onClick={() => setViewMode("map")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                  viewMode === "map" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                <Map className="h-4 w-4" />
-                Map
-              </button>
-            </div>
+          {/* List/map toggle — desktop-only on mobile-tight layouts.
+              The result count moves to a sub-header below to free row
+              space for filters. */}
+          <div className="hidden sm:flex bg-slate-100 rounded-xl p-1 shrink-0">
+            <button
+              onClick={() => setViewMode("list")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                viewMode === "list" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              <List className="h-4 w-4" /> List
+            </button>
+            <button
+              onClick={() => setViewMode("map")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                viewMode === "map" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              <Map className="h-4 w-4" /> Map
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile list/map switch + count: on mobile the toggle moves
+            here below the filter strip so the filter row is free for
+            three full chips. md+ keeps the toggle inline with filters. */}
+        <div className="flex items-center justify-between sm:hidden">
+          <span className="text-xs font-medium text-slate-500">
+            {filtered.length} location{filtered.length === 1 ? "" : "s"}
+          </span>
+          <div className="flex bg-slate-100 rounded-xl p-1">
+            <button
+              onClick={() => setViewMode("list")}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                viewMode === "list" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+              }`}
+            >
+              <List className="h-3.5 w-3.5" /> List
+            </button>
+            <button
+              onClick={() => setViewMode("map")}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                viewMode === "map" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+              }`}
+            >
+              <Map className="h-3.5 w-3.5" /> Map
+            </button>
           </div>
         </div>
 
@@ -575,29 +575,32 @@ export default function CustomerSearch() {
             </div>
           </div>
         ) : (
-          <div className="space-y-10">
+          // Tighter gap on mobile (gap-3) so 4-5 cards fit in a phone scroll;
+          // desktop keeps the breathing room (gap-4). Single column at every
+          // mobile width — the cards are wide-form, not grid tiles.
+          <div className="space-y-6">
             {nearbyLocations.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
                 {nearbyLocations.map((loc, idx) => renderLocationCard(loc, idx))}
               </div>
             )}
 
             {previousLocations.length > 0 && (
-              <div className="space-y-5">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-2xl font-bold font-display text-slate-900">Your Previous Wash Locations</h2>
-                  <span className="text-sm font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base sm:text-lg font-bold text-slate-900">Your Previous Wash Locations</h2>
+                  <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
                     {previousLocations.length}
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
                   {previousLocations.map((loc, idx) => renderLocationCard(loc, idx))}
                 </div>
               </div>
             )}
 
             {nearbyLocations.length === 0 && previousLocations.length === 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
                 {allSorted.map((loc, idx) => renderLocationCard(loc, idx))}
               </div>
             )}
