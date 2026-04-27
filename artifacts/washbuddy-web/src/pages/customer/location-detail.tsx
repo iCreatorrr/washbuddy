@@ -75,7 +75,11 @@ export default function LocationDetail() {
   const [etaMins, setEtaMins] = useState<number | null>(null);
   const [driverNote, setDriverNote] = useState<string>("");
   const [driverNoteOpen, setDriverNoteOpen] = useState<boolean>(false);
-  const [reviewsOpen, setReviewsOpen] = useState<boolean>(false);
+  // Auto-open reviews sheet when the URL carries ?reviews=open. The
+  // notification system uses this for "Provider replied to your
+  // review" — the deep link lands the driver on the location page
+  // with the reviews sheet already showing the reply.
+  const [reviewsOpen, setReviewsOpen] = useState<boolean>(() => urlParams.get("reviews") === "open");
 
   // Persist the receipt across remounts (back-then-forward navigation,
   // tab refocus). Keyed by locationId so booking at one location doesn't
@@ -788,7 +792,19 @@ export default function LocationDetail() {
       {/* Bottom-sheet on every viewport — feels native on mobile and
           sits as a clean side-panel on desktop. Capped height so the
           inner list scrolls and the page underneath stays anchored. */}
-      <Sheet open={reviewsOpen} onOpenChange={setReviewsOpen}>
+      <Sheet
+        open={reviewsOpen}
+        onOpenChange={(o) => {
+          setReviewsOpen(o);
+          // When the sheet closes after being deep-linked open via
+          // ?reviews=open, scrub the query param so a refresh doesn't
+          // re-open. We replace history rather than push so Back still
+          // exits the page entirely.
+          if (!o && new URLSearchParams(window.location.search).get("reviews") === "open") {
+            setNav(`/location/${locationId}`, { replace: true });
+          }
+        }}
+      >
         <SheetContent
           side="bottom"
           className="h-[85vh] sm:h-[80vh] sm:max-w-2xl sm:left-1/2 sm:-translate-x-1/2 sm:rounded-t-2xl flex flex-col p-0"

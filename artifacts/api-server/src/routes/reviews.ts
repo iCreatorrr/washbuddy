@@ -269,7 +269,11 @@ router.post("/reviews/:reviewId/reply", requireAuth, async (req, res) => {
     await createNotification(review.authorId, {
       subject: "Provider Replied to Your Review",
       body: `The provider at ${review.location.name} replied to your review`,
-      actionUrl: `/location/${review.locationId}?tab=reviews`,
+      // ?reviews=open is what the location-detail page reads on mount
+      // to auto-open the reviews sheet. The prior `?tab=reviews` value
+      // had no consumer — clicking the notification just landed on a
+      // form page with no indication of the new reply.
+      actionUrl: `/location/${review.locationId}?reviews=open`,
       metadata: { reviewId, locationId: review.locationId },
     });
 
