@@ -552,6 +552,7 @@ router.get("/bookings", requireAuth, async (req, res) => {
 
 router.get("/bookings/:bookingId", requireAuth, async (req, res) => {
   try {
+    const viewerId = (req.user as SessionUser).id;
     const booking = await prisma.booking.findUnique({
       where: { id: req.params.bookingId },
       include: {
@@ -560,6 +561,16 @@ router.get("/bookings/:bookingId", requireAuth, async (req, res) => {
         bookingServices: {
           select: { id: true, serviceId: true, nameSnapshot: true, priceMinor: true, durationMins: true, displayOrder: true },
           orderBy: { displayOrder: "asc" },
+        },
+        // Surface whether the requesting viewer has reviewed this exact
+        // booking. Driving the "Thanks for your review" state from server
+        // truth (per-booking) rather than client-only state stops it from
+        // leaking across bookings at the same provider when wouter
+        // re-renders BookingDetail without remounting.
+        reviews: {
+          where: { authorId: viewerId },
+          select: { id: true },
+          take: 1,
         },
         customer: { select: { id: true, email: true, firstName: true, lastName: true } },
         vehicle: true,
@@ -613,7 +624,12 @@ router.get("/bookings/:bookingId", requireAuth, async (req, res) => {
     if (!isProvider && !isAdmin) {
       washNotes = washNotes.filter((n: any) => n.authorRole !== "PROVIDER");
     }
-    const sanitized = { ...booking, washNotes };
+    // Boolean flatten of the viewer-scoped reviews relation. Strip the
+    // raw `reviews` array from the response so we don't leak the review
+    // id back to the client (it's not needed for the UI gate).
+    const hasReview = Array.isArray((booking as any).reviews) && (booking as any).reviews.length > 0;
+    const { reviews: _viewerReviews, ...rest } = booking as any;
+    const sanitized = { ...rest, washNotes, hasReview };
 
     res.json({ booking: sanitized });
   } catch (err) {

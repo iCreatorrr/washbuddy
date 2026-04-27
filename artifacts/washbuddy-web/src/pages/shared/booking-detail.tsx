@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRoute, useLocation } from "wouter";
 import { useGetBooking, useConfirmBooking, useCheckinBooking, useStartService, useCompleteBooking, useCancelBooking } from "@workspace/api-client-react";
 import { useAuth } from "@/contexts/auth";
@@ -38,7 +38,17 @@ export default function BookingDetail() {
   });
 
   // Mutations
+  // `reviewSubmitted` mirrors the per-booking server truth (b.hasReview)
+  // and flips when the inline form succeeds. Two failure modes the prior
+  // shape had: (a) wouter re-uses BookingDetail when /bookings/:id changes
+  // — the same true value leaked across bookings; (b) a fresh tab on a
+  // booking the user already reviewed showed the form because we hydrated
+  // from `false`. The effect below resyncs from the server on every
+  // booking/data change.
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
+  useEffect(() => {
+    setReviewSubmitted(!!(data?.booking as any)?.hasReview);
+  }, [bookingId, (data?.booking as any)?.hasReview]);
   const [showOverrideDialog, setShowOverrideDialog] = useState(false);
   const [overrideStatus, setOverrideStatus] = useState("");
   const [overrideReason, setOverrideReason] = useState("");
