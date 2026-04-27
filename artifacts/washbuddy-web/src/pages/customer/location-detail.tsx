@@ -85,19 +85,34 @@ export default function LocationDetail() {
   // tab refocus). Keyed by locationId so booking at one location doesn't
   // pre-fill the receipt at another. Cleared after the user clicks "View
   // My Bookings" or after 30 minutes (whichever comes first).
+  //
+  // Rehydration is GATED on the URL carrying ?booked=<bookingId> AND that
+  // id matching the cached receipt. Without the gate, *any* visit to
+  // /location/:id after a prior booking at that location renders the
+  // receipt instead of the form — the regression user-reported as
+  // "tapping a listing card opens a receipt". The 2g-1 back-button fix
+  // already replaces the post-booking URL with /location/:id?booked=X,
+  // so this gate just enforces what was always intended.
   const receiptStorageKey = locationId ? `wb.receipt.${locationId}` : null;
-  const [bookingResult, setBookingResult] = useState<{ id: string; status: string; slotUtc?: string; serviceIds?: string[] } | null>(() => {
+  // Vehicle is part of the cached receipt now (snapshot at booking time)
+  // so the receipt reads from the booked vehicle, not the user's current
+  // active vehicle context. Changing the active vehicle after booking no
+  // longer mutates a past receipt.
+  const [bookingResult, setBookingResult] = useState<{ id: string; status: string; slotUtc?: string; serviceIds?: string[]; vehicle?: any } | null>(() => {
     if (!receiptStorageKey) return null;
+    const bookedFromUrl = urlParams.get("booked");
+    if (!bookedFromUrl) return null;
     try {
       const raw = sessionStorage.getItem(receiptStorageKey);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       if (!parsed?.id || !parsed?.savedAt) return null;
+      if (parsed.id !== bookedFromUrl) return null;
       if (Date.now() - parsed.savedAt > 30 * 60 * 1000) {
         sessionStorage.removeItem(receiptStorageKey);
         return null;
       }
-      return { id: parsed.id, status: parsed.status, slotUtc: parsed.slotUtc, serviceIds: parsed.serviceIds };
+      return { id: parsed.id, status: parsed.status, slotUtc: parsed.slotUtc, serviceIds: parsed.serviceIds, vehicle: parsed.vehicle };
     } catch {
       return null;
     }
@@ -343,11 +358,25 @@ export default function LocationDetail() {
       const bookRes = await bookMutation.mutateAsync({
         data: { holdId: holdIdToUse, vehicleId: activeVehicle.id, idempotencyKey } as any,
       });
+      // Snapshot the vehicle ON THE BOOKING into the receipt — once
+      // captured, the receipt is immune to subsequent active-vehicle
+      // changes. This prevents the data-integrity bug where a driver
+      // who books with vehicle A, then swaps active to vehicle B, then
+      // refreshes the receipt, sees vehicle B on the receipt for a
+      // booking that was actually for A.
+      const vehicleSnapshot = activeVehicle ? {
+        id: activeVehicle.id,
+        nickname: (activeVehicle as any).nickname,
+        unitNumber: (activeVehicle as any).unitNumber,
+        bodyType: activeVehicle.bodyType,
+        lengthInches: activeVehicle.lengthInches,
+      } : null;
       const receipt = {
         id: bookRes.booking.id,
         status: bookRes.booking.status,
         slotUtc: selectedSlot ?? undefined,
         serviceIds: [...selectedServiceIds],
+        vehicle: vehicleSnapshot,
       };
 
       // If the driver typed a note inline, attach it to the new
@@ -420,6 +449,11 @@ export default function LocationDetail() {
       0,
     );
     const receiptTotalDuration = resolvedServices.reduce((sum: number, s: any) => sum + (s.durationMins || 0), 0);
+    // Vehicle source: ALWAYS the snapshot persisted at booking creation
+    // (or its sessionStorage rehydration). Never `activeVehicle` from
+    // context — the receipt is a record of what was booked, not of the
+    // driver's current selection.
+    const receiptVehicle = bookingResult.vehicle ?? null;
     return (
       <div className="max-w-xl mx-auto py-12 px-4">
         <BookingReceipt
@@ -428,7 +462,7 @@ export default function LocationDetail() {
           servicesList={resolvedServices}
           totalDuration={receiptTotalDuration}
           slotUtc={selectedSlot || bookingResult.slotUtc || null}
-          vehicle={activeVehicle}
+          vehicle={receiptVehicle}
           totalPrice={receiptTotalPrice}
           onDone={() => {
             if (receiptStorageKey) sessionStorage.removeItem(receiptStorageKey);
