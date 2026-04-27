@@ -556,7 +556,11 @@ router.get("/bookings/:bookingId", requireAuth, async (req, res) => {
     const booking = await prisma.booking.findUnique({
       where: { id: req.params.bookingId },
       include: {
-        location: { select: { id: true, name: true, timezone: true, providerId: true, provider: { select: { id: true, name: true } } } },
+        // Address fields are needed by the booking detail page to render
+        // a "Get Directions" link (Google Maps URL) without a second
+        // round-trip. Mirrors the shape used by /api/locations/:id and
+        // search results, so client-side helpers stay uniform.
+        location: { select: { id: true, name: true, timezone: true, providerId: true, addressLine1: true, city: true, stateCode: true, postalCode: true, latitude: true, longitude: true, provider: { select: { id: true, name: true } } } },
         service: { select: { id: true, name: true, durationMins: true } },
         bookingServices: {
           select: { id: true, serviceId: true, nameSnapshot: true, priceMinor: true, durationMins: true, displayOrder: true },
