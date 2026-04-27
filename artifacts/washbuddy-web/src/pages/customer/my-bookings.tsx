@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useListBookings, useCancelBooking } from "@workspace/api-client-react";
 import { Card, Badge, Button, ErrorState } from "@/components/ui";
 import { getStatusColor, getStatusLabel, formatCurrency, formatDate } from "@/lib/utils";
 import { formatLocationDisplay } from "@/lib/format-location";
+import { customerFacingCancellationLabel } from "@/lib/cancellationReasons";
 import { Link, useLocation } from "wouter";
 import { Calendar, MapPin, Truck, Search, Star, XCircle, AlertTriangle, X } from "lucide-react";
 import { motion } from "framer-motion";
@@ -19,10 +20,25 @@ const COMPLETED_STATUSES = ["COMPLETED_PENDING_WINDOW", "COMPLETED", "SETTLED"];
 const CANCELLED_STATUSES = ["CUSTOMER_CANCELLED", "PROVIDER_CANCELLED", "PROVIDER_DECLINED", "EXPIRED"];
 const CANCELLABLE_STATUSES = ["REQUESTED", "HELD", "PROVIDER_CONFIRMED"];
 
+// Parse a TabKey from a raw URL value, falling back to "upcoming".
+// Centralised so both the initial state and the back-nav effect read
+// the same logic.
+function parseTabFromQuery(search: string): TabKey {
+  const t = new URLSearchParams(search).get("tab");
+  if (t === "progress" || t === "completed" || t === "cancelled") return t;
+  return "upcoming";
+}
+
 export default function MyBookings() {
-  const [, setNav] = useLocation();
+  const [wouterPath, setNav] = useLocation();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<TabKey>("upcoming");
+  // Active tab is URL-driven (?tab=cancelled etc) so it survives a
+  // round-trip to /bookings/:id and back. Local useState alone lost
+  // context on every back-nav. The initial value reads from
+  // window.location.search at mount; subsequent tab clicks update the
+  // URL via setNav(..., {replace:true}) so we don't pollute history
+  // with one entry per tab toggle.
+  const [activeTab, setActiveTab] = useState<TabKey>(() => parseTabFromQuery(window.location.search));
   const [cancelTarget, setCancelTarget] = useState<{ id: string; name: string; date: string } | null>(null);
 
   // ?vehicleId=… deep-link from the My Vehicles delete-flow filters this
@@ -30,6 +46,28 @@ export default function MyBookings() {
   // refresh the filter without a manual reload.
   const urlParams = new URLSearchParams(window.location.search);
   const filterVehicleId = urlParams.get("vehicleId") || null;
+
+  // Resync activeTab when the URL changes (browser back/forward navigates
+  // between /bookings?tab=cancelled and /bookings — wouter only signals
+  // the path here, but tab changes are query-only, so we listen to
+  // popstate explicitly).
+  useEffect(() => {
+    const onPop = () => setActiveTab(parseTabFromQuery(window.location.search));
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  const handleTabChange = (next: TabKey) => {
+    setActiveTab(next);
+    // Build the URL with tab + preserved vehicleId filter (if present)
+    // so swapping tabs while filtered by vehicle doesn't drop the
+    // filter context. replace:true to keep history clean.
+    const params = new URLSearchParams();
+    if (next !== "upcoming") params.set("tab", next);
+    if (filterVehicleId) params.set("vehicleId", filterVehicleId);
+    const qs = params.toString();
+    setNav(qs ? `/bookings?${qs}` : "/bookings", { replace: true });
+  };
 
   const { allVehicles } = useActiveVehicle();
 
@@ -158,13 +196,18 @@ export default function MyBookings() {
         );
       })()}
 
-      {/* Tab navigation */}
-      <div className="flex bg-slate-100 rounded-xl p-1 gap-1 overflow-x-auto">
+      {/* Tab navigation. Compact at mobile (px-3 + content-width tabs)
+          so all 4 fit at 320-414px without forcing a horizontal page
+          scroll. The strip itself scrolls internally if a future
+          translation expands the labels. The prior `flex-1 min-w-[100px]`
+          forced 4 × 100 = 400px minimum, which exceeded 343px content
+          area at 375px and pushed the page sideways. */}
+      <div className="flex bg-slate-100 rounded-xl p-1 gap-1 overflow-x-auto scrollbar-hide">
         {tabs.map((tab) => (
           <button
             key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`flex-1 min-w-[100px] py-2.5 px-4 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
+            onClick={() => handleTabChange(tab.key)}
+            className={`shrink-0 px-3 py-2 sm:px-4 sm:py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
               activeTab === tab.key ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
             }`}
           >
@@ -298,6 +341,23 @@ function BookingRow({
             <Badge className={getStatusColor(booking.status)}>{getStatusLabel(booking.status)}</Badge>
             <span className="text-sm font-bold text-slate-400">ID: {booking.id.split("-")[0].toUpperCase()}</span>
           </div>
+          {/* Cancelled-card meta: actor (Customer/Provider) + reason
+              category. Only renders when the booking is cancelled. The
+              reason line is suppressed for CUSTOMER_CANCELLED bookings
+              and for unknown/legacy reason codes — both produce no
+              customer-facing string from customerFacingCancellationLabel. */}
+          {(booking.status === "CUSTOMER_CANCELLED" || booking.status === "PROVIDER_CANCELLED") && (
+            <div className="space-y-0.5">
+              <p className="text-xs text-slate-500">
+                Cancelled by <span className="font-semibold text-slate-700">{booking.status === "PROVIDER_CANCELLED" ? "Provider" : "Customer"}</span>
+              </p>
+              {booking.status === "PROVIDER_CANCELLED" && (() => {
+                const label = customerFacingCancellationLabel((booking as any).cancellationReasonCode);
+                if (!label) return null;
+                return <p className="text-xs text-slate-500">Reason: <span className="font-medium text-slate-700">{label}</span></p>;
+              })()}
+            </div>
+          )}
           <h3 className="text-xl font-bold text-slate-900 group-hover:text-primary transition-colors">
             {booking.serviceNameSnapshot}
           </h3>
