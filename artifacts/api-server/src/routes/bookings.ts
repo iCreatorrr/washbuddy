@@ -956,9 +956,23 @@ router.post("/bookings/:bookingId/decline", requireAuth, async (req, res) => {
   }
 });
 
+// Allowed cancellation reason codes. The values are user-facing only via
+// the notification template branch — the column itself stores the raw
+// code so analytics / future filters stay precise. Anything outside this
+// set falls back to "OTHER" wording on the notification side.
+const VALID_CANCELLATION_REASONS = new Set([
+  "CUSTOMER_REQUESTED",
+  "PROVIDER_UNAVAILABLE",
+  "CUSTOMER_NO_SHOW",
+  "OTHER",
+  // Legacy / driver-side reason codes — keep accepted so existing
+  // clients (driver self-cancel) don't break.
+  "USER_REQUESTED",
+]);
+
 router.post("/bookings/:bookingId/cancel", requireAuth, async (req, res) => {
   try {
-    const { reasonCode } = req.body;
+    const { reasonCode, note } = req.body as { reasonCode?: string; note?: string };
 
     const booking = await prisma.booking.findUnique({
       where: { id: req.params.bookingId },
@@ -972,15 +986,30 @@ router.post("/bookings/:bookingId/cancel", requireAuth, async (req, res) => {
 
     const user = req.user as SessionUser;
     const isAdmin = isPlatformAdmin(user);
-    const isCustomer = booking.customerId === user.id;
     const isProvider = isProviderRole(user, booking.location.providerId);
+    const isCustomer = booking.customerId === user.id;
 
     if (!isAdmin && !isCustomer && !isProvider) {
       res.status(403).json({ errorCode: "FORBIDDEN", message: "Access denied" });
       return;
     }
 
-    const newStatus = isCustomer ? "CUSTOMER_CANCELLED" : "PROVIDER_CANCELLED";
+    // Actor priority: PROVIDER first, then CUSTOMER. Walk-in bookings
+    // have customerId pointing at the provider's own user, so a naive
+    // isCustomer-first check mis-attributed every walk-in cancel to
+    // CUSTOMER_CANCELLED. Provider-role membership at the booking's
+    // location is the unambiguous signal — if you're a member of the
+    // provider org, your cancel is a provider cancel. Platform admins
+    // are treated as provider-side too (admin actions on the org's
+    // bookings shouldn't be filed under "customer"). Customer-only
+    // is the explicit fallback when neither role applies.
+    const isProviderActor = isProvider || (isAdmin && !isCustomer);
+    const newStatus = isProviderActor ? "PROVIDER_CANCELLED" : "CUSTOMER_CANCELLED";
+
+    const cleanReasonCode = (typeof reasonCode === "string" && VALID_CANCELLATION_REASONS.has(reasonCode))
+      ? reasonCode
+      : (typeof reasonCode === "string" && reasonCode.length > 0 ? "OTHER" : null);
+
     const cancellableStatuses = ["REQUESTED", "HELD", "PROVIDER_CONFIRMED", "LATE"];
 
     const updated = await prisma.$transaction(async (tx) => {
@@ -992,16 +1021,21 @@ router.post("/bookings/:bookingId/cancel", requireAuth, async (req, res) => {
 
       const result = await tx.booking.update({
         where: { id: booking.id },
-        data: { status: newStatus, cancellationReasonCode: reasonCode || null },
+        data: { status: newStatus, cancellationReasonCode: cleanReasonCode },
       });
 
+      // bookingStatusHistory.changedBy carries the actor user id — this
+      // is the source of truth for "who cancelled" if we ever need to
+      // re-derive without the new fields. The reason text below is
+      // for human-readable history; the structured code lives on
+      // booking.cancellationReasonCode.
       await tx.bookingStatusHistory.create({
         data: {
           bookingId: booking.id,
           fromStatus: b.status,
           toStatus: newStatus,
           changedBy: user.id,
-          reason: reasonCode || (isCustomer ? "Customer cancelled" : "Provider cancelled"),
+          reason: cleanReasonCode || (isProviderActor ? "Provider cancelled" : "Customer cancelled"),
         },
       });
 
@@ -1014,7 +1048,7 @@ router.post("/bookings/:bookingId/cancel", requireAuth, async (req, res) => {
     });
 
     res.json({ booking: updated });
-    notifyBookingCancelled(booking.id, isCustomer ? "customer" : "provider").catch(() => {});
+    notifyBookingCancelled(booking.id, isProviderActor ? "provider" : "customer", cleanReasonCode, note?.trim() || null).catch(() => {});
   } catch (err: any) {
     if (err?.message === "NOT_CANCELLABLE") {
       res.status(409).json({ errorCode: "NOT_CANCELLABLE", message: "Cannot cancel booking in its current status" });

@@ -235,47 +235,91 @@ export async function notifyBookingDeclined(bookingId: string, reasonCode?: stri
   } catch (err) { logger.error({ err, bookingId }, "notifyBookingDeclined failed"); }
 }
 
-export async function notifyBookingCancelled(bookingId: string, cancelledBy: "customer" | "provider"): Promise<void> {
+export async function notifyBookingCancelled(
+  bookingId: string,
+  cancelledBy: "customer" | "provider",
+  reasonCode: string | null = null,
+  _note: string | null = null,
+): Promise<void> {
   try {
     const b = await loadBookingFull(bookingId);
     if (!b || !b.location || !b.customer) return;
 
+    // Walk-in bookings: customerId points at the provider's own user
+    // (no platform-side customer to notify). Skip the customer-side
+    // notification entirely when the cancel comes from the provider
+    // for a walk-in — there's no real driver to apologise to.
+    const isWalkIn = b.bookingSource === "WALK_IN" || (b as any).isOffPlatform === true;
+
     const cancellerLabel = cancelledBy === "customer" ? `${b.customer.firstName} ${b.customer.lastName}` : b.location.provider.name;
     const scheduledDate = fmtDate(b.scheduledStartAtUtc);
-
+    const scheduledTime = fmtTime(b.scheduledStartAtUtc);
+    const whenLine = `${scheduledDate} at ${scheduledTime}`;
     const bookingUrl = `/bookings/${b.id}`;
+
     if (cancelledBy === "customer") {
-      // Notify provider
-      const admins = await getProviderAdmins(b.location.providerId);
-      for (const admin of admins) {
-        await createNotification(admin.userId, {
+      // Notify provider team (admins + staff). The customer-side cancel
+      // text is unchanged from the prior shape — we don't surface the
+      // driver's reason to the provider here, just the bare fact.
+      const team = await getProviderTeam(b.location.providerId);
+      for (const member of team) {
+        await createNotification(member.userId, {
           subject: "Booking cancelled by customer",
           body: `${b.customer.firstName} ${b.customer.lastName} cancelled their ${b.serviceNameSnapshot} at ${b.location.name} on ${scheduledDate}.`,
           actionUrl: bookingUrl,
-          metadata: { bookingId: b.id, type: "BOOKING_CANCELLED" },
+          metadata: { bookingId: b.id, type: "BOOKING_CANCELLED", cancelledBy: "customer", reasonCode },
         });
-        await sendEmail({ to: admin.email, ...templates.bookingCancelled({
-          recipientName: admin.firstName, cancelledBy: cancellerLabel,
+        await sendEmail({ to: member.email, ...templates.bookingCancelled({
+          recipientName: member.firstName, cancelledBy: cancellerLabel,
           serviceName: b.serviceNameSnapshot, locationName: b.location.name,
           scheduledDate, actionUrl: bookingUrl,
         })});
       }
-    } else {
-      // Notify customer
-      await createNotification(b.customer.id, {
-        subject: "Booking cancelled by provider",
-        body: `${b.location.provider.name} cancelled your ${b.serviceNameSnapshot} on ${scheduledDate}. We apologize for the inconvenience.`,
-        actionUrl: bookingUrl,
-        metadata: { bookingId: b.id, type: "BOOKING_CANCELLED" },
-      });
-      const email = await getUserEmail(b.customer.id);
-      if (email) {
-        await sendEmail({ to: email, ...templates.bookingCancelled({
-          recipientName: b.customer.firstName, cancelledBy: cancellerLabel,
-          serviceName: b.serviceNameSnapshot, locationName: b.location.name,
-          scheduledDate, actionUrl: bookingUrl,
-        })});
-      }
+      return;
+    }
+
+    // Provider-cancelled. Customer-side text branches on reason so the
+    // driver gets context-appropriate wording instead of a generic
+    // "We apologize for the inconvenience" for every cause.
+    if (isWalkIn) return; // no platform-side customer to notify
+
+    // Defaults (OTHER / null reason) match the prior generic text so
+    // any unrecognised code still produces a reasonable message.
+    let subject = "Booking cancelled";
+    let body = `Your ${b.serviceNameSnapshot} at ${b.location.name} for ${whenLine} has been cancelled.`;
+
+    switch (reasonCode) {
+      case "CUSTOMER_REQUESTED":
+        subject = "Booking cancelled per your request";
+        body = `Your ${b.serviceNameSnapshot} at ${b.location.name} for ${whenLine} has been cancelled as requested.`;
+        break;
+      case "PROVIDER_UNAVAILABLE":
+        subject = "Booking cancelled";
+        body = `${b.location.name} is unable to service your ${b.serviceNameSnapshot} for ${whenLine}. Sorry for the inconvenience.`;
+        break;
+      case "CUSTOMER_NO_SHOW":
+        subject = "Booking cancelled — no-show";
+        body = `Your ${b.serviceNameSnapshot} at ${b.location.name} for ${whenLine} was cancelled because you didn't arrive.`;
+        break;
+      case "OTHER":
+      default:
+        // keep defaults above
+        break;
+    }
+
+    await createNotification(b.customer.id, {
+      subject,
+      body,
+      actionUrl: bookingUrl,
+      metadata: { bookingId: b.id, type: "BOOKING_CANCELLED", cancelledBy: "provider", reasonCode },
+    });
+    const email = await getUserEmail(b.customer.id);
+    if (email) {
+      await sendEmail({ to: email, ...templates.bookingCancelled({
+        recipientName: b.customer.firstName, cancelledBy: cancellerLabel,
+        serviceName: b.serviceNameSnapshot, locationName: b.location.name,
+        scheduledDate, actionUrl: bookingUrl,
+      })});
     }
   } catch (err) { logger.error({ err, bookingId }, "notifyBookingCancelled failed"); }
 }
