@@ -346,6 +346,13 @@ export default function LocationDetail() {
         try { sessionStorage.setItem(receiptStorageKey, JSON.stringify({ ...receipt, savedAt: Date.now() })); }
         catch { /* quota / disabled storage — receipt still works in-session */ }
       }
+      // Replace the booking-form URL in history with a receipt-marker
+      // URL. With this in place, pressing Back from receipt goes to
+      // wherever was BEFORE the form (e.g. /search), not to a fresh
+      // form for the same location. The marker also lets us detect
+      // "user landed here via receipt path" on remount, in tandem
+      // with the sessionStorage rehydration above.
+      setNav(`/location/${locationId}?booked=${bookRes.booking.id}`, { replace: true });
     } catch (err: any) {
       if (err?.message?.includes("hold") || err?.status === 410) {
         setBookingError("Your hold has expired. Please select a new time slot.");
@@ -389,7 +396,10 @@ export default function LocationDetail() {
           totalPrice={receiptTotalPrice}
           onDone={() => {
             if (receiptStorageKey) sessionStorage.removeItem(receiptStorageKey);
-            setNav("/bookings");
+            // replace:true so Back from /bookings doesn't bounce the user
+            // back to the receipt URL — they came from /search → form →
+            // receipt → bookings, and Back should land on /search.
+            setNav("/bookings", { replace: true });
           }}
         />
       </div>
