@@ -1,7 +1,18 @@
-import React, { useState } from "react";
-import { useGetLocationReviews, useGetReviewAggregate, useVoteOnReview } from "@workspace/api-client-react";
+import React, { useMemo } from "react";
+import {
+  useGetLocationReviews,
+  useGetReviewAggregate,
+  useVoteOnReview,
+  useClearReviewVote,
+  getGetLocationReviewsQueryKey,
+  type LocationReviewItem,
+  type LocationReviewsResponse,
+  type VoteOnReviewBodyVote,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Card, Button, Badge } from "./ui";
+import { useLocation } from "wouter";
+import { toast } from "sonner";
+import { Card, Badge } from "./ui";
 import { StarRating, RatingDistribution } from "./star-rating";
 import { Star, ThumbsUp, ThumbsDown, MessageSquare } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
@@ -14,6 +25,7 @@ interface LocationReviewsProps {
 export function LocationReviews({ locationId }: LocationReviewsProps) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const [, setNav] = useLocation();
 
   const { data: aggData } = useGetReviewAggregate(locationId, {
     query: { enabled: !!locationId },
@@ -26,12 +38,103 @@ export function LocationReviews({ locationId }: LocationReviewsProps) {
   });
 
   const voteMut = useVoteOnReview({ request: { credentials: "include" } });
+  const clearMut = useClearReviewVote({ request: { credentials: "include" } });
 
-  const handleVote = async (reviewId: string, isHelpful: boolean) => {
+  const reviewsQueryKey = useMemo(
+    () => getGetLocationReviewsQueryKey(locationId, {}),
+    [locationId],
+  );
+
+  // Optimistic update: rewrite the cached LocationReviewsResponse for
+  // the target review, recompute counts and currentUserVote per the
+  // toggle/swap rules. Returns the original snapshot so onError can
+  // restore it. The server is the source of truth — onSuccess writes
+  // the canonical counts back from the response.
+  const applyOptimisticVote = (reviewId: string, nextVote: "HELPFUL" | "UNHELPFUL" | null) => {
+    const previous = queryClient.getQueryData<LocationReviewsResponse>(reviewsQueryKey);
+    if (!previous) return previous;
+    queryClient.setQueryData<LocationReviewsResponse>(reviewsQueryKey, {
+      ...previous,
+      reviews: previous.reviews.map((r: LocationReviewItem) => {
+        if (r.id !== reviewId) return r;
+        const prev = (r.currentUserVote ?? null) as "HELPFUL" | "UNHELPFUL" | null;
+        let helpful = r.helpfulCount ?? 0;
+        let unhelpful = r.unhelpfulCount ?? 0;
+        // Reverse the prior vote's contribution.
+        if (prev === "HELPFUL") helpful -= 1;
+        else if (prev === "UNHELPFUL") unhelpful -= 1;
+        // Apply the new vote.
+        if (nextVote === "HELPFUL") helpful += 1;
+        else if (nextVote === "UNHELPFUL") unhelpful += 1;
+        return {
+          ...r,
+          helpfulCount: helpful,
+          unhelpfulCount: unhelpful,
+          currentUserVote: nextVote ?? undefined,
+        };
+      }),
+    });
+    return previous;
+  };
+
+  const writeServerCountsToCache = (
+    reviewId: string,
+    counts: { helpfulCount: number; unhelpfulCount: number; currentUserVote?: "HELPFUL" | "UNHELPFUL" | null },
+  ) => {
+    queryClient.setQueryData<LocationReviewsResponse>(reviewsQueryKey, (prev: LocationReviewsResponse | undefined) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        reviews: prev.reviews.map((r: LocationReviewItem) =>
+          r.id === reviewId
+            ? {
+                ...r,
+                helpfulCount: counts.helpfulCount,
+                unhelpfulCount: counts.unhelpfulCount,
+                currentUserVote: counts.currentUserVote ?? undefined,
+              }
+            : r,
+        ),
+      };
+    });
+  };
+
+  const handleVote = async (review: LocationReviewItem, target: "HELPFUL" | "UNHELPFUL") => {
+    if (!user) {
+      // Anonymous viewers can see counts but can't act. Route to login
+      // so the click leads somewhere useful instead of being a no-op.
+      setNav("/login");
+      return;
+    }
+    if (voteMut.isPending || clearMut.isPending) return;
+
+    const current = (review.currentUserVote ?? null) as "HELPFUL" | "UNHELPFUL" | null;
+    // Tap a filled thumb again → toggle off (DELETE). Otherwise POST
+    // the new vote — the server handles same-vote-toggle internally
+    // too, but we model the toggle on the client so the UI updates
+    // instantly without a server round-trip race.
+    const willClear = current === target;
+    const optimisticNext = willClear ? null : target;
+    const snapshot = applyOptimisticVote(review.id, optimisticNext);
+
     try {
-      await voteMut.mutateAsync({ reviewId, data: { isHelpful } });
-      queryClient.invalidateQueries({ queryKey: [`/api/locations/${locationId}/reviews`] });
-    } catch {}
+      if (willClear) {
+        const res = await clearMut.mutateAsync({ reviewId: review.id });
+        writeServerCountsToCache(review.id, res);
+      } else {
+        const res = await voteMut.mutateAsync({
+          reviewId: review.id,
+          data: { vote: target as VoteOnReviewBodyVote },
+        });
+        writeServerCountsToCache(review.id, res);
+      }
+    } catch {
+      // Roll back on failure and surface the error so users know the
+      // vote didn't land. A blunt invalidate would also work but
+      // restoring the snapshot avoids a flash to stale state.
+      if (snapshot) queryClient.setQueryData(reviewsQueryKey, snapshot);
+      toast.error("Couldn't save your vote. Try again?");
+    }
   };
 
   const aggregate = aggData;
@@ -75,7 +178,7 @@ export function LocationReviews({ locationId }: LocationReviewsProps) {
         </Card>
       ) : (
         <div className="space-y-4">
-          {reviews.map((r) => (
+          {reviews.map((r: LocationReviewItem) => (
             <Card key={r.id} className="p-5">
               <div className="flex items-start justify-between mb-2">
                 <div>
@@ -99,28 +202,79 @@ export function LocationReviews({ locationId }: LocationReviewsProps) {
                 </div>
               )}
 
-              {user && (
-                <div className="flex items-center gap-3 text-xs text-slate-400">
-                  <button
-                    onClick={() => handleVote(r.id, true)}
-                    className="flex items-center gap-1 hover:text-emerald-600 transition-colors"
-                  >
-                    <ThumbsUp className="h-3.5 w-3.5" />
-                    Helpful ({r.helpfulCount || 0})
-                  </button>
-                  <button
-                    onClick={() => handleVote(r.id, false)}
-                    className="flex items-center gap-1 hover:text-red-500 transition-colors"
-                  >
-                    <ThumbsDown className="h-3.5 w-3.5" />
-                    ({r.unhelpfulCount || 0})
-                  </button>
-                </div>
-              )}
+              <ReviewVoteButtons
+                review={r}
+                isLoggedIn={!!user}
+                isPending={voteMut.isPending || clearMut.isPending}
+                onVote={handleVote}
+              />
             </Card>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+interface ReviewVoteButtonsProps {
+  review: LocationReviewItem;
+  isLoggedIn: boolean;
+  isPending: boolean;
+  onVote: (review: LocationReviewItem, target: "HELPFUL" | "UNHELPFUL") => void;
+}
+
+// Tap targets are 44×44 (h-11 w-11) per WCAG / Apple HIG. Spacing
+// between thumbs is gap-2 (8px). Filled state uses primary blue for
+// HELPFUL and destructive red for UNHELPFUL, with the lucide icon set
+// to fill="currentColor" so the thumb shape itself fills.
+function ReviewVoteButtons({ review, isLoggedIn, isPending, onVote }: ReviewVoteButtonsProps) {
+  const myVote = (review.currentUserVote ?? null) as "HELPFUL" | "UNHELPFUL" | null;
+  const helpful = review.helpfulCount ?? 0;
+  const unhelpful = review.unhelpfulCount ?? 0;
+  const disabledForGuest = !isLoggedIn;
+
+  const baseBtn =
+    "inline-flex items-center gap-1.5 min-h-11 min-w-11 px-2.5 rounded-lg text-xs font-medium transition-colors select-none disabled:cursor-not-allowed";
+
+  const upActive = myVote === "HELPFUL";
+  const downActive = myVote === "UNHELPFUL";
+
+  return (
+    <div className="flex items-center gap-2 -ml-2.5" data-testid="review-vote-buttons">
+      <button
+        type="button"
+        onClick={() => onVote(review, "HELPFUL")}
+        disabled={isPending}
+        aria-pressed={upActive}
+        aria-label={upActive ? "Remove helpful vote" : "Mark as helpful"}
+        title={disabledForGuest ? "Log in to vote" : undefined}
+        className={`${baseBtn} ${
+          upActive
+            ? "text-primary bg-primary/10 hover:bg-primary/15"
+            : "text-slate-500 hover:text-primary hover:bg-slate-50"
+        }`}
+        data-testid={`vote-helpful-${review.id}`}
+      >
+        <ThumbsUp className="h-4 w-4" fill={upActive ? "currentColor" : "none"} />
+        <span>Helpful{helpful > 0 ? ` (${helpful})` : ""}</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onVote(review, "UNHELPFUL")}
+        disabled={isPending}
+        aria-pressed={downActive}
+        aria-label={downActive ? "Remove not-helpful vote" : "Mark as not helpful"}
+        title={disabledForGuest ? "Log in to vote" : undefined}
+        className={`${baseBtn} ${
+          downActive
+            ? "text-destructive bg-destructive/10 hover:bg-destructive/15"
+            : "text-slate-500 hover:text-destructive hover:bg-slate-50"
+        }`}
+        data-testid={`vote-unhelpful-${review.id}`}
+      >
+        <ThumbsDown className="h-4 w-4" fill={downActive ? "currentColor" : "none"} />
+        <span>{unhelpful > 0 ? unhelpful : ""}</span>
+      </button>
     </div>
   );
 }
