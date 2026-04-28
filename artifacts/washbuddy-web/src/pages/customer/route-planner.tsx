@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 import { Card, Input, Button, Badge, ErrorState } from "@/components/ui";
-import { MapPin, Navigation, Route, ArrowRight, X, Loader2, ChevronDown, Crosshair, Star, Maximize2, Minimize2, Pin, Pencil } from "lucide-react";
+import { MapPin, Navigation, Route, ArrowRight, X, Loader2, ChevronDown, Crosshair, Star, Maximize2, Minimize2, Pencil } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { formatCurrency } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1466,8 +1466,24 @@ export default function RoutePlanner() {
                     <div className="p-4 sm:p-5 space-y-1.5">
                       <div className="flex items-start justify-between gap-2">
                         <h3 className={`text-base sm:text-lg font-bold leading-tight truncate ${incompatible ? "text-slate-500" : "text-slate-900"}`}>{loc.name}</h3>
+                        {/* Chevron is the booking-navigation affordance now.
+                            Card body tap selects on map; chevron tap
+                            navigates to /location/:id. p-3 makes the tap
+                            target 44px square (h-5 icon + 12px padding
+                            each side) — clears the iOS minimum. -mr-2
+                            -mt-2 visually pulls the bigger tap area
+                            back into the card padding box so it doesn't
+                            push the title. */}
                         {!incompatible && (
-                          <ArrowRight className="h-4 w-4 text-slate-300 group-hover:text-primary transition-colors mt-0.5 shrink-0" />
+                          <button
+                            type="button"
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setNavLocation(buildLocationUrl(loc.id)); }}
+                            className="shrink-0 -mr-2 -mt-2 p-3 rounded-lg text-slate-400 hover:text-primary hover:bg-slate-100 transition-colors"
+                            aria-label={`Book at ${loc.name}`}
+                            title="Book at this location"
+                          >
+                            <ArrowRight className="h-5 w-5" />
+                          </button>
                         )}
                       </div>
 
@@ -1536,7 +1552,26 @@ export default function RoutePlanner() {
                     {incompatible ? (
                       <div className="block">{card}</div>
                     ) : (
-                      <Link href={buildLocationUrl(loc.id)} className="block">{card}</Link>
+                      // Card body tap = select on map (popup, highlight,
+                      // pan-if-off-screen). The chevron inside the card
+                      // is the booking affordance and stops propagation
+                      // so it doesn't reach this onClick. role="button" +
+                      // a keyboard handler so keyboard users can still
+                      // select with Enter or Space — no longer a Link.
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        className="block text-left w-full"
+                        onClick={() => selectLocation(loc.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            selectLocation(loc.id);
+                          }
+                        }}
+                      >
+                        {card}
+                      </div>
                     )}
                   </motion.div>
                 );
