@@ -865,7 +865,23 @@ export default function RoutePlanner() {
         setNavLocation(`/location/${loc.id}${query ? `?${query}` : ""}`);
       });
 
-      marker.bindPopup(popup, { closeButton: false, maxWidth: 280 });
+      // autoPanPadding tells Leaflet how much room to keep between the
+      // popup's bounding box and the map edges when it auto-pans on
+      // open. Default `[5, 5]` is too small — the popup overlapped
+      // the zoom controls (Leaflet built-in, top-left, ~30×60) and
+      // the custom expand button (top-right, 40×40) on every popup
+      // open. [70, 80] leaves enough margin for both control clusters
+      // plus a comfortable gutter, and Leaflet pans the map down
+      // automatically when the popup would otherwise cross into a
+      // control's space. Picked option (a) per spec — the cleanest
+      // fix that respects Leaflet's intended behaviour, no z-index
+      // shuffling or hide-on-popup logic needed.
+      marker.bindPopup(popup, {
+        closeButton: false,
+        maxWidth: 280,
+        autoPan: true,
+        autoPanPadding: [70, 80],
+      });
       // Tap pin → flip the active pin so the matching card highlights
       // too. Symmetric with the card's pin button.
       marker.on("popupopen", () => {
