@@ -219,6 +219,19 @@ function CityAutocomplete({
             onChange(null);
             setResults([]);
           } else {
+            // If the user starts typing into a field that has a
+            // previously-committed CityOption (e.g. they're editing the
+            // existing destination), the prior `value` is still set —
+            // the dropdown gate `!value && query.length >= 2` would
+            // suppress suggestions even though the typed text no
+            // longer matches the committed label. Clear `value` via
+            // the parent's onChange the moment the typed text diverges
+            // from the committed label so the suggestions render
+            // cleanly. This is what "edit-to-replace" means in any
+            // typeahead — the prior selection isn't valid anymore.
+            if (value && val !== value.label) {
+              onChange(null);
+            }
             handleSearch(val);
           }
         }}
