@@ -166,16 +166,19 @@ export function CancelBookingDialog({
 
             <div className="pt-2">
               <label htmlFor="cancel-note" className="block text-xs font-medium text-slate-600 mb-1">
-                Note for our records (optional)
+                Add a message for the customer (optional)
               </label>
               <textarea
                 id="cancel-note"
                 value={note}
                 onChange={(e) => setNote(e.target.value.slice(0, 500))}
-                rows={2}
-                placeholder="Anything worth remembering?"
+                rows={3}
+                placeholder="e.g. Sorry — our machine is down today. Could you book Wednesday?"
                 className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm bg-white focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none"
               />
+              <p className="mt-1 text-xs text-slate-500">
+                Visible to the customer in their cancellation notification.
+              </p>
             </div>
           </div>
         )}
