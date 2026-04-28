@@ -1136,9 +1136,19 @@ export default function RoutePlanner() {
               />
             </div>
 
+            {/* Demoted secondary affordance now that From + To both
+                auto-fire planRoute on autocomplete selection. The
+                button stays visible for keyboard submitters and for
+                users who type free text without picking a suggestion.
+                Outline variant + min-h-11 keeps the tap target above
+                the 44px iOS floor while reading as quieter than the
+                prior filled-primary 48px button. The functional shape
+                is unchanged — onClick still wraps in an arrow so the
+                MouseEvent fix from 2g-2 (commit 50b4211) holds. */}
             <Button
-              size="lg"
-              className="h-12 rounded-xl px-6 w-full sm:w-auto shrink-0"
+              variant="outline"
+              size="default"
+              className="min-h-11 rounded-xl px-5 w-full sm:w-auto shrink-0"
               onClick={() => handlePlanRoute()}
               disabled={!origin || !destination || isRouting}
             >
