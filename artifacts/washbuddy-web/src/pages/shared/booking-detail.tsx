@@ -215,8 +215,7 @@ export default function BookingDetail() {
                 a known reason code is present. CUSTOMER_CANCELLED
                 (driver self-cancel) carries no reason; OTHER / unknown
                 codes return null from the helper and the line is
-                suppressed. The optional internal note is intentionally
-                NOT surfaced here — that stays in provider records. */}
+                suppressed. */}
             {b.status === "PROVIDER_CANCELLED" && (() => {
               const label = customerFacingCancellationLabel((b as any).cancellationReasonCode);
               if (!label) return null;
@@ -224,14 +223,40 @@ export default function BookingDetail() {
                 <p className="text-sm text-slate-600 mt-2">Reason: <span className="font-semibold text-slate-800">{label}</span></p>
               );
             })()}
+            {/* Provider's optional message to the customer. Customer-
+                visible by default (2g-1.5 product decision); the
+                visibility flag stays on the booking for a future
+                toggle. Plain-text rendering: links are NOT auto-
+                converted, multi-line whitespace IS preserved. */}
+            {b.status === "PROVIDER_CANCELLED"
+              && (b as any).cancellationNoteVisibleToCustomer !== false
+              && typeof (b as any).cancellationNote === "string"
+              && (b as any).cancellationNote.trim().length > 0 && (
+              <div className="mt-3 p-3 rounded-xl bg-slate-50 border border-slate-200 max-w-prose">
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Message from provider</p>
+                <p className="text-sm text-slate-700 mt-1 whitespace-pre-wrap break-words italic">
+                  “{(b as any).cancellationNote}”
+                </p>
+              </div>
+            )}
             <h1 className="text-4xl font-display font-bold text-slate-900 mt-4 mb-2">{b.serviceNameSnapshot}</h1>
             <p className="text-slate-500 font-mono text-sm">ID: {b.id}</p>
           </div>
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap items-start gap-3">
+            {/* Cancel — muted text link (matches Daily Board treatment
+                from 2g-1.4 commit 06ae2e7). Click still routes through
+                the cancellation dialog mounted at page-root, so the
+                portal + scroll-lock + reason-capture flow is identical
+                to the Daily Board surface. */}
             {(isCustomer) && ["REQUESTED", "HELD", "PROVIDER_CONFIRMED"].includes(b.status) && (
-              <Button variant="outline" onClick={() => handleAction("cancel")} isLoading={cancelMut.isPending}>
-                Cancel Booking
-              </Button>
+              <button
+                type="button"
+                onClick={() => handleAction("cancel")}
+                disabled={cancelMut.isPending}
+                className="text-sm font-medium text-slate-500 hover:text-slate-700 hover:underline underline-offset-2 disabled:opacity-50"
+              >
+                Cancel booking
+              </button>
             )}
             {isAdmin && activeStatuses.includes(b.status) && (
               <Button variant="destructive" onClick={handleForceCancel} isLoading={adminActionLoading} className="gap-1">
@@ -245,6 +270,25 @@ export default function BookingDetail() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Rebook CTA — only shows when the provider cancelled the
+          booking. Routes back into the standard /location/:id flow
+          (no pre-fill — driver re-selects services + slot). Hidden
+          for CUSTOMER_CANCELLED (driver self-cancel — they made the
+          call, no need to push them back) and for any non-cancelled
+          state. Customer view only; providers don't book on behalf
+          of a customer here. */}
+      {!isProvider && b.status === "PROVIDER_CANCELLED" && b.location?.id && (
+        <Card className="p-4 sm:p-5 bg-blue-50/50 border-blue-200">
+          <p className="text-sm text-slate-600">Want to book again?</p>
+          <Button
+            onClick={() => setNav(`/location/${b.location.id}`)}
+            className="mt-2 w-full sm:w-auto min-h-11 bg-blue-600 hover:bg-blue-700 text-white gap-1.5"
+          >
+            <Calendar className="h-4 w-4" /> Book at {b.location.name}
+          </Button>
+        </Card>
       )}
 
       {/* Override Status Dialog */}
@@ -384,11 +428,23 @@ function ProviderHeader({
           )}
         </div>
 
-        <div className="flex flex-wrap gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {/* Provider-side Cancel — muted text link, matching the
+              Daily Board treatment from 2g-1.4 (commit 06ae2e7). The
+              positive primary actions on this header (Confirm Job,
+              Mark Checked In, Start Wash, Complete Wash) keep the
+              filled-color emphasis; the destructive action shouldn't
+              compete visually. Click still routes through the
+              cancellation dialog mounted at page-root. */}
           {["REQUESTED", "HELD", "PROVIDER_CONFIRMED"].includes(b.status) && (
-            <Button variant="outline" onClick={() => onAction("cancel")} isLoading={cancelPending}>
-              Cancel Booking
-            </Button>
+            <button
+              type="button"
+              onClick={() => onAction("cancel")}
+              disabled={cancelPending}
+              className="text-sm font-medium text-slate-500 hover:text-slate-700 hover:underline underline-offset-2 disabled:opacity-50"
+            >
+              Cancel booking
+            </button>
           )}
           {b.status === "REQUESTED" && (
             <Button onClick={() => onAction("confirm")} isLoading={confirmPending} className="bg-blue-600 hover:bg-blue-700">
