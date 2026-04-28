@@ -1054,7 +1054,24 @@ export default function RoutePlanner() {
                 <div className="relative">
                   <CityAutocomplete
                     value={origin}
-                    onChange={(c) => { setOrigin(c); setRoute(null); }}
+                    onChange={(c) => {
+                      setOrigin(c);
+                      setRoute(null);
+                      // Symmetric auto-fire with the To field — when
+                      // the user picks an origin from autocomplete and
+                      // a destination is already set, recompute the
+                      // route immediately. setTimeout(0) lets React
+                      // commit the setOrigin batch first so
+                      // planRouteRef.current reads the freshest closure
+                      // (same pattern as the To field below). Free
+                      // typing without selecting from autocomplete
+                      // does NOT enter this path — onChange only fires
+                      // when CityAutocomplete commits a selection
+                      // (or null on clear).
+                      if (c && destination) {
+                        setTimeout(() => planRouteRef.current?.(c, destination), 0);
+                      }
+                    }}
                     placeholder="Start city..."
                     exclude={destination}
                   />
