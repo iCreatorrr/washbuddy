@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 import { Card, Input, Button, Badge, ErrorState } from "@/components/ui";
-import { MapPin, Navigation, Route, ArrowRight, X, Loader2, ChevronDown, Crosshair } from "lucide-react";
+import { MapPin, Navigation, Route, ArrowRight, X, Loader2, ChevronDown, Crosshair, Star, Maximize2, Minimize2, Pin, Pencil } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { formatCurrency } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -288,6 +288,20 @@ const locationIcon = L.divIcon({
   popupAnchor: [0, -30],
 });
 
+/** Highlighted pin: when the user taps a list card's pin button, the
+ * matching marker switches to this icon so the map pin and the card
+ * read as the same item. Slightly larger + amber fill so it stands
+ * out against the standard blue / gray pins without being garish. */
+const activeLocationIcon = L.divIcon({
+  className: "",
+  html: `<div style="width:36px;height:36px;background:linear-gradient(135deg,#f59e0b,#d97706);border:3px solid white;border-radius:50%;box-shadow:0 4px 14px rgba(245,158,11,0.45);display:flex;align-items:center;justify-content:center;">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+  </div>`,
+  iconSize: [36, 36],
+  iconAnchor: [18, 36],
+  popupAnchor: [0, -36],
+});
+
 /** Greyed-out pin used for locations that physically can't host the
  * driver's active vehicle. Same shape so the map still reads as a
  * location pin, but the saturated blue collapses to slate so the eye
@@ -485,6 +499,24 @@ export default function RoutePlanner() {
   const [, setNavLocation] = useLocation();
   const autoRoutedRef = useRef(!!cached);
   const geoAttemptedRef = useRef(false);
+  // Mounted ref guards async setStates after unmount. Leaflet's own
+  // map.remove() is wrapped in try/catch, but the ETA / route fetches
+  // aren't aborted — without the ref they'd setState after unmount and
+  // produce a console warning during fast navigations.
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
+  // UI state for the redesigned shell. mapExpanded toggles the map
+  // between its inline ~55vh shape and a full-viewport overlay; the
+  // overlay uses position:fixed and locks body scroll. activePinId
+  // mirrors a card-tap onto the map (the matching pin switches to the
+  // amber active icon) without navigating away. formCollapsed defaults
+  // to "collapse the From/To form when a route is already planned" —
+  // less duplicate header weight on a long scroll. The driver hits
+  // Edit to expand it again.
+  const [mapExpanded, setMapExpanded] = useState(false);
+  const [activePinId, setActivePinId] = useState<string | null>(null);
+  const [formCollapsed, setFormCollapsed] = useState(!!cached);
 
   const { activeVehicle } = useActiveVehicle();
   const activeVehicleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
@@ -725,70 +757,95 @@ export default function RoutePlanner() {
 
     locsToShow.forEach((loc) => {
       if (loc.latitude == null || loc.longitude == null) return;
-      // Pick the icon based on whether the active vehicle can fit any
-      // bay at this location. The dimmed pin tells the driver at a
-      // glance "I see this location but I can't book here right now"
-      // without making them tap through to find out.
+      // Pick the icon based on (a) compatibility with the active
+      // vehicle and (b) whether this location is the active pin. The
+      // dimmed pin tells the driver at a glance "I can't book here";
+      // the amber active pin matches whichever card the driver tapped
+      // last so the eye can pair card and pin without hunting.
       const incompatible = (loc as any).fitsActiveVehicle === false;
-      const marker = L.marker([loc.latitude, loc.longitude], {
-        icon: incompatible ? incompatibleLocationIcon : locationIcon,
-      }).addTo(map);
+      const isActive = activePinId === loc.id && !incompatible;
+      const icon = incompatible
+        ? incompatibleLocationIcon
+        : isActive
+          ? activeLocationIcon
+          : locationIcon;
+      const marker = L.marker([loc.latitude, loc.longitude], { icon }).addTo(map);
 
       const popup = L.DomUtil.create("div");
-      popup.style.cssText = "font-family:system-ui;min-width:180px;";
+      popup.style.cssText = "font-family:system-ui;min-width:220px;max-width:260px;";
 
+      // Title — same weight as list card
       const nameEl = L.DomUtil.create("div", "", popup);
-      nameEl.style.cssText = `font-weight:700;font-size:14px;margin-bottom:4px;color:${incompatible ? "#475569" : "#0f172a"};`;
+      nameEl.style.cssText = `font-weight:700;font-size:15px;line-height:1.2;color:${incompatible ? "#475569" : "#0f172a"};`;
       nameEl.textContent = loc.name;
 
-      if (loc.provider?.name) {
-        const provEl = L.DomUtil.create("div", "", popup);
-        provEl.style.cssText = "font-size:12px;color:#64748b;margin-bottom:2px;";
-        provEl.textContent = loc.provider.name;
-      }
-
-      const addrEl = L.DomUtil.create("div", "", popup);
-      addrEl.style.cssText = "font-size:12px;color:#94a3b8;margin-bottom:4px;";
-      addrEl.textContent = route
-        ? `${loc.city} — ${Math.round(loc.distanceToRoute)} km from route`
-        : `${loc.city} — ${Math.round(loc.distFromOrigin)} km away`;
-
       if (incompatible) {
-        // Replace the standard "X services" line + Book button with a
-        // prominent incompatibility badge and a helper line. No CTA —
-        // the driver's only path forward is swapping their active
-        // vehicle, which lives outside this popup.
         const badge = L.DomUtil.create("div", "", popup);
-        badge.style.cssText = "margin-top:6px;padding:6px 8px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;font-size:11px;font-weight:600;color:#92400e;display:flex;align-items:center;gap:4px;";
+        badge.style.cssText = "margin-top:8px;padding:6px 8px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;font-size:11px;font-weight:600;color:#92400e;display:flex;align-items:center;gap:4px;";
         badge.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> No bay fits your active vehicle`;
-
         const helpEl = L.DomUtil.create("div", "", popup);
         helpEl.style.cssText = "margin-top:6px;font-size:11px;color:#64748b;";
         helpEl.textContent = "Change your active vehicle to book at this location.";
+        marker.bindPopup(popup, { closeButton: false });
+        markersRef.current.push(marker);
         return;
       }
 
+      // Rating · distance · status row — same shape as list card
+      const reviewCountP: number = (loc as any).reviewCount ?? 0;
+      const averageRatingP: number | null = (loc as any).averageRating ?? null;
+      const isOpenP = !!(loc as any).isOpenNow;
       const etaMins = etas[loc.id];
-      if (etaMins != null) {
-        const etaEl = L.DomUtil.create("div", "", popup);
-        etaEl.style.cssText = "font-size:12px;font-weight:600;color:#7c3aed;margin-bottom:4px;display:flex;align-items:center;gap:4px;";
-        etaEl.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> ${formatETA(etaMins)} away`;
+      const distLine = route
+        ? `${Math.round((loc as any).distanceToRoute)} km from route`
+        : `${Math.round((loc as any).distFromOrigin)} km`;
+
+      const metaEl = L.DomUtil.create("div", "", popup);
+      metaEl.style.cssText = "margin-top:6px;font-size:13px;color:#475569;line-height:1.3;";
+      const metaParts: string[] = [];
+      if (reviewCountP > 0) {
+        metaParts.push(`<span style="color:#f59e0b;">★</span> <strong style="color:#334155;">${averageRatingP != null ? averageRatingP.toFixed(1) : "—"}</strong> <span style="color:#94a3b8;">(${reviewCountP})</span>`);
+      } else {
+        metaParts.push(`<span style="color:#cbd5e1;">☆</span> <span style="color:#94a3b8;">No reviews yet</span>`);
+      }
+      metaParts.push(`<span style="color:#475569;">${distLine}</span>`);
+      if (etaMins != null) metaParts.push(`<span style="color:#475569;">${formatETA(etaMins)} away</span>`);
+      metaParts.push(isOpenP
+        ? `<span style="color:#059669;font-weight:500;">Open Now</span>`
+        : `<span style="color:#94a3b8;font-weight:500;">Closed</span>`);
+      metaEl.innerHTML = metaParts.join('<span style="color:#cbd5e1;"> · </span>');
+
+      // Address line (provider + city / region)
+      const addrEl = L.DomUtil.create("div", "", popup);
+      addrEl.style.cssText = "margin-top:4px;font-size:12px;color:#94a3b8;line-height:1.3;";
+      const stateP = (loc as any).stateCode || (loc as any).regionCode || "";
+      addrEl.textContent = `${loc.addressLine1 || loc.city}, ${loc.city}${stateP ? `, ${stateP}` : ""}`;
+
+      // From $X — match list card price line
+      const minP = (() => {
+        const svcs: any[] = loc.services || [];
+        if (svcs.length === 0) return null;
+        let m = Infinity;
+        for (const s of svcs) {
+          const p = (s.allInPriceMinor ?? s.basePriceMinor) ?? Infinity;
+          if (p < m) m = p;
+        }
+        return Number.isFinite(m) ? m : null;
+      })();
+      if (minP != null) {
+        const priceEl = L.DomUtil.create("div", "", popup);
+        priceEl.style.cssText = "margin-top:6px;font-size:13px;font-weight:600;color:#334155;";
+        priceEl.textContent = `From ${formatCurrency(minP)}`;
       }
 
-      const servCount = loc.services?.length || 0;
-      if (servCount > 0) {
-        const svcEl = L.DomUtil.create("div", "", popup);
-        svcEl.style.cssText = "font-size:11px;color:#3b82f6;font-weight:600;margin-bottom:6px;";
-        svcEl.textContent = `${servCount} service${servCount > 1 ? "s" : ""} available`;
-      }
-
+      // Book a Wash CTA — matches the rebook CTA from 2g-1.5: filled
+      // blue, 44px tall, full-width inside the popup.
       const btn = L.DomUtil.create("button", "", popup);
       btn.textContent = "Book a Wash";
       btn.style.cssText = `
-        margin-top:4px;padding:6px 12px;width:100%;
-        background:linear-gradient(135deg,#3b82f6,#1d4ed8);
-        color:white;border:none;border-radius:8px;
-        font-size:12px;font-weight:600;cursor:pointer;
+        margin-top:10px;padding:10px 16px;width:100%;min-height:40px;
+        background:#2563eb;color:white;border:none;border-radius:8px;
+        font-size:13px;font-weight:600;cursor:pointer;
       `;
       L.DomEvent.on(btn, "click", (e) => {
         L.DomEvent.stopPropagation(e);
@@ -808,7 +865,12 @@ export default function RoutePlanner() {
         setNavLocation(`/location/${loc.id}${query ? `?${query}` : ""}`);
       });
 
-      marker.bindPopup(popup, { closeButton: false });
+      marker.bindPopup(popup, { closeButton: false, maxWidth: 280 });
+      // Tap pin → flip the active pin so the matching card highlights
+      // too. Symmetric with the card's pin button.
+      marker.on("popupopen", () => {
+        if (mountedRef.current) setActivePinId(loc.id);
+      });
       markersRef.current.push(marker);
     });
 
@@ -833,7 +895,7 @@ export default function RoutePlanner() {
     } else if (origin) {
       map.setView([origin.lat, origin.lng], 10, { animate: true });
     }
-  }, [route, origin, destination, nearbyLocations, initialLocations, setNavLocation, etas]);
+  }, [route, origin, destination, nearbyLocations, initialLocations, setNavLocation, etas, activePinId]);
 
   // Build a location detail URL with optional return-to-route + user coords.
   // Uses URLSearchParams so separators (? vs &) are always correct, even when
@@ -880,6 +942,36 @@ export default function RoutePlanner() {
   };
   planRouteRef.current = (o, d) => handlePlanRoute(o, d);
 
+  // Body scroll lock while the map is in fullscreen mode so the page
+  // underneath doesn't scroll behind the map. Restored to the prior
+  // overflow value on collapse — preserved (not blindly set to "auto")
+  // in case some other component sets it for its own reasons.
+  useEffect(() => {
+    if (!mapExpanded) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [mapExpanded]);
+
+  // Force a Leaflet `invalidateSize` when the map container resizes
+  // between inline and fullscreen — without it the tile layer renders
+  // off-position because Leaflet caches the container's dimensions.
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    const id = window.setTimeout(() => {
+      try { map.invalidateSize({ animate: false }); } catch {}
+    }, 50);
+    return () => window.clearTimeout(id);
+  }, [mapExpanded]);
+
+  // Auto-collapse the form when the route resolves so the map gets the
+  // primary screen real estate. Re-expanding stays the user's call via
+  // the Edit button — we don't auto-expand on every state change.
+  useEffect(() => {
+    if (route) setFormCollapsed(true);
+  }, [route]);
+
   const handleSwap = () => {
     const temp = origin;
     setOrigin(destination);
@@ -893,44 +985,67 @@ export default function RoutePlanner() {
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   };
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <ActiveVehiclePill />
-      </div>
-      <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-indigo-900 via-purple-900 to-blue-900 text-white p-8 sm:p-10">
-        <div
-          className="absolute inset-0 opacity-30"
-          style={{
-            backgroundImage:
-              "radial-gradient(circle at 30% 40%, rgba(139,92,246,0.4) 0%, transparent 50%), radial-gradient(circle at 70% 60%, rgba(59,130,246,0.3) 0%, transparent 40%)",
-          }}
-        />
-        <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-2">
-            <Route className="h-6 w-6 text-purple-300" />
-            <h1 className="text-3xl sm:text-4xl font-display font-bold">Route Planner</h1>
-          </div>
-          <p className="text-slate-300 mb-6 max-w-xl">
-            Plan your trip and find wash locations along the way. Your current location is detected automatically — just enter your destination to get started.
-          </p>
+  // "Show on map" — single-tap on a card's pin button pans the map to
+  // the matching pin and highlights it via activeLocationIcon. We don't
+  // navigate away because tapping the card body is the primary action
+  // for that (matches Find a Wash). The pin icon is a separate gesture
+  // for "let me see where this is on the map".
+  const handleShowOnMap = (loc: any) => {
+    if (loc.latitude == null || loc.longitude == null) return;
+    setActivePinId(loc.id);
+    const map = mapInstanceRef.current;
+    if (map) {
+      try {
+        // Neighborhood-level zoom (14) gives enough surrounding context
+        // without losing the pin in tile detail. animate:true keeps the
+        // pan visible so the eye follows the change.
+        map.setView([loc.latitude, loc.longitude], 14, { animate: true });
+      } catch {}
+    }
+  };
 
-          <div className="flex flex-col sm:flex-row gap-3 items-stretch">
-            <div className="flex-1">
-              <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 block">From</label>
+  // Helpers for the redesigned list card. Mirror Find a Wash so a
+  // driver scanning one page reads the other identically (same row
+  // layout, same star treatment, same "From $X" line, same incompat
+  // badge). Server doesn't expose minimum price; compute from the
+  // services array already in the search response.
+  const minPriceFor = (loc: any): number | null => {
+    const svcs: any[] = loc.services || [];
+    if (svcs.length === 0) return null;
+    let m = Infinity;
+    for (const s of svcs) {
+      const p = (s.allInPriceMinor ?? s.basePriceMinor) ?? Infinity;
+      if (p < m) m = p;
+    }
+    return Number.isFinite(m) ? m : null;
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 max-w-full">
+        <div className="min-w-0 max-w-full">
+          <ActiveVehiclePill />
+        </div>
+      </div>
+
+      {/* Slim header — collapsed when a route is planned, full form
+          otherwise. Drops the gradient hero + verbose copy ("Plan
+          your trip and find wash locations…") that ate ~200px above
+          the fold on mobile. */}
+      {!formCollapsed || !route ? (
+        <Card className="p-4 sm:p-5 space-y-3">
+          <div className="flex items-end gap-2 sm:gap-3 flex-col sm:flex-row">
+            <div className="flex-1 w-full min-w-0">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 block">From</label>
               {origin?.name === "My Location" ? (
-                <div className="h-12 rounded-xl bg-white/10 border border-white/20 flex items-center px-4 gap-2">
-                  <Crosshair className="h-4 w-4 text-green-400 shrink-0" />
-                  <span className="text-white text-sm font-medium truncate">My Location</span>
-                  <span className="text-slate-400 text-xs truncate hidden sm:inline">
-                    {(() => {
-                      const m = origin.label.match(/My Location \((.*),\s*-?\d+\.?\d*,\s*-?\d+\.?\d*\)/);
-                      return m ? `(${m[1].trim()})` : "(detected)";
-                    })()}
-                  </span>
+                <div className="h-12 rounded-xl bg-slate-50 border-2 border-slate-200 flex items-center px-3 gap-2">
+                  <Crosshair className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span className="text-slate-900 text-sm font-medium truncate min-w-0">My Location</span>
                   <button
+                    type="button"
                     onClick={() => { setOrigin(null); setRoute(null); }}
-                    className="ml-auto text-slate-400 hover:text-white shrink-0"
+                    className="ml-auto text-slate-400 hover:text-slate-700 shrink-0"
+                    aria-label="Clear origin"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -939,15 +1054,13 @@ export default function RoutePlanner() {
                 <div className="relative">
                   <CityAutocomplete
                     value={origin}
-                    onChange={(c) => {
-                      setOrigin(c);
-                      setRoute(null);
-                    }}
+                    onChange={(c) => { setOrigin(c); setRoute(null); }}
                     placeholder="Start city..."
                     exclude={destination}
                   />
                   {!origin && geoStatus !== "unavailable" && (
                     <button
+                      type="button"
                       onClick={() => {
                         if (geoStatus === "denied") {
                           setRouteError("Location access was denied. Please enable location in your browser settings.");
@@ -969,33 +1082,29 @@ export default function RoutePlanner() {
                           { timeout: 8000 }
                         );
                       }}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500 transition-colors"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-primary transition-colors"
                       title="Use my location"
+                      aria-label="Use my current location"
                     >
                       <Crosshair className="h-4 w-4" />
                     </button>
                   )}
                 </div>
               )}
-              {geoStatus === "pending" && !initialOrigin && (
-                <div className="flex items-center gap-1.5 mt-1.5 text-slate-400 text-xs">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Detecting location...
-                </div>
-              )}
             </div>
 
-            <div className="flex items-end justify-center sm:pb-1">
-              <button
-                onClick={handleSwap}
-                className="h-10 w-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
-                title="Swap"
-              >
-                <ArrowRight className="h-4 w-4 text-white sm:rotate-0 rotate-90" />
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={handleSwap}
+              className="h-10 w-10 sm:h-10 sm:w-10 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors shrink-0 self-end mb-0 sm:mb-1"
+              title="Swap"
+              aria-label="Swap origin and destination"
+            >
+              <ArrowRight className="h-4 w-4 text-slate-600 rotate-90 sm:rotate-0" />
+            </button>
 
-            <div className="flex-1">
-              <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 block">To</label>
+            <div className="flex-1 w-full min-w-0">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 block">To</label>
               <CityAutocomplete
                 value={destination}
                 onChange={(c) => {
@@ -1010,179 +1119,259 @@ export default function RoutePlanner() {
               />
             </div>
 
-            <div className="flex items-end">
-              <Button
-                size="lg"
-                className="h-12 rounded-xl px-8 w-full sm:w-auto"
-                onClick={handlePlanRoute}
-                disabled={!origin || !destination || isRouting}
-              >
-                {isRouting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Planning...
-                  </>
-                ) : (
-                  <>
-                    <Navigation className="h-4 w-4 mr-2" />
-                    Plan Route
-                  </>
-                )}
-              </Button>
-            </div>
+            <Button
+              size="lg"
+              className="h-12 rounded-xl px-6 w-full sm:w-auto shrink-0"
+              onClick={() => handlePlanRoute()}
+              disabled={!origin || !destination || isRouting}
+            >
+              {isRouting ? (
+                <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Planning...</>
+              ) : (
+                <><Navigation className="h-4 w-4 mr-2" /> Plan Route</>
+              )}
+            </Button>
           </div>
-
-          {routeError && (
-            <p className="text-red-300 text-sm mt-3">{routeError}</p>
+          {geoStatus === "pending" && !initialOrigin && (
+            <div className="flex items-center gap-1.5 text-slate-500 text-xs">
+              <Loader2 className="h-3 w-3 animate-spin" /> Detecting location...
+            </div>
           )}
-        </div>
-      </div>
-
-      {route && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex flex-wrap gap-4"
-        >
-          <div className="bg-white rounded-2xl border border-slate-200 px-5 py-3 flex items-center gap-3">
-            <div className="bg-blue-50 p-2 rounded-lg">
-              <Route className="h-4 w-4 text-blue-600" />
+          {routeError && (
+            <p className="text-red-600 text-sm">{routeError}</p>
+          )}
+        </Card>
+      ) : (
+        // Collapsed summary — shows BOTH from and to (the prior shape
+        // hid From in the collapsed state, which left the user
+        // wondering "did I plan this trip?"). Edit reopens the full
+        // form for changes.
+        <Card className="p-3 sm:p-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-slate-500 leading-tight">
+                <span className="font-semibold text-slate-700">From:</span>{" "}
+                <span className="truncate">{origin?.name === "My Location" ? "My Location" : (origin?.label || "—")}</span>
+              </p>
+              <p className="text-xs text-slate-500 leading-tight mt-0.5">
+                <span className="font-semibold text-slate-700">To:</span>{" "}
+                <span className="truncate">{destination?.label || "—"}</span>
+              </p>
             </div>
-            <div>
-              <p className="text-xs text-slate-500 font-medium">Distance</p>
-              <p className="text-lg font-bold text-slate-900">{route.distanceKm} km</p>
-            </div>
+            <button
+              type="button"
+              onClick={() => setFormCollapsed(false)}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors shrink-0"
+            >
+              <Pencil className="h-3.5 w-3.5" /> Edit
+            </button>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-200 px-5 py-3 flex items-center gap-3">
-            <div className="bg-purple-50 p-2 rounded-lg">
-              <Navigation className="h-4 w-4 text-purple-600" />
-            </div>
-            <div>
-              <p className="text-xs text-slate-500 font-medium">Drive Time</p>
-              <p className="text-lg font-bold text-slate-900">{formatDuration(route.durationMins)}</p>
-            </div>
-          </div>
-          <div className="bg-white rounded-2xl border border-slate-200 px-5 py-3 flex items-center gap-3">
-            <div className="bg-green-50 p-2 rounded-lg">
-              <MapPin className="h-4 w-4 text-green-600" />
-            </div>
-            <div>
-              <p className="text-xs text-slate-500 font-medium">Wash Stops</p>
-              <p className="text-lg font-bold text-slate-900">{nearbyLocations.length} locations</p>
-            </div>
-          </div>
-        </motion.div>
+        </Card>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <div
-            ref={mapRef}
-            className="rounded-2xl overflow-hidden border border-slate-200 shadow-sm"
-            style={{ height: "550px", width: "100%", zIndex: 0 }}
-          />
-        </div>
+      {/* Compact metrics strip — single inline row replaces the three
+          icon cards. Only shows when a route is planned. */}
+      {route && (
+        <p className="text-xs sm:text-sm text-slate-600 px-1">
+          <span className="font-semibold text-slate-900">{route.distanceKm} km</span>
+          <span className="text-slate-300"> · </span>
+          <span className="font-semibold text-slate-900">{formatDuration(route.durationMins)}</span>
+          <span className="text-slate-300"> · </span>
+          <span className="font-semibold text-slate-900">{nearbyLocations.length} stops</span>
+        </p>
+      )}
 
+      {/* Map — primary surface. Inline ~55vh on mobile so users see
+          the route at a glance + scroll the list below. The expand
+          button overlays in the top-right; tap to enter fullscreen
+          (position:fixed inset-0). Body scroll is locked while
+          expanded so the page underneath doesn't scroll. */}
+      <div
+        className={
+          mapExpanded
+            ? "fixed inset-0 z-50 bg-white p-2"
+            : "relative"
+        }
+      >
+        <div
+          ref={mapRef}
+          className="rounded-2xl overflow-hidden border border-slate-200 shadow-sm w-full"
+          style={{
+            height: mapExpanded ? "calc(100vh - 16px)" : "55vh",
+            minHeight: mapExpanded ? undefined : "320px",
+            maxHeight: mapExpanded ? undefined : "640px",
+            zIndex: 0,
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => setMapExpanded((v) => !v)}
+          className="absolute top-3 right-3 z-[401] h-10 w-10 rounded-xl bg-white shadow-md border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
+          aria-label={mapExpanded ? "Collapse map" : "Expand map"}
+        >
+          {mapExpanded ? <Minimize2 className="h-4 w-4 text-slate-700" /> : <Maximize2 className="h-4 w-4 text-slate-700" />}
+        </button>
+      </div>
+
+      {/* List of locations. Hidden while map is fullscreen — the
+          fullscreen overlay covers the entire viewport, so the list
+          would render behind it and waste DOM. */}
+      {!mapExpanded && (
         <div className="space-y-3">
-          <h2 className="text-lg font-bold text-slate-900 font-display">
-            {route
-              ? `Wash Locations Along Route (${nearbyLocations.length})`
-              : displayLocations.length > 0
-                ? `Nearby Wash Locations (${displayLocations.length})`
-                : "Wash Locations"}
-          </h2>
+          {!route && (
+            <p className="text-xs text-slate-500 px-1">
+              Enter a destination to see locations along your route.
+            </p>
+          )}
 
           {!route && !isRouting && displayLocations.length === 0 && !origin && (
-            <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-300">
+            <Card className="text-center py-12 border-dashed">
               <Route className="h-10 w-10 text-slate-300 mx-auto mb-3" />
               <p className="text-slate-500 text-sm">
                 Allow location access to see nearby wash locations, or enter a starting city above.
               </p>
-            </div>
+            </Card>
           )}
 
           {!route && !isRouting && origin && displayLocations.length === 0 && (
-            <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-300">
+            <Card className="text-center py-12 border-dashed">
               <MapPin className="h-10 w-10 text-slate-300 mx-auto mb-3" />
               <p className="text-slate-500 text-sm">
                 No wash locations found within {NEARBY_RADIUS_KM} km. Enter a destination to plan a route.
               </p>
-            </div>
+            </Card>
           )}
 
           {isRouting && (
-            <div className="text-center py-12 bg-white rounded-2xl border border-slate-200">
+            <Card className="text-center py-12">
               <Loader2 className="h-8 w-8 text-blue-500 animate-spin mx-auto mb-3" />
               <p className="text-slate-500 text-sm">Calculating route...</p>
-            </div>
+            </Card>
           )}
 
           {route && nearbyLocations.length === 0 && !isRouting && (
-            <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-300">
+            <Card className="text-center py-12 border-dashed">
               <MapPin className="h-10 w-10 text-slate-300 mx-auto mb-3" />
               <p className="text-slate-500 text-sm">No wash locations found within {ROUTE_CORRIDOR_KM} km of this route.</p>
-            </div>
+            </Card>
           )}
 
           {displayLocations.length > 0 && !isRouting && (
-            <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
               {displayLocations.map((loc, idx) => {
                 const incompatible = (loc as any).fitsActiveVehicle === false;
+                const minPrice = minPriceFor(loc);
+                const reviewCount: number = (loc as any).reviewCount ?? 0;
+                const averageRating: number | null = (loc as any).averageRating ?? null;
+                const isOpen = !!(loc as any).isOpenNow;
+                // Route-aware metadata: distance from route + ETA from
+                // origin when available; falls back to distance from
+                // current location otherwise. "Min detour" is NOT
+                // computed server-side (see surfaced flag) so we use
+                // the existing data; the wording "X km from route"
+                // makes the difference clear.
+                const distLine = route
+                  ? `${Math.round((loc as any).distanceToRoute)} km from route`
+                  : `${Math.round((loc as any).distFromOrigin)} km`;
+                const etaMins = etas[loc.id];
+                const isActivePin = activePinId === loc.id;
+
                 const card = (
-                  <div
-                    className={`rounded-xl border p-4 transition-all ${
+                  <Card
+                    className={`flex flex-col border-2 ${
                       incompatible
                         ? "bg-slate-50 border-slate-200 cursor-default"
-                        : "bg-white border-slate-200 hover:border-blue-300 hover:shadow-sm cursor-pointer"
+                        : isActivePin
+                          ? "border-amber-400 bg-amber-50/40 cursor-pointer"
+                          : "group cursor-pointer hover:border-primary/30 hover:shadow-sm transition-all"
                     }`}
                     title={incompatible ? "Change your active vehicle to book at this location" : undefined}
                   >
-                    <div className="flex items-start justify-between mb-1">
-                      <h3 className={`font-semibold text-sm leading-tight ${incompatible ? "text-slate-500" : "text-slate-900"}`}>{loc.name}</h3>
-                      <div className="flex items-center gap-1.5 ml-2 shrink-0">
-                        {etas[loc.id] != null && (
-                          <Badge className="bg-purple-50 text-purple-700 border-purple-200 text-xs">
-                            {formatETA(etas[loc.id])} away
-                          </Badge>
-                        )}
-                        <Badge className="bg-blue-50 text-blue-700 border-blue-200 text-xs">
-                          {route ? `${Math.round(loc.distanceToRoute)} km` : `${Math.round(loc.distFromOrigin)} km`}
-                        </Badge>
+                    <div className="p-4 sm:p-5 space-y-1.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className={`text-base sm:text-lg font-bold leading-tight truncate ${incompatible ? "text-slate-500" : "text-slate-900"}`}>{loc.name}</h3>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {/* Pin button: pans the map to this location
+                              without navigating. Stops propagation so
+                              the card-level Link doesn't also fire. */}
+                          {!incompatible && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleShowOnMap(loc); }}
+                              className={`p-1.5 rounded-lg transition-colors ${isActivePin ? "bg-amber-100 text-amber-700" : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"}`}
+                              aria-label="Show on map"
+                              title="Show on map"
+                            >
+                              <Pin className="h-4 w-4" />
+                            </button>
+                          )}
+                          {!incompatible && (
+                            <ArrowRight className="h-4 w-4 text-slate-300 group-hover:text-primary transition-colors mt-0.5" />
+                          )}
+                        </div>
                       </div>
+
+                      {incompatible ? (
+                        <div className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 text-amber-800 border border-amber-300 text-xs font-medium">
+                          No bay fits your active vehicle
+                        </div>
+                      ) : (
+                        <>
+                          {/* Rating · distance · status — same line
+                              shape as Find a Wash. flex-wrap so a long
+                              translated string breaks cleanly at
+                              narrow widths. */}
+                          <p className="text-sm text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
+                            {reviewCount > 0 ? (
+                              <span className="inline-flex items-center gap-1 shrink-0">
+                                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                                <span className="font-semibold text-slate-700">{averageRating != null ? averageRating.toFixed(1) : "—"}</span>
+                                <span className="text-slate-400">({reviewCount})</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 shrink-0 text-slate-400">
+                                <Star className="h-3.5 w-3.5 text-slate-300" />
+                                No reviews yet
+                              </span>
+                            )}
+                            <span className="text-slate-300">·</span>
+                            <span className="shrink-0">{distLine}</span>
+                            {etaMins != null && (
+                              <>
+                                <span className="text-slate-300">·</span>
+                                <span className="shrink-0">{formatETA(etaMins)} away</span>
+                              </>
+                            )}
+                            <span className="text-slate-300">·</span>
+                            {isOpen ? (
+                              <span className="inline-flex items-center gap-1 text-emerald-600 font-medium shrink-0">
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Open Now
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 font-medium shrink-0">Closed</span>
+                            )}
+                          </p>
+
+                          <p className="text-sm text-slate-500 flex items-center gap-1.5 min-w-0">
+                            <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                            <span className="truncate">{loc.addressLine1 ? `${loc.addressLine1}, ` : ""}{loc.city}, {(loc as any).stateCode || (loc as any).regionCode}{loc.postalCode ? ` ${loc.postalCode}` : ""}</span>
+                          </p>
+
+                          {minPrice != null && (
+                            <p className="text-sm font-semibold text-slate-700">From {formatCurrency(minPrice)}</p>
+                          )}
+                        </>
+                      )}
                     </div>
-                    <p className={`text-xs mb-2 ${incompatible ? "text-slate-400" : "text-slate-500"}`}>
-                      {loc.city}, {(loc as any).stateCode || (loc as any).regionCode}
-                    </p>
-                    {incompatible && (
-                      <div className="mb-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-300 text-[11px] font-medium">
-                        No bay fits your active vehicle
-                      </div>
-                    )}
-                    {loc.services && loc.services.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {loc.services.slice(0, 2).map((svc) => (
-                          <span
-                            key={svc.id}
-                            className={`text-xs px-2 py-0.5 rounded-md ${incompatible ? "bg-slate-100 text-slate-400" : "bg-slate-50 text-slate-600"}`}
-                          >
-                            {svc.name} · {formatCurrency((svc as any).allInPriceMinor ?? svc.basePriceMinor)}
-                          </span>
-                        ))}
-                        {loc.services.length > 2 && (
-                          <span className={`text-xs font-medium px-1 ${incompatible ? "text-slate-400" : "text-blue-600"}`}>
-                            +{loc.services.length - 2} more
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  </Card>
                 );
+
                 return (
                   <motion.div
                     key={loc.id}
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: idx * 0.03 }}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: idx * 0.02 }}
                   >
                     {incompatible ? (
                       <div className="block">{card}</div>
@@ -1195,7 +1384,7 @@ export default function RoutePlanner() {
             </div>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
