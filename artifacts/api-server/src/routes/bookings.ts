@@ -1019,9 +1019,25 @@ router.post("/bookings/:bookingId/cancel", requireAuth, async (req, res) => {
 
       if (!b) throw new Error("NOT_CANCELLABLE");
 
+      // Persist the optional provider note alongside reason + status.
+      // The note column was added in 2g-1.5 — prior to that the note
+      // was parsed from the request body and dropped on the floor, so
+      // any existing /cancel callers that omit `note` continue to work
+      // (note stays null, no DB error). Empty / whitespace-only notes
+      // are coerced to null so a stale empty submission doesn't leave
+      // a vacant "Message from provider:" block on the customer view.
+      const cleanNote = (typeof note === "string" && note.trim().length > 0) ? note.trim().slice(0, 500) : null;
       const result = await tx.booking.update({
         where: { id: booking.id },
-        data: { status: newStatus, cancellationReasonCode: cleanReasonCode },
+        data: {
+          status: newStatus,
+          cancellationReasonCode: cleanReasonCode,
+          cancellationNote: cleanNote,
+          // visibility flag isn't writable from the client yet — the
+          // dialog's note is customer-visible by default per 2g-1.5
+          // product decision. Leave default (true) so the customer
+          // sees the note unless a future toggle says otherwise.
+        },
       });
 
       // bookingStatusHistory.changedBy carries the actor user id — this

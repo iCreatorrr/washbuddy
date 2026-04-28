@@ -764,6 +764,18 @@ model Booking {
 
   declineReasonCode      String?   @map("decline_reason_code")
   cancellationReasonCode String?   @map("cancellation_reason_code")
+  // Free-text cancellation note (written by the provider in the cancel
+  // dialog). Customer-visible by default — see
+  // cancellationNoteVisibleToCustomer below for the toggle.
+  cancellationNote                  String?  @map("cancellation_note")
+  // Default true: provider-cancellation notes are surfaced on the
+  // customer's booking-detail page and My Bookings card unless the
+  // provider explicitly hides them. The default reflects the product
+  // decision in 2g-1.5 — providers writing a note want the customer
+  // to read it ("Sorry, machine is down — book Wednesday?"). A future
+  // toggle in the dialog can flip this per-booking; for now, all
+  // notes default to visible.
+  cancellationNoteVisibleToCustomer Boolean  @default(true) @map("cancellation_note_visible_to_customer")
   reminderSentAt         DateTime? @map("reminder_sent_at") @db.Timestamptz
 
   // V2 fields
