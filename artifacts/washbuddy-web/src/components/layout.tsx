@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "./ui";
 import { LogOut, Menu, User, MapPin, Calendar, Truck, LayoutDashboard, Settings, Users, Droplets, Route, Star, Shield, ClipboardList, RotateCcw, Building2, BarChart3, X, ArrowLeft } from "lucide-react";
 import { NotificationBell } from "./notification-bell";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, logout, hasRole } = useAuth();
@@ -171,43 +171,50 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        {/* Mobile Menu Dropdown — backdrop dismisses on tap */}
-        <AnimatePresence>
-          {isMobileMenuOpen && (
-            <>
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="lg:hidden fixed inset-0 top-[73px] bg-black/40 z-10"
-                aria-hidden
-              />
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="lg:hidden bg-slate-900 text-white overflow-hidden border-b border-slate-800 sticky top-[73px] z-20"
-              >
-                <nav className="p-4 space-y-2">
-                  {navItems.map((item) => (
-                    <Link key={item.href} href={item.href} className="block" onClick={() => setIsMobileMenuOpen(false)}>
-                      <div className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-slate-800 text-slate-300">
-                        <item.icon className="h-5 w-5" />
-                        {item.label}
-                      </div>
-                    </Link>
-                  ))}
-                  <div className="pt-4 mt-4 border-t border-slate-800">
-                    <Button variant="ghost" className="w-full text-slate-300 hover:bg-slate-800 hover:text-white" onClick={logout}>
-                      <LogOut className="h-4 w-4 mr-2" /> Sign Out
-                    </Button>
-                  </div>
-                </nav>
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
+        {/* Mobile Menu Dropdown — backdrop dismisses on tap. No
+            AnimatePresence and no exit animation: a 300ms height/
+            opacity exit caused a visible desync where the icon (which
+            reads isMobileMenuOpen synchronously) had already flipped
+            back to the three-lines glyph while the menu was still
+            rendering its exit. Users would tap the icon thinking it
+            would close the visible menu, but state was already false,
+            so the tap re-opened it. Instant render — when state is
+            true the menu is visible; when false it isn't. The slide-in
+            animation on entry is preserved via initial/animate. */}
+        {isMobileMenuOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.15 }}
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="lg:hidden fixed inset-0 top-[73px] bg-black/40 z-10"
+              aria-hidden
+            />
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              transition={{ duration: 0.15 }}
+              className="lg:hidden bg-slate-900 text-white overflow-hidden border-b border-slate-800 sticky top-[73px] z-20"
+            >
+              <nav className="p-4 space-y-2">
+                {navItems.map((item) => (
+                  <Link key={item.href} href={item.href} className="block" onClick={() => setIsMobileMenuOpen(false)}>
+                    <div className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-slate-800 text-slate-300">
+                      <item.icon className="h-5 w-5" />
+                      {item.label}
+                    </div>
+                  </Link>
+                ))}
+                <div className="pt-4 mt-4 border-t border-slate-800">
+                  <Button variant="ghost" className="w-full text-slate-300 hover:bg-slate-800 hover:text-white" onClick={logout}>
+                    <LogOut className="h-4 w-4 mr-2" /> Sign Out
+                  </Button>
+                </div>
+              </nav>
+            </motion.div>
+          </>
+        )}
 
         <div className="flex-1 p-4 md:p-8 w-full max-w-7xl mx-auto">
           {children}
