@@ -356,6 +356,19 @@ function BookingRow({
                 if (!label) return null;
                 return <p className="text-xs text-slate-500">Reason: <span className="font-medium text-slate-700">{label}</span></p>;
               })()}
+              {/* Provider's optional message — single truncated line on
+                  the card; the user taps through to booking-detail to
+                  read the full message wrapped. Hidden when the note
+                  is absent or the visibility flag was explicitly set
+                  to false (default true per 2g-1.5). */}
+              {booking.status === "PROVIDER_CANCELLED"
+                && (booking as any).cancellationNoteVisibleToCustomer !== false
+                && typeof (booking as any).cancellationNote === "string"
+                && (booking as any).cancellationNote.trim().length > 0 && (
+                <p className="text-xs text-slate-500 truncate italic">
+                  “{(booking as any).cancellationNote}”
+                </p>
+              )}
             </div>
           )}
           <h3 className="text-xl font-bold text-slate-900 group-hover:text-primary transition-colors">
