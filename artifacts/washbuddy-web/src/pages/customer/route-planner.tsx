@@ -1240,6 +1240,17 @@ export default function RoutePlanner() {
                             setOrigin(myLoc);
                             setGeoStatus("granted");
                             setRoute(null);
+                            // Symmetric with From's autocomplete onChange
+                            // (2g-2.1 commit 944fb08): when the user
+                            // commits a new origin via the geolocation
+                            // crosshair AND a destination is already set,
+                            // recompute the route immediately. setTimeout(0)
+                            // lets React commit the setOrigin batch first
+                            // so planRouteRef.current reads the freshest
+                            // closure.
+                            if (destination) {
+                              setTimeout(() => planRouteRef.current?.(myLoc, destination), 0);
+                            }
                           },
                           () => {
                             setGeoStatus("denied");
