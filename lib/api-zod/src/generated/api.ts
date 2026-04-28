@@ -1349,6 +1349,13 @@ export const GetLocationReviewsResponse = zod.object({
       providerReplyAt: zod.string().nullish(),
       helpfulCount: zod.number().optional(),
       unhelpfulCount: zod.number().optional(),
+      currentUserVote: zod
+        .union([
+          zod.literal("HELPFUL"),
+          zod.literal("UNHELPFUL"),
+          zod.literal(null),
+        ])
+        .nullish(),
       createdAt: zod.string(),
     }),
   ),
@@ -1437,19 +1444,45 @@ export const EditReviewResponse = zod.object({
 });
 
 /**
- * @summary Vote a review as helpful or unhelpful
+ * @summary Vote a review as helpful or unhelpful (toggles off when same vote re-sent)
  */
 export const VoteOnReviewParams = zod.object({
   reviewId: zod.coerce.string(),
 });
 
 export const VoteOnReviewBody = zod.object({
-  isHelpful: zod.boolean(),
+  vote: zod.enum(["HELPFUL", "UNHELPFUL"]),
 });
 
 export const VoteOnReviewResponse = zod.object({
-  id: zod.string(),
-  isHelpful: zod.boolean(),
+  helpfulCount: zod.number(),
+  unhelpfulCount: zod.number(),
+  currentUserVote: zod
+    .union([
+      zod.literal("HELPFUL"),
+      zod.literal("UNHELPFUL"),
+      zod.literal(null),
+    ])
+    .nullish(),
+});
+
+/**
+ * @summary Clear the current user's vote on a review (idempotent)
+ */
+export const ClearReviewVoteParams = zod.object({
+  reviewId: zod.coerce.string(),
+});
+
+export const ClearReviewVoteResponse = zod.object({
+  helpfulCount: zod.number(),
+  unhelpfulCount: zod.number(),
+  currentUserVote: zod
+    .union([
+      zod.literal("HELPFUL"),
+      zod.literal("UNHELPFUL"),
+      zod.literal(null),
+    ])
+    .nullish(),
 });
 
 /**

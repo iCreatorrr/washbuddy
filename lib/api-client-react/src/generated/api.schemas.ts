@@ -467,6 +467,18 @@ export interface ReviewAggregate {
   responseRate: number;
 }
 
+/**
+ * @nullable
+ */
+export type LocationReviewItemCurrentUserVote =
+  | (typeof LocationReviewItemCurrentUserVote)[keyof typeof LocationReviewItemCurrentUserVote]
+  | null;
+
+export const LocationReviewItemCurrentUserVote = {
+  HELPFUL: "HELPFUL",
+  UNHELPFUL: "UNHELPFUL",
+} as const;
+
 export interface LocationReviewItem {
   id: string;
   bookingId: string;
@@ -482,7 +494,28 @@ export interface LocationReviewItem {
   providerReplyAt?: string | null;
   helpfulCount?: number;
   unhelpfulCount?: number;
+  /** @nullable */
+  currentUserVote?: LocationReviewItemCurrentUserVote;
   createdAt: string;
+}
+
+/**
+ * @nullable
+ */
+export type ReviewVoteResponseCurrentUserVote =
+  | (typeof ReviewVoteResponseCurrentUserVote)[keyof typeof ReviewVoteResponseCurrentUserVote]
+  | null;
+
+export const ReviewVoteResponseCurrentUserVote = {
+  HELPFUL: "HELPFUL",
+  UNHELPFUL: "UNHELPFUL",
+} as const;
+
+export interface ReviewVoteResponse {
+  helpfulCount: number;
+  unhelpfulCount: number;
+  /** @nullable */
+  currentUserVote?: ReviewVoteResponseCurrentUserVote;
 }
 
 export interface LocationReviewsResponse {
@@ -871,13 +904,16 @@ export type EditReviewBody = {
   comment?: string;
 };
 
-export type VoteOnReviewBody = {
-  isHelpful: boolean;
-};
+export type VoteOnReviewBodyVote =
+  (typeof VoteOnReviewBodyVote)[keyof typeof VoteOnReviewBodyVote];
 
-export type VoteOnReview200 = {
-  id: string;
-  isHelpful: boolean;
+export const VoteOnReviewBodyVote = {
+  HELPFUL: "HELPFUL",
+  UNHELPFUL: "UNHELPFUL",
+} as const;
+
+export type VoteOnReviewBody = {
+  vote: VoteOnReviewBodyVote;
 };
 
 export type HideReviewBody = {

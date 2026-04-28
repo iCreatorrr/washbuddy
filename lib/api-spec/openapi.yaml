@@ -929,7 +929,7 @@ paths:
     post:
       operationId: voteOnReview
       tags: [reviews]
-      summary: Vote a review as helpful or unhelpful
+      summary: Vote a review as helpful or unhelpful (toggles off when same vote re-sent)
       parameters:
         - $ref: "#/components/parameters/ReviewId"
       requestBody:
@@ -939,22 +939,30 @@ paths:
             schema:
               type: object
               properties:
-                isHelpful:
-                  type: boolean
-              required: [isHelpful]
+                vote:
+                  type: string
+                  enum: [HELPFUL, UNHELPFUL]
+              required: [vote]
       responses:
         "200":
-          description: Vote recorded
+          description: Vote applied; returns updated counts and current user's vote
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  id:
-                    type: string
-                  isHelpful:
-                    type: boolean
-                required: [id, isHelpful]
+                $ref: "#/components/schemas/ReviewVoteResponse"
+    delete:
+      operationId: clearReviewVote
+      tags: [reviews]
+      summary: Clear the current user's vote on a review (idempotent)
+      parameters:
+        - $ref: "#/components/parameters/ReviewId"
+      responses:
+        "200":
+          description: Vote cleared; returns updated counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewVoteResponse"
 
   /reviews/{reviewId}/hide:
     post:
@@ -1868,9 +1876,24 @@ components:
           type: integer
         unhelpfulCount:
           type: integer
+        currentUserVote:
+          type: ["string", "null"]
+          enum: [HELPFUL, UNHELPFUL, null]
         createdAt:
           type: string
       required: [id, bookingId, authorId, authorName, rating, createdAt]
+
+    ReviewVoteResponse:
+      type: object
+      properties:
+        helpfulCount:
+          type: integer
+        unhelpfulCount:
+          type: integer
+        currentUserVote:
+          type: ["string", "null"]
+          enum: [HELPFUL, UNHELPFUL, null]
+      required: [helpfulCount, unhelpfulCount]
 
     LocationReviewsResponse:
       type: object

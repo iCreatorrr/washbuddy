@@ -5,6 +5,7 @@
  * WashBuddy API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { LocationReviewItemCurrentUserVote } from "./locationReviewItemCurrentUserVote";
 
 export interface LocationReviewItem {
   id: string;
@@ -21,5 +22,7 @@ export interface LocationReviewItem {
   providerReplyAt?: string | null;
   helpfulCount?: number;
   unhelpfulCount?: number;
+  /** @nullable */
+  currentUserVote?: LocationReviewItemCurrentUserVote;
   createdAt: string;
 }

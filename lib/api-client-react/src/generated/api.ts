@@ -69,6 +69,7 @@ import type {
   ReplyToReviewBody,
   Review,
   ReviewAggregate,
+  ReviewVoteResponse,
   SearchLocations200,
   SearchLocationsParams,
   SetOperatingHours200,
@@ -82,7 +83,6 @@ import type {
   UpdateServiceInput,
   UpdateVehicle200,
   UpdateVehicleInput,
-  VoteOnReview200,
   VoteOnReviewBody,
 } from "./api.schemas";
 
@@ -3705,7 +3705,7 @@ export const useEditReview = <
 };
 
 /**
- * @summary Vote a review as helpful or unhelpful
+ * @summary Vote a review as helpful or unhelpful (toggles off when same vote re-sent)
  */
 export const getVoteOnReviewUrl = (reviewId: string) => {
   return `/api/reviews/${reviewId}/vote`;
@@ -3715,8 +3715,8 @@ export const voteOnReview = async (
   reviewId: string,
   voteOnReviewBody: VoteOnReviewBody,
   options?: RequestInit,
-): Promise<VoteOnReview200> => {
-  return customFetch<VoteOnReview200>(getVoteOnReviewUrl(reviewId), {
+): Promise<ReviewVoteResponse> => {
+  return customFetch<ReviewVoteResponse>(getVoteOnReviewUrl(reviewId), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },
@@ -3769,7 +3769,7 @@ export type VoteOnReviewMutationBody = BodyType<VoteOnReviewBody>;
 export type VoteOnReviewMutationError = ErrorType<unknown>;
 
 /**
- * @summary Vote a review as helpful or unhelpful
+ * @summary Vote a review as helpful or unhelpful (toggles off when same vote re-sent)
  */
 export const useVoteOnReview = <
   TError = ErrorType<unknown>,
@@ -3789,6 +3789,90 @@ export const useVoteOnReview = <
   TContext
 > => {
   return useMutation(getVoteOnReviewMutationOptions(options));
+};
+
+/**
+ * @summary Clear the current user's vote on a review (idempotent)
+ */
+export const getClearReviewVoteUrl = (reviewId: string) => {
+  return `/api/reviews/${reviewId}/vote`;
+};
+
+export const clearReviewVote = async (
+  reviewId: string,
+  options?: RequestInit,
+): Promise<ReviewVoteResponse> => {
+  return customFetch<ReviewVoteResponse>(getClearReviewVoteUrl(reviewId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getClearReviewVoteMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof clearReviewVote>>,
+    TError,
+    { reviewId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof clearReviewVote>>,
+  TError,
+  { reviewId: string },
+  TContext
+> => {
+  const mutationKey = ["clearReviewVote"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof clearReviewVote>>,
+    { reviewId: string }
+  > = (props) => {
+    const { reviewId } = props ?? {};
+
+    return clearReviewVote(reviewId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ClearReviewVoteMutationResult = NonNullable<
+  Awaited<ReturnType<typeof clearReviewVote>>
+>;
+
+export type ClearReviewVoteMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Clear the current user's vote on a review (idempotent)
+ */
+export const useClearReviewVote = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof clearReviewVote>>,
+    TError,
+    { reviewId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof clearReviewVote>>,
+  TError,
+  { reviewId: string },
+  TContext
+> => {
+  return useMutation(getClearReviewVoteMutationOptions(options));
 };
 
 /**

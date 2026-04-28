@@ -5,7 +5,8 @@
  * WashBuddy API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { VoteOnReviewBodyVote } from "./voteOnReviewBodyVote";
 
 export type VoteOnReviewBody = {
-  isHelpful: boolean;
+  vote: VoteOnReviewBodyVote;
 };

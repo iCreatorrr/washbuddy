@@ -109,6 +109,11 @@ router.get("/locations/:locationId/reviews", async (req, res) => {
     const { locationId } = req.params;
     const cursor = req.query.cursor as string | undefined;
     const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+    // Anonymous requests get currentUserVote: null without joining the
+    // votes-by-user table — no need to do a userId-bounded include
+    // when there's no user. Logged-in requests pull only the viewer's
+    // own vote (never the full voter list — voter identity is private).
+    const viewerId = req.user?.id ?? null;
 
     const where: any = { locationId, isHidden: false };
     if (cursor) {
@@ -122,7 +127,7 @@ router.get("/locations/:locationId/reviews", async (req, res) => {
         take: limit + 1,
         include: {
           author: { select: { id: true, firstName: true, lastName: true } },
-          votes: { select: { isHelpful: true } },
+          votes: { select: { vote: true, userId: true } },
         },
       }),
       prisma.review.count({ where: { locationId, isHidden: false } }),
@@ -151,20 +156,28 @@ router.get("/locations/:locationId/reviews", async (req, res) => {
       where: { locationId, isHidden: false, providerReply: { not: null } },
     });
 
-    const formattedReviews = items.map((r) => ({
-      id: r.id,
-      bookingId: r.bookingId,
-      authorId: r.authorId,
-      authorName: `${r.author.firstName} ${r.author.lastName}`,
-      rating: r.rating,
-      comment: r.comment,
-      isEdited: r.isEdited,
-      providerReply: r.providerReply,
-      providerReplyAt: r.providerReplyAt,
-      helpfulCount: r.votes.filter((v) => v.isHelpful).length,
-      unhelpfulCount: r.votes.filter((v) => !v.isHelpful).length,
-      createdAt: r.createdAt,
-    }));
+    const formattedReviews = items.map((r: typeof items[number]) => {
+      const helpfulCount = r.votes.filter((v: { vote: string }) => v.vote === "HELPFUL").length;
+      const unhelpfulCount = r.votes.filter((v: { vote: string }) => v.vote === "UNHELPFUL").length;
+      const myVote = viewerId
+        ? r.votes.find((v: { userId: string }) => v.userId === viewerId)
+        : null;
+      return {
+        id: r.id,
+        bookingId: r.bookingId,
+        authorId: r.authorId,
+        authorName: `${r.author.firstName} ${r.author.lastName}`,
+        rating: r.rating,
+        comment: r.comment,
+        isEdited: r.isEdited,
+        providerReply: r.providerReply,
+        providerReplyAt: r.providerReplyAt,
+        helpfulCount,
+        unhelpfulCount,
+        currentUserVote: myVote?.vote ?? null,
+        createdAt: r.createdAt,
+      };
+    });
 
     res.json({
       reviews: formattedReviews,
@@ -335,38 +348,86 @@ router.patch("/reviews/:reviewId", requireAuth, async (req, res) => {
   }
 });
 
+// Read counts + this user's vote from a single grouped query, used as
+// the response shape for both POST /vote and DELETE /vote so the client
+// can update its UI from a single source of truth.
+async function getVoteStateForReview(
+  reviewId: string,
+  viewerId: string | null,
+): Promise<{ helpfulCount: number; unhelpfulCount: number; currentUserVote: "HELPFUL" | "UNHELPFUL" | null }> {
+  const grouped = await prisma.reviewVote.groupBy({
+    by: ["vote"],
+    where: { reviewId },
+    _count: { _all: true },
+  });
+  let helpfulCount = 0;
+  let unhelpfulCount = 0;
+  for (const g of grouped) {
+    if (g.vote === "HELPFUL") helpfulCount = g._count._all;
+    else if (g.vote === "UNHELPFUL") unhelpfulCount = g._count._all;
+  }
+  let currentUserVote: "HELPFUL" | "UNHELPFUL" | null = null;
+  if (viewerId) {
+    const mine = await prisma.reviewVote.findUnique({
+      where: { reviewId_userId: { reviewId, userId: viewerId } },
+      select: { vote: true },
+    });
+    currentUserVote = mine?.vote ?? null;
+  }
+  return { helpfulCount, unhelpfulCount, currentUserVote };
+}
+
 router.post("/reviews/:reviewId/vote", requireAuth, async (req, res) => {
   try {
     const user = req.user as SessionUser;
-    const { reviewId } = req.params;
-    const { isHelpful } = req.body;
+    const reviewId = String(req.params.reviewId);
+    const { vote } = req.body;
 
-    if (typeof isHelpful !== "boolean") {
-      res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "isHelpful (boolean) is required" });
+    if (vote !== "HELPFUL" && vote !== "UNHELPFUL") {
+      res.status(400).json({ errorCode: "VALIDATION_ERROR", message: "vote must be 'HELPFUL' or 'UNHELPFUL'" });
       return;
     }
 
-    const review = await prisma.review.findUnique({ where: { id: reviewId } });
+    const review = await prisma.review.findUnique({ where: { id: reviewId }, select: { id: true } });
     if (!review) {
       res.status(404).json({ errorCode: "NOT_FOUND", message: "Review not found" });
       return;
     }
 
-    if (review.authorId === user.id) {
-      res.status(400).json({ errorCode: "SELF_VOTE", message: "You cannot vote on your own review" });
-      return;
+    // Toggle semantics: same vote re-sent removes the vote (so a user
+    // can un-vote without two taps); a different vote flips it. New
+    // vote inserts. Self-voting is allowed — voter identity is stored
+    // for fraud detection but never surfaced.
+    const existing = await prisma.reviewVote.findUnique({
+      where: { reviewId_userId: { reviewId, userId: user.id } },
+      select: { id: true, vote: true },
+    });
+    if (!existing) {
+      await prisma.reviewVote.create({ data: { reviewId, userId: user.id, vote } });
+    } else if (existing.vote === vote) {
+      await prisma.reviewVote.delete({ where: { id: existing.id } });
+    } else {
+      await prisma.reviewVote.update({ where: { id: existing.id }, data: { vote } });
     }
 
-    const vote = await prisma.reviewVote.upsert({
-      where: { reviewId_userId: { reviewId, userId: user.id } },
-      create: { reviewId, userId: user.id, isHelpful },
-      update: { isHelpful },
-    });
-
-    res.json({ id: vote.id, isHelpful: vote.isHelpful });
+    res.json(await getVoteStateForReview(reviewId, user.id));
   } catch (err: any) {
     req.log.error({ err }, "Failed to vote on review");
     res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to vote on review" });
+  }
+});
+
+router.delete("/reviews/:reviewId/vote", requireAuth, async (req, res) => {
+  try {
+    const user = req.user as SessionUser;
+    const reviewId = String(req.params.reviewId);
+
+    // Idempotent: deleteMany returns count 0 if no vote exists, no error.
+    await prisma.reviewVote.deleteMany({ where: { reviewId, userId: user.id } });
+    res.json(await getVoteStateForReview(reviewId, user.id));
+  } catch (err: any) {
+    req.log.error({ err }, "Failed to clear review vote");
+    res.status(500).json({ errorCode: "INTERNAL_ERROR", message: "Failed to clear review vote" });
   }
 });
 
@@ -452,7 +513,7 @@ router.get("/reviews/provider", requireAuth, async (req, res) => {
         author: { select: { id: true, firstName: true, lastName: true } },
         location: { select: { id: true, name: true } },
         booking: { select: { id: true, serviceNameSnapshot: true, scheduledStartAtUtc: true } },
-        votes: { select: { isHelpful: true } },
+        votes: { select: { vote: true } },
       },
     });
 
@@ -471,7 +532,7 @@ router.get("/reviews/provider", requireAuth, async (req, res) => {
       isEdited: r.isEdited,
       providerReply: r.providerReply,
       providerReplyAt: r.providerReplyAt,
-      helpfulCount: r.votes.filter((v) => v.isHelpful).length,
+      helpfulCount: r.votes.filter((v) => v.vote === "HELPFUL").length,
       createdAt: r.createdAt,
     }));
 
