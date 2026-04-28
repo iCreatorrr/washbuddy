@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   useGetLocationReviews,
   useGetReviewAggregate,
@@ -18,6 +18,20 @@ import { Star, ThumbsUp, ThumbsDown, MessageSquare } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/contexts/auth";
 
+type SortOption = "RECENT" | "HELPFUL" | "HIGHEST" | "LOWEST";
+
+const SORT_LABELS: Record<SortOption, string> = {
+  RECENT: "Most recent",
+  HELPFUL: "Most helpful",
+  HIGHEST: "Highest rated",
+  LOWEST: "Lowest rated",
+};
+
+// Show sort only once the user can't easily scan the whole list. Below
+// the threshold the dropdown is just chrome — at 5+ reviews it earns
+// its keep.
+const SORT_DROPDOWN_MIN_REVIEWS = 5;
+
 interface LocationReviewsProps {
   locationId: string;
 }
@@ -26,6 +40,11 @@ export function LocationReviews({ locationId }: LocationReviewsProps) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [, setNav] = useLocation();
+  // Session-scoped sort state — resets when the modal closes since the
+  // component unmounts with the Sheet. Default is "RECENT" to match
+  // the server's natural ordering, which avoids any client-side
+  // resort flash on first paint.
+  const [sortBy, setSortBy] = useState<SortOption>("RECENT");
 
   const { data: aggData } = useGetReviewAggregate(locationId, {
     query: { enabled: !!locationId },
@@ -141,6 +160,28 @@ export function LocationReviews({ locationId }: LocationReviewsProps) {
   const reviews = reviewsData?.reviews || [];
   const total = reviewsData?.total || 0;
 
+  // Client-side resort. The list is paginated to ≤20 items per page,
+  // and only the visible page is reordered — same data flow as the
+  // existing component (no extra fetch). Stable secondary sort on
+  // createdAt keeps the order deterministic when the primary key
+  // ties (e.g. two reviews both at 0 helpful votes).
+  const sortedReviews = useMemo(() => {
+    if (sortBy === "RECENT") return reviews;
+    const copy = [...reviews];
+    const byCreatedDesc = (a: LocationReviewItem, b: LocationReviewItem) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    if (sortBy === "HELPFUL") {
+      copy.sort((a, b) => (b.helpfulCount ?? 0) - (a.helpfulCount ?? 0) || byCreatedDesc(a, b));
+    } else if (sortBy === "HIGHEST") {
+      copy.sort((a, b) => b.rating - a.rating || byCreatedDesc(a, b));
+    } else if (sortBy === "LOWEST") {
+      copy.sort((a, b) => a.rating - b.rating || byCreatedDesc(a, b));
+    }
+    return copy;
+  }, [reviews, sortBy]);
+
+  const showSort = total >= SORT_DROPDOWN_MIN_REVIEWS;
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -178,7 +219,36 @@ export function LocationReviews({ locationId }: LocationReviewsProps) {
         </Card>
       ) : (
         <div className="space-y-4">
-          {reviews.map((r: LocationReviewItem) => (
+          {showSort && (
+            <div
+              className="flex items-center justify-between gap-3 px-1"
+              // Stop bubbling so the change/click on the dropdown
+              // never reaches a parent backdrop listener that might
+              // close the Sheet. Sheet itself respects pointer events
+              // inside content, but defending against future
+              // wrappers is cheap.
+              onClick={(e) => e.stopPropagation()}
+            >
+              <label htmlFor="reviews-sort" className="text-xs font-medium text-slate-500">
+                Sort by
+              </label>
+              <select
+                id="reviews-sort"
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortOption)}
+                onClick={(e) => e.stopPropagation()}
+                className="min-h-9 rounded-lg border border-slate-200 bg-white px-3 pr-8 text-sm text-slate-700 shadow-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                data-testid="reviews-sort-select"
+              >
+                {(Object.keys(SORT_LABELS) as SortOption[]).map((opt) => (
+                  <option key={opt} value={opt}>
+                    {SORT_LABELS[opt]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {sortedReviews.map((r: LocationReviewItem) => (
             <Card key={r.id} className="p-5">
               <div className="flex items-start justify-between mb-2">
                 <div>
