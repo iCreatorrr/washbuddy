@@ -521,14 +521,17 @@ export default function RoutePlanner() {
 
   // UI state for the redesigned shell. mapExpanded toggles the map
   // between its inline ~55vh shape and a full-viewport overlay; the
-  // overlay uses position:fixed and locks body scroll. activePinId
-  // mirrors a card-tap onto the map (the matching pin switches to the
-  // amber active icon) without navigating away. formCollapsed defaults
-  // to "collapse the From/To form when a route is already planned" —
-  // less duplicate header weight on a long scroll. The driver hits
-  // Edit to expand it again.
+  // overlay uses position:fixed and locks body scroll.
+  // selectedLocationId is the SINGLE source of truth for "which
+  // location is the user looking at right now" — pin highlight,
+  // popup-open state, and card highlight all derive from it. Any
+  // tap that selects (pin, card body) writes here; any tap that
+  // deselects (same pin, same card, empty map) clears it.
+  // formCollapsed defaults to "collapse the From/To form when a
+  // route is already planned" — less duplicate header weight on a
+  // long scroll. The driver hits Edit to expand it again.
   const [mapExpanded, setMapExpanded] = useState(false);
-  const [activePinId, setActivePinId] = useState<string | null>(null);
+  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
   const [formCollapsed, setFormCollapsed] = useState(!!cached);
 
   const { activeVehicle } = useActiveVehicle();
@@ -612,8 +615,26 @@ export default function RoutePlanner() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const routeLayerRef = useRef<L.Polyline | null>(null);
-  const markersRef = useRef<L.Marker[]>([]);
+  // Markers keyed by location.id so the selection effect can find a
+  // marker by id without re-running the whole marker effect. The Map
+  // is mutated in-place by the marker effect; the selection effect
+  // reads it. Endpoints (start / destination / your-location) live
+  // separately because they don't participate in selection.
+  const markersByIdRef = useRef<Map<string, L.Marker>>(new Map());
   const endpointsRef = useRef<L.Marker[]>([]);
+  // Tracks which location id is currently shown on the map so the
+  // selection effect doesn't double-open a popup that's already open.
+  const openPopupIdRef = useRef<string | null>(null);
+  // Ref-shaped selection toggle so Leaflet event handlers attached
+  // inside the marker effect (which doesn't re-run on selection) can
+  // call the freshest closure rather than capturing a stale snapshot.
+  // Same pattern planRouteRef uses below.
+  const selectLocationRef = useRef<(id: string) => void>();
+  // Memoized "did we already fit-bounds for this route/locations
+  // combo?" — drops the marker effect's habit of re-fitting on every
+  // re-run (etas, ActiveVehicle pill swaps, etc), which is what made
+  // the map yank out from under a user who panned manually.
+  const lastFitKeyRef = useRef<string | null>(null);
 
   const initialLocations = useMemo(() => {
     if (route || !origin) return [];
@@ -715,8 +736,8 @@ export default function RoutePlanner() {
       map.removeLayer(routeLayerRef.current);
       routeLayerRef.current = null;
     }
-    markersRef.current.forEach((m) => map.removeLayer(m));
-    markersRef.current = [];
+    markersByIdRef.current.forEach((m) => map.removeLayer(m));
+    markersByIdRef.current.clear();
     endpointsRef.current.forEach((m) => map.removeLayer(m));
     endpointsRef.current = [];
 
@@ -770,18 +791,14 @@ export default function RoutePlanner() {
 
     locsToShow.forEach((loc) => {
       if (loc.latitude == null || loc.longitude == null) return;
-      // Pick the icon based on (a) compatibility with the active
-      // vehicle and (b) whether this location is the active pin. The
-      // dimmed pin tells the driver at a glance "I can't book here";
-      // the amber active pin matches whichever card the driver tapped
-      // last so the eye can pair card and pin without hunting.
+      // Default icon — incompatible gets the dimmed pin; everything
+      // else gets the standard blue. The amber active icon is set
+      // by the selection effect, NOT here. Keeping this effect
+      // free of selection state is what stops the "tap pin →
+      // marker rebuilds → popup closes" two-tap bug. activePinId
+      // is no longer in this effect's dependency array.
       const incompatible = (loc as any).fitsActiveVehicle === false;
-      const isActive = activePinId === loc.id && !incompatible;
-      const icon = incompatible
-        ? incompatibleLocationIcon
-        : isActive
-          ? activeLocationIcon
-          : locationIcon;
+      const icon = incompatible ? incompatibleLocationIcon : locationIcon;
       const marker = L.marker([loc.latitude, loc.longitude], { icon }).addTo(map);
 
       const popup = L.DomUtil.create("div");
@@ -800,7 +817,7 @@ export default function RoutePlanner() {
         helpEl.style.cssText = "margin-top:6px;font-size:11px;color:#64748b;";
         helpEl.textContent = "Change your active vehicle to book at this location.";
         marker.bindPopup(popup, { closeButton: false });
-        markersRef.current.push(marker);
+        markersByIdRef.current.set(loc.id, marker);
         return;
       }
 
@@ -895,36 +912,62 @@ export default function RoutePlanner() {
         autoPan: true,
         autoPanPadding: [70, 80],
       });
-      // Tap pin → flip the active pin so the matching card highlights
-      // too. Symmetric with the card's pin button.
-      marker.on("popupopen", () => {
-        if (mountedRef.current) setActivePinId(loc.id);
+      // Pin click is the selection trigger. selectLocation toggles —
+      // tapping the same pin a second time deselects, atomically
+      // swaps highlight if a different pin is currently selected.
+      // No setView / setZoom / fitBounds runs from here; the
+      // selection effect handles popup-open, icon swap, and the
+      // pan-if-off-screen pan. We attach to `click`, not
+      // `popupopen`, because Leaflet's bindPopup fires popupopen
+      // both on user click AND on programmatic openPopup() — using
+      // popupopen for state writes loops back through the selection
+      // effect which then calls openPopup() again.
+      marker.on("click", (e) => {
+        // L.DomEvent.stopPropagation prevents the map's own click
+        // handler from firing, which would otherwise treat this as
+        // a tap-on-empty-area and immediately deselect.
+        L.DomEvent.stopPropagation(e);
+        if (!mountedRef.current) return;
+        selectLocationRef.current?.(loc.id);
       });
-      markersRef.current.push(marker);
+      markersByIdRef.current.set(loc.id, marker);
     });
 
-    if (route) {
-      const allPoints: L.LatLngExpression[] = [
-        ...route.points,
-        ...nearbyLocations
-          .filter((l) => l.latitude != null && l.longitude != null)
-          .map((l) => [l.latitude!, l.longitude!] as L.LatLngExpression),
-      ];
-      if (allPoints.length > 0) {
-        map.fitBounds(L.latLngBounds(allPoints).pad(0.1), { animate: false });
+    // Initial fit ONLY when the route or the no-route locations set
+    // changed since the last fit — gated by a ref so subsequent
+    // re-runs of this effect (driven by etas, ActiveVehicle pill
+    // swaps, etc) don't yank the map view out from under a user who
+    // panned/zoomed manually. The user-reported "zoom out on pin tap"
+    // came from this block running on every activePinId change;
+    // selection no longer touches this effect's deps.
+    const fitKey = route
+      ? `route:${origin?.lat},${origin?.lng}->${destination?.lat},${destination?.lng}:n=${nearbyLocations.length}`
+      : `nearby:${origin?.lat},${origin?.lng}:n=${initialLocations.length}`;
+    if (lastFitKeyRef.current !== fitKey) {
+      lastFitKeyRef.current = fitKey;
+      if (route) {
+        const allPoints: L.LatLngExpression[] = [
+          ...route.points,
+          ...nearbyLocations
+            .filter((l) => l.latitude != null && l.longitude != null)
+            .map((l) => [l.latitude!, l.longitude!] as L.LatLngExpression),
+        ];
+        if (allPoints.length > 0) {
+          map.fitBounds(L.latLngBounds(allPoints).pad(0.1), { animate: false });
+        }
+      } else if (origin && locsToShow.length > 0) {
+        const allPoints: L.LatLngExpression[] = [
+          [origin.lat, origin.lng],
+          ...locsToShow
+            .filter((l) => l.latitude != null && l.longitude != null)
+            .map((l) => [l.latitude!, l.longitude!] as L.LatLngExpression),
+        ];
+        map.fitBounds(L.latLngBounds(allPoints).pad(0.15), { animate: true });
+      } else if (origin) {
+        map.setView([origin.lat, origin.lng], 10, { animate: true });
       }
-    } else if (origin && locsToShow.length > 0) {
-      const allPoints: L.LatLngExpression[] = [
-        [origin.lat, origin.lng],
-        ...locsToShow
-          .filter((l) => l.latitude != null && l.longitude != null)
-          .map((l) => [l.latitude!, l.longitude!] as L.LatLngExpression),
-      ];
-      map.fitBounds(L.latLngBounds(allPoints).pad(0.15), { animate: true });
-    } else if (origin) {
-      map.setView([origin.lat, origin.lng], 10, { animate: true });
     }
-  }, [route, origin, destination, nearbyLocations, initialLocations, setNavLocation, etas, activePinId]);
+  }, [route, origin, destination, nearbyLocations, initialLocations, setNavLocation, etas]);
 
   // Build a location detail URL with optional return-to-route + user coords.
   // Uses URLSearchParams so separators (? vs &) are always correct, even when
@@ -1014,24 +1057,101 @@ export default function RoutePlanner() {
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   };
 
-  // "Show on map" — single-tap on a card's pin button pans the map to
-  // the matching pin and highlights it via activeLocationIcon. We don't
-  // navigate away because tapping the card body is the primary action
-  // for that (matches Find a Wash). The pin icon is a separate gesture
-  // for "let me see where this is on the map".
-  const handleShowOnMap = (loc: any) => {
-    if (loc.latitude == null || loc.longitude == null) return;
-    setActivePinId(loc.id);
-    const map = mapInstanceRef.current;
-    if (map) {
-      try {
-        // Neighborhood-level zoom (14) gives enough surrounding context
-        // without losing the pin in tile detail. animate:true keeps the
-        // pan visible so the eye follows the change.
-        map.setView([loc.latitude, loc.longitude], 14, { animate: true });
-      } catch {}
-    }
+  // selectLocation toggles: tapping the same id clears (deselect),
+  // tapping a different id swaps. The selection effect downstream
+  // owns popup-open, icon swap, and pan-if-off-screen — this helper
+  // is a pure state writer.
+  const selectLocation = (id: string | null) => {
+    setSelectedLocationId((prev) => (prev === id ? null : id));
   };
+  selectLocationRef.current = (id) => selectLocation(id);
+
+  // Selection effect — derives EVERYTHING visual on the map from
+  // selectedLocationId:
+  //   - opens popup on the selected marker (or closes if null)
+  //   - swaps that marker's icon to the amber active glyph
+  //   - reverts the previously-selected marker to its default icon
+  //   - pans the map (NO zoom change) only if the selected pin is
+  //     currently OFF-screen — already-visible pins produce zero
+  //     map movement
+  // No setView / setZoom / fitBounds is called here. Pan-if-off-
+  // screen uses panTo without a zoom argument, preserving the
+  // user's zoom level.
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    // Revert all incompatibility-aware default icons; the selected
+    // marker (if any) gets the active icon below. Iterating the
+    // markersByIdRef keeps us in sync with whatever the marker
+    // effect last produced.
+    markersByIdRef.current.forEach((marker, id) => {
+      const loc = (route ? nearbyLocations : initialLocations).find((l) => l.id === id);
+      const incompatible = (loc as any)?.fitsActiveVehicle === false;
+      if (id === selectedLocationId && !incompatible) {
+        marker.setIcon(activeLocationIcon);
+      } else {
+        marker.setIcon(incompatible ? incompatibleLocationIcon : locationIcon);
+      }
+    });
+
+    if (selectedLocationId == null) {
+      if (openPopupIdRef.current != null) {
+        try { map.closePopup(); } catch {}
+        openPopupIdRef.current = null;
+      }
+      return;
+    }
+
+    const marker = markersByIdRef.current.get(selectedLocationId);
+    if (!marker) {
+      // Selected id refers to a location not currently on the map —
+      // could happen during a route swap. Clear silently.
+      if (openPopupIdRef.current != null) {
+        try { map.closePopup(); } catch {}
+        openPopupIdRef.current = null;
+      }
+      return;
+    }
+
+    if (openPopupIdRef.current !== selectedLocationId) {
+      try { marker.openPopup(); } catch {}
+      openPopupIdRef.current = selectedLocationId;
+    }
+
+    // Pan-if-off-screen — the only map-view change tied to selection.
+    // panTo without a zoom argument preserves the user's current zoom
+    // level. autoPanPadding from 2g-2.1 (the popup option) handles
+    // the popup's own clearance from controls; this just gets the
+    // pin into bounds when a card-tap selected an off-screen one.
+    try {
+      const ll = marker.getLatLng();
+      const bounds = map.getBounds();
+      if (!bounds.contains(ll)) {
+        map.panTo(ll, { animate: true });
+      }
+    } catch {}
+  }, [selectedLocationId, route, nearbyLocations, initialLocations]);
+
+  // Tap on empty map area → deselect. Leaflet's 'click' fires only
+  // on tap (not drag), and individual marker clicks call
+  // L.DomEvent.stopPropagation so they don't bubble here.
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    const handler = () => {
+      if (mountedRef.current) setSelectedLocationId(null);
+    };
+    map.on("click", handler);
+    return () => { map.off("click", handler); };
+  }, []);
+
+  // Reset selection when the underlying location set changes (route
+  // swap, vehicle filter swap). Otherwise a stale id could outlive
+  // its marker.
+  useEffect(() => {
+    setSelectedLocationId(null);
+  }, [route?.points.length, allLocations.length]);
 
   // Helpers for the redesigned list card. Mirror Find a Wash so a
   // driver scanning one page reads the other identically (same row
@@ -1330,14 +1450,14 @@ export default function RoutePlanner() {
                   ? `${Math.round((loc as any).distanceToRoute)} km from route`
                   : `${Math.round((loc as any).distFromOrigin)} km`;
                 const etaMins = etas[loc.id];
-                const isActivePin = activePinId === loc.id;
+                const isSelected = selectedLocationId === loc.id;
 
                 const card = (
                   <Card
                     className={`flex flex-col border-2 ${
                       incompatible
                         ? "bg-slate-50 border-slate-200 cursor-default"
-                        : isActivePin
+                        : isSelected
                           ? "border-amber-400 bg-amber-50/40 cursor-pointer"
                           : "group cursor-pointer hover:border-primary/30 hover:shadow-sm transition-all"
                     }`}
@@ -1346,25 +1466,9 @@ export default function RoutePlanner() {
                     <div className="p-4 sm:p-5 space-y-1.5">
                       <div className="flex items-start justify-between gap-2">
                         <h3 className={`text-base sm:text-lg font-bold leading-tight truncate ${incompatible ? "text-slate-500" : "text-slate-900"}`}>{loc.name}</h3>
-                        <div className="flex items-center gap-1 shrink-0">
-                          {/* Pin button: pans the map to this location
-                              without navigating. Stops propagation so
-                              the card-level Link doesn't also fire. */}
-                          {!incompatible && (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleShowOnMap(loc); }}
-                              className={`p-1.5 rounded-lg transition-colors ${isActivePin ? "bg-amber-100 text-amber-700" : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"}`}
-                              aria-label="Show on map"
-                              title="Show on map"
-                            >
-                              <Pin className="h-4 w-4" />
-                            </button>
-                          )}
-                          {!incompatible && (
-                            <ArrowRight className="h-4 w-4 text-slate-300 group-hover:text-primary transition-colors mt-0.5" />
-                          )}
-                        </div>
+                        {!incompatible && (
+                          <ArrowRight className="h-4 w-4 text-slate-300 group-hover:text-primary transition-colors mt-0.5 shrink-0" />
+                        )}
                       </div>
 
                       {incompatible ? (
