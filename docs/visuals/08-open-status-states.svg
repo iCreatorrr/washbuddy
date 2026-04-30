@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 120" width="600" height="120">
+  <rect width="600" height="120" fill="#FFFFFF"/>
+
+  <g transform="translate(20, 20)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500">Open</text>
+    <g transform="translate(0, 14)">
+      <circle cx="6" cy="9" r="3" fill="#15803D"/>
+      <text x="14" y="13" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#15803D" font-weight="500">Open at 4:30 PM</text>
+    </g>
+  </g>
+
+  <g transform="translate(180, 20)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500">Closes within 1 hour</text>
+    <g transform="translate(0, 14)">
+      <circle cx="6" cy="9" r="3" fill="#B45309"/>
+      <text x="14" y="13" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#B45309" font-weight="500">Closes at 6:00 PM</text>
+    </g>
+  </g>
+
+  <g transform="translate(380, 20)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500">Closed</text>
+    <g transform="translate(0, 14)">
+      <circle cx="6" cy="9" r="3" fill="#B91C1C"/>
+      <text x="14" y="13" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#B91C1C" font-weight="500">Closed</text>
+    </g>
+  </g>
+
+  <text x="20" y="80" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569">In route mode: "Open at 4:30 PM" reflects the user's arrival time.</text>
+  <text x="20" y="98" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569">In nearby mode: "Open now" until 1 hour before close, then "Closes at 6:00 PM".</text>
+</svg>

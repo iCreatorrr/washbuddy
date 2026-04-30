@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 160" width="320" height="160">
+  <defs>
+    <filter id="shadow2" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0F172A" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  <rect width="320" height="160" fill="#E8EDE7"/>
+
+  <g transform="translate(20, 14)">
+    <rect x="0" y="0" width="280" height="92" rx="12" fill="#FFFFFF" filter="url(#shadow2)"/>
+
+    <rect x="14" y="14" width="34" height="16" rx="3" fill="#2D6FE3"/>
+    <text x="31" y="25.5" font-family="ui-sans-serif, system-ui, sans-serif" font-size="9" fill="white" font-weight="500" letter-spacing="0.4" text-anchor="middle">TOP</text>
+
+    <text x="56" y="26" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13.5" fill="#0F172A" font-weight="500">Maple Leaf Bus Wash</text>
+    <text x="56" y="42" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569">Mississauga · +6 min detour</text>
+
+    <line x1="14" y1="56" x2="266" y2="56" stroke="#E2E8F0" stroke-width="0.5"/>
+
+    <text x="14" y="78" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#15803D" font-weight="500">● Open at 4:30 PM</text>
+
+    <g transform="translate(176, 64)">
+      <rect x="0" y="0" width="86" height="28" rx="14" fill="#2D6FE3"/>
+      <text x="43" y="18" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="white" font-weight="500" text-anchor="middle">Book →</text>
+    </g>
+  </g>
+
+  <path d="M150 106 l 10 10 l 10 -10 z" fill="#FFFFFF" filter="url(#shadow2)"/>
+
+  <g transform="translate(150, 116)">
+    <path d="M16 2 C 7 2, 2 9, 2 16 C 2 25, 16 38, 16 38 C 16 38, 30 25, 30 16 C 30 9, 25 2, 16 2 Z" fill="#2D6FE3" stroke="#FFFFFF" stroke-width="2"/>
+    <circle cx="16" cy="15" r="9" fill="#FFFFFF"/>
+    <path d="M16 9 C 16 9, 12 13, 12 16 a 4 4 0 0 0 8 0 c 0 -3 -4 -7 -4 -7 z" fill="#2D6FE3"/>
+    <circle cx="16" cy="20" r="20" fill="none" stroke="#FBBF24" stroke-width="3"/>
+  </g>
+</svg>

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 580" width="390" height="580">
+  <rect width="390" height="580" fill="rgba(15,23,42,0.45)"/>
+  <rect x="0" y="40" width="390" height="540" rx="22" ry="22" fill="#FFFFFF"/>
+  <rect x="0" y="60" width="390" height="520" fill="#FFFFFF"/>
+
+  <rect x="176" y="48" width="38" height="4" rx="2" fill="#CBD5E1"/>
+
+  <g transform="translate(0, 70)">
+    <text x="16" y="20" font-family="ui-sans-serif, system-ui, sans-serif" font-size="17" fill="#0F172A" font-weight="500">All filters</text>
+    <text x="16" y="36" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569">2 active</text>
+    <g transform="translate(310, 12)">
+      <rect x="0" y="0" width="64" height="22" rx="11" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="0.5"/>
+      <path d="M14 6 l 6 4 l 6 -4 v 12 l -6 -4 l -6 4 z" fill="none" stroke="#0F172A" stroke-width="1.5"/>
+      <text x="42" y="15" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#0F172A" font-weight="500">Save</text>
+    </g>
+  </g>
+
+  <line x1="0" y1="120" x2="390" y2="120" stroke="#E2E8F0" stroke-width="0.5"/>
+
+  <g transform="translate(16, 134)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500" letter-spacing="0.6">SORT BY</text>
+    <g transform="translate(0, 14)">
+      <circle cx="8" cy="10" r="7" fill="#2D6FE3"/>
+      <circle cx="8" cy="10" r="3" fill="white"/>
+      <text x="22" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#0F172A" font-weight="500">Best fit for route</text>
+    </g>
+    <g transform="translate(0, 38)">
+      <circle cx="8" cy="10" r="7" fill="white" stroke="#CBD5E1" stroke-width="1.5"/>
+      <text x="22" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#0F172A">Shortest detour</text>
+    </g>
+    <g transform="translate(0, 62)">
+      <circle cx="8" cy="10" r="7" fill="white" stroke="#CBD5E1" stroke-width="1.5"/>
+      <text x="22" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#0F172A">Distance from me</text>
+    </g>
+    <g transform="translate(0, 86)">
+      <circle cx="8" cy="10" r="7" fill="white" stroke="#CBD5E1" stroke-width="1.5"/>
+      <text x="22" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#0F172A">Price (low to high)</text>
+    </g>
+  </g>
+
+  <line x1="16" y1="248" x2="374" y2="248" stroke="#E2E8F0" stroke-width="0.5"/>
+
+  <g transform="translate(16, 262)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500" letter-spacing="0.6">AVAILABILITY</text>
+    <g transform="translate(0, 14)">
+      <rect x="0" y="2" width="16" height="16" rx="3" fill="white" stroke="#CBD5E1" stroke-width="1.5"/>
+      <text x="24" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#0F172A">Available now</text>
+      <text x="320" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#94A3B8" text-anchor="end">24</text>
+    </g>
+    <g transform="translate(0, 38)">
+      <rect x="0" y="2" width="16" height="16" rx="3" fill="white" stroke="#CBD5E1" stroke-width="1.5"/>
+      <text x="24" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#0F172A">Walk-ins accepted</text>
+      <text x="320" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#94A3B8" text-anchor="end">15</text>
+    </g>
+  </g>
+
+  <line x1="16" y1="328" x2="374" y2="328" stroke="#E2E8F0" stroke-width="0.5"/>
+
+  <g transform="translate(16, 342)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500" letter-spacing="0.6">FUEL &amp; CONVENIENCE</text>
+    <g transform="translate(0, 14)">
+      <rect x="0" y="2" width="16" height="16" rx="3" fill="#2D6FE3"/>
+      <path d="M3 12 l 4 4 l 8 -10" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/>
+      <text x="24" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#0F172A">Diesel</text>
+      <text x="320" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#94A3B8" text-anchor="end">31</text>
+    </g>
+    <g transform="translate(0, 38)">
+      <rect x="0" y="2" width="16" height="16" rx="3" fill="white" stroke="#CBD5E1" stroke-width="1.5"/>
+      <text x="24" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#0F172A">DEF</text>
+      <text x="320" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#94A3B8" text-anchor="end">24</text>
+    </g>
+  </g>
+
+  <line x1="0" y1="436" x2="390" y2="436" stroke="#E2E8F0" stroke-width="0.5"/>
+
+  <g transform="translate(0, 446)">
+    <rect x="16" y="0" width="100" height="44" rx="12" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="0.5"/>
+    <text x="66" y="28" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#0F172A" font-weight="500" text-anchor="middle">Clear all</text>
+    <rect x="124" y="0" width="250" height="44" rx="12" fill="#2D6FE3"/>
+    <text x="249" y="28" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="white" font-weight="500" text-anchor="middle">Apply (8)</text>
+  </g>
+
+  <text x="16" y="525" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#475569" font-style="italic">Sections continue: Driver amenities, Coach amenities, Repair &amp; roadside (LISTING ONLY), Compliance, Bay accommodation</text>
+</svg>

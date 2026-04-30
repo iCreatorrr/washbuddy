@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 220" width="600" height="220">
+  <rect width="600" height="220" fill="#F8FAFC"/>
+
+  <g transform="translate(80, 60)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500">Top-tier</text>
+    <text x="0" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#94A3B8">32 × 40px</text>
+    <g transform="translate(20, 30)">
+      <path d="M16 2 C 7 2, 2 9, 2 16 C 2 25, 16 38, 16 38 C 16 38, 30 25, 30 16 C 30 9, 25 2, 16 2 Z" fill="#2D6FE3" stroke="#FFFFFF" stroke-width="2"/>
+      <circle cx="16" cy="15" r="9" fill="#FFFFFF"/>
+      <path d="M16 9 C 16 9, 12 13, 12 16 a 4 4 0 0 0 8 0 c 0 -3 -4 -7 -4 -7 z" fill="#2D6FE3"/>
+    </g>
+    <text x="20" y="100" font-family="ui-sans-serif, system-ui, sans-serif" font-size="9" fill="#94A3B8">#2D6FE3</text>
+  </g>
+
+  <g transform="translate(200, 60)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500">Mid-tier</text>
+    <text x="0" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#94A3B8">26 × 33px</text>
+    <g transform="translate(22, 33)">
+      <path d="M13 2 C 6 2, 2 7, 2 13 C 2 21, 13 31, 13 31 C 13 31, 24 21, 24 13 C 24 7, 20 2, 13 2 Z" fill="#6B9AED" stroke="#FFFFFF" stroke-width="2"/>
+      <circle cx="13" cy="12" r="7" fill="#FFFFFF"/>
+      <path d="M13 7 C 13 7, 10 11, 10 13 a 3 3 0 0 0 6 0 c 0 -2 -3 -6 -3 -6 z" fill="#6B9AED"/>
+    </g>
+    <text x="22" y="100" font-family="ui-sans-serif, system-ui, sans-serif" font-size="9" fill="#94A3B8">#6B9AED</text>
+  </g>
+
+  <g transform="translate(320, 60)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500">Low-relevance</text>
+    <text x="0" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#94A3B8">22 × 28px</text>
+    <g transform="translate(28, 38)">
+      <path d="M11 2 C 5 2, 2 6, 2 11 C 2 17, 11 26, 11 26 C 11 26, 20 17, 20 11 C 20 6, 17 2, 11 2 Z" fill="#94A3B8" stroke="#FFFFFF" stroke-width="1.8"/>
+      <circle cx="11" cy="10" r="5" fill="#FFFFFF" opacity="0.85"/>
+    </g>
+    <text x="28" y="100" font-family="ui-sans-serif, system-ui, sans-serif" font-size="9" fill="#94A3B8">#94A3B8</text>
+  </g>
+
+  <g transform="translate(450, 60)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500">Incompatible</text>
+    <text x="0" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#94A3B8">22 × 28px, dashed</text>
+    <g transform="translate(28, 38)">
+      <path d="M11 2 C 5 2, 2 6, 2 11 C 2 17, 11 26, 11 26 C 11 26, 20 17, 20 11 C 20 6, 17 2, 11 2 Z" fill="#E2E8F0" stroke="#94A3B8" stroke-width="1.5" stroke-dasharray="2 1.5"/>
+      <circle cx="11" cy="10" r="4" fill="#FFFFFF" opacity="0.7"/>
+    </g>
+    <text x="28" y="100" font-family="ui-sans-serif, system-ui, sans-serif" font-size="9" fill="#94A3B8">#E2E8F0 / #94A3B8</text>
+  </g>
+
+  <text x="20" y="200" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569">All pins anchor at the bottom point. White stroke (2px on top/mid, 1.8px on low/incompatible) separates pin from map.</text>
+</svg>

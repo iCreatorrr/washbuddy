@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 270" width="600" height="270">
+  <rect width="600" height="270" fill="#F8FAFC"/>
+
+  <g transform="translate(40, 30)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#0F172A" font-weight="500">0 services selected (default)</text>
+    <text x="0" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#94A3B8">White outline, blue chevron, dark text</text>
+    <g transform="translate(0, 28)">
+      <rect x="0" y="0" width="86" height="32" rx="16" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="0.5"/>
+      <text x="14" y="20" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12.5" fill="#0F172A" font-weight="500">Services</text>
+      <path d="M68 14 l 4 4 l 4 -4" stroke="#2D6FE3" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <g transform="translate(200, 30)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#0F172A" font-weight="500">1 service selected</text>
+    <text x="0" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#94A3B8">Solid blue fill, white text</text>
+    <g transform="translate(0, 28)">
+      <rect x="0" y="0" width="68" height="32" rx="16" fill="#2D6FE3"/>
+      <text x="14" y="20" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12.5" fill="white" font-weight="500">Wash</text>
+      <path d="M50 14 l 4 4 l 4 -4" stroke="white" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <g transform="translate(330, 30)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#0F172A" font-weight="500">2 services selected</text>
+    <text x="0" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#94A3B8">Comma-separated</text>
+    <g transform="translate(0, 28)">
+      <rect x="0" y="0" width="106" height="32" rx="16" fill="#2D6FE3"/>
+      <text x="14" y="20" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12.5" fill="white" font-weight="500">Wash, Dump</text>
+      <path d="M88 14 l 4 4 l 4 -4" stroke="white" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <g transform="translate(40, 130)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#0F172A" font-weight="500">3+ services selected</text>
+    <text x="0" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#94A3B8">First name + count truncation</text>
+    <g transform="translate(0, 28)">
+      <rect x="0" y="0" width="120" height="32" rx="16" fill="#2D6FE3"/>
+      <text x="14" y="20" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12.5" fill="white" font-weight="500">Wash + 2 more</text>
+      <path d="M102 14 l 4 4 l 4 -4" stroke="white" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <g transform="translate(40, 215)">
+    <text x="0" y="0" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500">Short-form category names used in chip:</text>
+    <text x="0" y="18" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569">Wash · Interior · Dump · Restock · Add-ons</text>
+    <text x="0" y="36" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#94A3B8" font-style="italic">(Full names in service picker sheet — Exterior wash, Interior cleaning, Restroom dump, Restock &amp; consumables, Add-ons)</text>
+  </g>
+</svg>

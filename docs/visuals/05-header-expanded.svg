@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 200" width="390" height="200">
+  <rect width="390" height="200" fill="#FFFFFF"/>
+
+  <g transform="translate(12, 12)">
+    <circle cx="18" cy="18" r="18" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="0.5"/>
+    <g transform="translate(8, 8)">
+      <path d="M10 3 C 10 3, 5 8.5, 5 12.5 a 5 5 0 0 0 10 0 c 0 -4 -5 -9.5 -5 -9.5 z" fill="#2D6FE3"/>
+    </g>
+    <rect x="42" y="2" width="120" height="32" rx="16" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="0.5"/>
+    <circle cx="58" cy="18" r="11" fill="#F1F5F9"/>
+    <text x="58" y="21" font-family="ui-sans-serif, system-ui, sans-serif" font-size="9" fill="#475569" font-weight="500" text-anchor="middle">XL</text>
+    <text x="74" y="22" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#0F172A" font-weight="500">big momma</text>
+    <text x="138" y="22" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#475569">· Coach</text>
+    <path d="M154 16 l 4 4 l 4 -4" stroke="#94A3B8" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </g>
+
+  <g transform="translate(12, 56)">
+    <rect x="0" y="0" width="366" height="98" rx="14" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="0.5"/>
+    <g transform="translate(12, 12)">
+      <circle cx="8" cy="8" r="7" fill="none" stroke="#2D6FE3" stroke-width="2"/>
+      <circle cx="8" cy="8" r="3" fill="#2D6FE3"/>
+      <text x="22" y="12" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#475569">My location</text>
+      <text x="270" y="12" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#94A3B8">Mississauga, ON</text>
+    </g>
+    <line x1="12" y1="32" x2="354" y2="32" stroke="#E2E8F0" stroke-width="0.5"/>
+    <g transform="translate(12, 42)">
+      <path d="M8 0 c -3.5 0 -6.5 3 -6.5 6.5 c 0 5 6.5 10 6.5 10 s 6.5 -5 6.5 -10 c 0 -3.5 -3 -6.5 -6.5 -6.5 z M8 4 a 2 2 0 0 1 0 4 a 2 2 0 0 1 0 -4" fill="#94A3B8"/>
+      <text x="22" y="12" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#0F172A" font-weight="500">Buffalo, NY</text>
+      <text x="290" y="12" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500">Clear</text>
+    </g>
+    <line x1="12" y1="62" x2="354" y2="62" stroke="#E2E8F0" stroke-width="0.5"/>
+    <g transform="translate(12, 72)">
+      <circle cx="8" cy="8" r="6.5" fill="none" stroke="#94A3B8" stroke-width="1.5"/>
+      <line x1="8" y1="8" x2="8" y2="4" stroke="#94A3B8" stroke-width="1.5"/>
+      <line x1="8" y1="8" x2="11" y2="9" stroke="#94A3B8" stroke-width="1.5"/>
+      <text x="22" y="12" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#475569">Arrive</text>
+      <rect x="56" y="3" width="100" height="18" rx="9" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="0.5"/>
+      <text x="106" y="15" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#0F172A" font-weight="500" text-anchor="middle">Today, 4:30 PM</text>
+      <text x="240" y="12" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#94A3B8">~ 1h 42m drive</text>
+    </g>
+  </g>
+
+  <text x="12" y="178" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#475569" font-style="italic">Vehicle pill separates from destination. Three-row search card: origin, destination, time. Total height: ~166px including header bar above.</text>
+</svg>

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 130" width="390" height="130">
+  <rect width="390" height="130" fill="#EBF2FD"/>
+  <rect x="0" y="0" width="3" height="130" fill="#2D6FE3"/>
+
+  <g transform="translate(16, 14)">
+    <rect x="0" y="0" width="34" height="16" rx="3" fill="#2D6FE3"/>
+    <text x="17" y="11.5" font-family="ui-sans-serif, system-ui, sans-serif" font-size="9" fill="white" font-weight="500" letter-spacing="0.4" text-anchor="middle">TOP</text>
+  </g>
+
+  <g transform="translate(56, 12)">
+    <text x="0" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#0F172A" font-weight="500">Maple Leaf Bus Wash</text>
+    <text x="0" y="30" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11.5" fill="#475569">Mississauga · </text>
+    <text x="76" y="30" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11.5" fill="#0F172A" font-weight="500">+6 min detour</text>
+    <text x="148" y="30" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11.5" fill="#475569">· arrive 4:30, done by 6:00 PM</text>
+
+    <g transform="translate(0, 42)">
+      <rect x="0" y="0" width="64" height="18" rx="3" fill="#D1FAE5"/>
+      <text x="6" y="13" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10.5" fill="#065F46" font-weight="500">Hand wash</text>
+      <rect x="68" y="0" width="42" height="18" rx="3" fill="#D1FAE5"/>
+      <text x="74" y="13" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10.5" fill="#065F46" font-weight="500">Dump</text>
+      <rect x="114" y="0" width="42" height="18" rx="3" fill="#D1FAE5"/>
+      <text x="120" y="13" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10.5" fill="#065F46" font-weight="500">Diesel</text>
+    </g>
+
+    <g transform="translate(0, 74)">
+      <text x="0" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#15803D" font-weight="500">● Open at 4:30 PM</text>
+      <text x="240" y="9" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#94A3B8">Est.</text>
+      <text x="260" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" fill="#0F172A" font-weight="500">$135</text>
+    </g>
+  </g>
+
+  <line x1="0" y1="120" x2="390" y2="120" stroke="#E2E8F0" stroke-width="0.5"/>
+</svg>

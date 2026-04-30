@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 380" width="390" height="380">
+  <rect width="390" height="380" fill="#E8EDE7"/>
+  <rect x="0" y="14" width="390" height="366" rx="22" ry="22" fill="#FFFFFF"/>
+  <rect x="0" y="34" width="390" height="346" fill="#FFFFFF"/>
+
+  <rect x="176" y="22" width="38" height="4" rx="2" fill="#CBD5E1"/>
+
+  <text x="16" y="58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#0F172A" font-weight="500">8 matches along route</text>
+
+  <g transform="translate(290, 44)">
+    <rect x="0" y="0" width="84" height="28" rx="14" fill="#F1F5F9"/>
+    <rect x="2" y="2" width="40" height="24" rx="12" fill="#FFFFFF"/>
+    <text x="22" y="17" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#0F172A" font-weight="500" text-anchor="middle">Map</text>
+    <text x="62" y="17" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500" text-anchor="middle">List</text>
+  </g>
+
+  <line x1="0" y1="86" x2="390" y2="86" stroke="#E2E8F0" stroke-width="0.5"/>
+
+  <g transform="translate(0, 86)">
+    <rect x="16" y="14" width="34" height="16" rx="3" fill="#2D6FE3"/>
+    <text x="33" y="25.5" font-family="ui-sans-serif, system-ui, sans-serif" font-size="9" fill="white" font-weight="500" letter-spacing="0.4" text-anchor="middle">TOP</text>
+    <text x="56" y="26" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#0F172A" font-weight="500">Maple Leaf Bus Wash</text>
+    <text x="56" y="42" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11.5" fill="#475569">Mississauga · </text>
+    <text x="132" y="42" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11.5" fill="#0F172A" font-weight="500">+6 min detour</text>
+  </g>
+
+  <line x1="0" y1="180" x2="390" y2="180" stroke="#E2E8F0" stroke-width="0.5"/>
+
+  <g transform="translate(0, 180)">
+    <rect x="16" y="14" width="34" height="16" rx="3" fill="#2D6FE3"/>
+    <text x="33" y="25.5" font-family="ui-sans-serif, system-ui, sans-serif" font-size="9" fill="white" font-weight="500" letter-spacing="0.4" text-anchor="middle">TOP</text>
+    <text x="56" y="26" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#0F172A" font-weight="500">Capital Region Bus Wash</text>
+    <text x="56" y="42" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11.5" fill="#475569">Mississauga · </text>
+    <text x="132" y="42" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11.5" fill="#0F172A" font-weight="500">+9 min detour</text>
+  </g>
+
+  <line x1="0" y1="274" x2="390" y2="274" stroke="#E2E8F0" stroke-width="0.5"/>
+
+  <g transform="translate(0, 274)">
+    <text x="22" y="32" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#94A3B8" font-weight="500" text-anchor="middle">3</text>
+    <text x="56" y="26" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#0F172A" font-weight="500">Lakefront Transit Wash</text>
+  </g>
+</svg>

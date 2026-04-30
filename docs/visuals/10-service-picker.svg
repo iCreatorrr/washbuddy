@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 540" width="390" height="540">
+  <rect width="390" height="540" fill="rgba(15,23,42,0.45)"/>
+  <rect x="0" y="60" width="390" height="480" rx="22" ry="22" fill="#FFFFFF"/>
+  <rect x="0" y="80" width="390" height="460" fill="#FFFFFF"/>
+
+  <rect x="176" y="68" width="38" height="4" rx="2" fill="#CBD5E1"/>
+
+  <text x="16" y="106" font-family="ui-sans-serif, system-ui, sans-serif" font-size="17" fill="#0F172A" font-weight="500">What do you need?</text>
+  <text x="16" y="124" font-family="ui-sans-serif, system-ui, sans-serif" font-size="12" fill="#475569">Pick one or more — we'll match providers that offer all of them.</text>
+
+  <g transform="translate(16, 144)">
+    <rect x="0" y="0" width="36" height="36" rx="9" fill="#DBEAFE"/>
+    <g transform="translate(8, 8)">
+      <path d="M10 3 C 10 3, 5 8.5, 5 12.5 a 5 5 0 0 0 10 0 c 0 -4 -5 -9.5 -5 -9.5 z" fill="#1E40AF"/>
+    </g>
+    <text x="48" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#0F172A" font-weight="500">Exterior wash</text>
+    <text x="48" y="30" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569">Hand wash, drive-through, two-step</text>
+    <rect x="270" y="8" width="22" height="20" rx="10" fill="#F1F5F9"/>
+    <text x="281" y="22" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#94A3B8" text-anchor="middle">52</text>
+    <circle cx="328" cy="18" r="10" fill="#2D6FE3"/>
+    <path d="M324 18 l 3 4 l 6 -7" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </g>
+
+  <line x1="16" y1="194" x2="358" y2="194" stroke="#E2E8F0" stroke-width="0.5"/>
+
+  <g transform="translate(16, 210)">
+    <rect x="0" y="0" width="36" height="36" rx="9" fill="#FEF3C7"/>
+    <text x="48" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#0F172A" font-weight="500">Interior cleaning</text>
+    <text x="48" y="30" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569">Turn-clean, standard, deep detail</text>
+    <rect x="270" y="8" width="22" height="20" rx="10" fill="#F1F5F9"/>
+    <text x="281" y="22" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#94A3B8" text-anchor="middle">38</text>
+    <circle cx="328" cy="18" r="10" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.5"/>
+  </g>
+
+  <line x1="16" y1="260" x2="358" y2="260" stroke="#E2E8F0" stroke-width="0.5"/>
+
+  <g transform="translate(16, 276)">
+    <rect x="0" y="0" width="36" height="36" rx="9" fill="#D1FAE5"/>
+    <text x="48" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#0F172A" font-weight="500">Restroom dump</text>
+    <text x="48" y="30" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569">Pump-out, fresh water, chemical refill</text>
+    <rect x="270" y="8" width="22" height="20" rx="10" fill="#F1F5F9"/>
+    <text x="281" y="22" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#94A3B8" text-anchor="middle">31</text>
+    <circle cx="328" cy="18" r="10" fill="#2D6FE3"/>
+    <path d="M324 18 l 3 4 l 6 -7" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </g>
+
+  <line x1="16" y1="326" x2="358" y2="326" stroke="#E2E8F0" stroke-width="0.5"/>
+
+  <g transform="translate(16, 342)">
+    <rect x="0" y="0" width="36" height="36" rx="9" fill="#EDE9FE"/>
+    <text x="48" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#0F172A" font-weight="500">Restock &amp; consumables</text>
+    <text x="48" y="30" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569">Water, coffee, paper, hand sanitizer</text>
+    <rect x="270" y="8" width="22" height="20" rx="10" fill="#F1F5F9"/>
+    <text x="281" y="22" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#94A3B8" text-anchor="middle">22</text>
+    <circle cx="328" cy="18" r="10" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.5"/>
+  </g>
+
+  <line x1="16" y1="392" x2="358" y2="392" stroke="#E2E8F0" stroke-width="0.5"/>
+
+  <g transform="translate(16, 408)">
+    <rect x="0" y="0" width="36" height="36" rx="9" fill="#FCE7F3"/>
+    <text x="48" y="14" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#0F172A" font-weight="500">Add-ons</text>
+    <text x="48" y="30" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569">Specialty services — wax, ceramic, vinyl</text>
+    <rect x="270" y="8" width="22" height="20" rx="10" fill="#F1F5F9"/>
+    <text x="281" y="22" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#94A3B8" text-anchor="middle">9</text>
+    <circle cx="328" cy="18" r="10" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.5"/>
+  </g>
+
+  <g transform="translate(16, 470)">
+    <rect x="0" y="0" width="358" height="46" rx="12" fill="#2D6FE3"/>
+    <text x="179" y="29" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="white" font-weight="500" text-anchor="middle">Apply (8 matches along route)</text>
+  </g>
+</svg>

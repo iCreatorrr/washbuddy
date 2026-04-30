@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 100" width="600" height="100">
+  <rect width="600" height="100" fill="#F8FAFC"/>
+
+  <g transform="translate(20, 20)">
+    <rect x="0" y="0" width="76" height="22" rx="11" fill="#F1F5F9"/>
+    <text x="10" y="15" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500">Diesel</text>
+    <text x="58" y="16" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#94A3B8" font-weight="400">×</text>
+  </g>
+
+  <g transform="translate(106, 20)">
+    <rect x="0" y="0" width="120" height="22" rx="11" fill="#F1F5F9"/>
+    <text x="10" y="15" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500">Driver restroom</text>
+    <text x="102" y="16" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#94A3B8" font-weight="400">×</text>
+  </g>
+
+  <g transform="translate(236, 20)">
+    <rect x="0" y="0" width="100" height="22" rx="11" fill="#F1F5F9"/>
+    <text x="10" y="15" font-family="ui-sans-serif, system-ui, sans-serif" font-size="11" fill="#475569" font-weight="500">Bay ≥45ft</text>
+    <text x="82" y="16" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" fill="#94A3B8" font-weight="400">×</text>
+  </g>
+
+  <text x="20" y="68" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#475569">Tap × to remove a single filter. Search re-runs immediately. Pills wrap to multiple lines at narrow viewports.</text>
+  <text x="20" y="84" font-family="ui-sans-serif, system-ui, sans-serif" font-size="10" fill="#475569" font-style="italic">Tier 1 chips (Service Type, Open, Filters) do NOT appear as separate pills — they're already visible in the chip row.</text>
+</svg>
