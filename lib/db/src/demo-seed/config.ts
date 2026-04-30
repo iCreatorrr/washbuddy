@@ -82,10 +82,18 @@ export const RATING_DISTRIBUTION = [
   { rating: 1, weight: 0.04 },
 ];
 
+export type ServiceCategoryLiteral =
+  | "EXTERIOR_WASH"
+  | "INTERIOR_CLEANING"
+  | "RESTROOM_DUMP"
+  | "RESTOCK_CONSUMABLES"
+  | "ADD_ON";
+
 export const SERVICE_TEMPLATES = [
   {
     name: "Exterior Bus Wash",
     description: "Full exterior wash including undercarriage rinse",
+    category: "EXTERIOR_WASH" as ServiceCategoryLiteral,
     durationMins: 30,
     basePriceMinorRange: [12000, 18000] as [number, number],
     platformFeePercent: 0.15,
@@ -95,6 +103,7 @@ export const SERVICE_TEMPLATES = [
   {
     name: "Full Detail Wash",
     description: "Complete interior and exterior deep clean",
+    category: "INTERIOR_CLEANING" as ServiceCategoryLiteral,
     durationMins: 90,
     basePriceMinorRange: [30000, 45000] as [number, number],
     platformFeePercent: 0.15,
@@ -104,6 +113,7 @@ export const SERVICE_TEMPLATES = [
   {
     name: "Quick Rinse",
     description: "Fast exterior rinse for light maintenance",
+    category: "EXTERIOR_WASH" as ServiceCategoryLiteral,
     durationMins: 15,
     basePriceMinorRange: [6000, 9000] as [number, number],
     platformFeePercent: 0.15,
@@ -113,6 +123,7 @@ export const SERVICE_TEMPLATES = [
   {
     name: "Interior Sanitization",
     description: "Deep interior cleaning with sanitizing treatment",
+    category: "INTERIOR_CLEANING" as ServiceCategoryLiteral,
     durationMins: 60,
     basePriceMinorRange: [20000, 28000] as [number, number],
     platformFeePercent: 0.15,
@@ -122,6 +133,7 @@ export const SERVICE_TEMPLATES = [
   {
     name: "Fleet Express Wash",
     description: "Streamlined exterior wash optimized for fleet throughput",
+    category: "EXTERIOR_WASH" as ServiceCategoryLiteral,
     durationMins: 20,
     basePriceMinorRange: [9000, 13000] as [number, number],
     platformFeePercent: 0.12,

@@ -5,6 +5,7 @@
  * WashBuddy API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ServiceCategory } from "./serviceCategory";
 
 export interface Service {
   id: string;
@@ -20,4 +21,8 @@ export interface Service {
   leadTimeMins?: number;
   requiresConfirmation?: boolean;
   isVisible: boolean;
+  category: ServiceCategory;
+  /** @nullable */
+  subcategory?: string | null;
+  labels: string[];
 }
