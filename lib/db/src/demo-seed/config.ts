@@ -89,55 +89,68 @@ export type ServiceCategoryLiteral =
   | "RESTOCK_CONSUMABLES"
   | "ADD_ON";
 
-export const SERVICE_TEMPLATES = [
+export interface ServiceTemplate {
+  name: string;
+  description: string;
+  category: ServiceCategoryLiteral;
+  labels?: string[];
+  durationMins: number;
+  basePriceMinorRange: [number, number];
+  platformFeePercent: number;
+  capacityPerSlot: [number, number];
+  leadTimeMins: number;
+}
+
+export const SERVICE_TEMPLATES: ServiceTemplate[] = [
   {
     name: "Exterior Bus Wash",
     description: "Full exterior wash including undercarriage rinse",
-    category: "EXTERIOR_WASH" as ServiceCategoryLiteral,
+    category: "EXTERIOR_WASH",
     durationMins: 30,
-    basePriceMinorRange: [12000, 18000] as [number, number],
+    basePriceMinorRange: [12000, 18000],
     platformFeePercent: 0.15,
-    capacityPerSlot: [1, 3] as [number, number],
+    capacityPerSlot: [1, 3],
     leadTimeMins: 60,
   },
   {
     name: "Full Detail Wash",
     description: "Complete interior and exterior deep clean",
-    category: "INTERIOR_CLEANING" as ServiceCategoryLiteral,
+    category: "EXTERIOR_WASH",
+    labels: ["detail", "full-service", "interior"],
     durationMins: 90,
-    basePriceMinorRange: [30000, 45000] as [number, number],
+    basePriceMinorRange: [30000, 45000],
     platformFeePercent: 0.15,
-    capacityPerSlot: [1, 1] as [number, number],
+    capacityPerSlot: [1, 1],
     leadTimeMins: 120,
   },
   {
     name: "Quick Rinse",
     description: "Fast exterior rinse for light maintenance",
-    category: "EXTERIOR_WASH" as ServiceCategoryLiteral,
+    category: "EXTERIOR_WASH",
     durationMins: 15,
-    basePriceMinorRange: [6000, 9000] as [number, number],
+    basePriceMinorRange: [6000, 9000],
     platformFeePercent: 0.15,
-    capacityPerSlot: [2, 4] as [number, number],
+    capacityPerSlot: [2, 4],
     leadTimeMins: 30,
   },
   {
     name: "Interior Sanitization",
     description: "Deep interior cleaning with sanitizing treatment",
-    category: "INTERIOR_CLEANING" as ServiceCategoryLiteral,
+    category: "INTERIOR_CLEANING",
     durationMins: 60,
-    basePriceMinorRange: [20000, 28000] as [number, number],
+    basePriceMinorRange: [20000, 28000],
     platformFeePercent: 0.15,
-    capacityPerSlot: [1, 2] as [number, number],
+    capacityPerSlot: [1, 2],
     leadTimeMins: 90,
   },
   {
     name: "Fleet Express Wash",
     description: "Streamlined exterior wash optimized for fleet throughput",
-    category: "EXTERIOR_WASH" as ServiceCategoryLiteral,
+    category: "EXTERIOR_WASH",
     durationMins: 20,
-    basePriceMinorRange: [9000, 13000] as [number, number],
+    basePriceMinorRange: [9000, 13000],
     platformFeePercent: 0.12,
-    capacityPerSlot: [3, 5] as [number, number],
+    capacityPerSlot: [3, 5],
     leadTimeMins: 45,
   },
 ];

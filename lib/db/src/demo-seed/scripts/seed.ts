@@ -186,6 +186,7 @@ async function main() {
               name: svcTemplate.name,
               description: svcTemplate.description,
               category: svcTemplate.category,
+              labels: svcTemplate.labels ?? [],
               durationMins: svcTemplate.durationMins,
               basePriceMinor: roundedPrice,
               currencyCode: region.currencyCode,

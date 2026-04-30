@@ -171,6 +171,7 @@ interface ServiceTemplate {
   name: string;
   description: string;
   category: ServiceCategoryLiteral;
+  labels?: string[];
   durationMinsRange: [number, number];
   usdPriceRange: [number, number]; // in dollars
   cadMultiplier: number; // CAD prices ~1.25x USD
@@ -204,7 +205,8 @@ const SERVICE_MENU: ServiceTemplate[] = [
   {
     name: "Full Detail",
     description: "Premium full-service detail including exterior wash, interior deep clean, engine bay, and protective coating.",
-    category: "INTERIOR_CLEANING",
+    category: "EXTERIOR_WASH",
+    labels: ["detail", "full-service", "interior"],
     durationMinsRange: [60, 120],
     usdPriceRange: [150, 250],
     cadMultiplier: 1.28,
@@ -752,6 +754,7 @@ async function main() {
             name: svcTmpl.name,
             description: svcTmpl.description,
             category: svcTmpl.category,
+            labels: svcTmpl.labels ?? [],
             durationMins,
             basePriceMinor: dollars(basePrice),
             currencyCode: tmpl.currencyCode,

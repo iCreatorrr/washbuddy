@@ -37,17 +37,53 @@ export const CATEGORY_SHORT_NAMES: Record<ServiceCategory, string> = {
   ADD_ON: "Add-ons",
 };
 
+// Suggested subcategories shown as autocomplete hints in the provider
+// service-creation form. Free-string, not enum-locked — providers can type
+// their own. Sourced from motorcoach-industry conventions and analogous
+// service-marketplace UX patterns. Capitalized for human-readable display
+// in the form; matching against provider-typed values is case-insensitive.
 export const SUGGESTED_SUBCATEGORIES: Record<ServiceCategory, string[]> = {
   EXTERIOR_WASH: [
-    "drive-through",
-    "hand-wash",
-    "hand-wash-with-dry",
-    "two-step",
-    "pressure-only",
-    "mobile",
+    "Hand wash",
+    "Drive-through",
+    "Touchless",
+    "High-pressure",
+    "Two-step",
+    "Undercarriage",
+    "Roof",
+    "Wax / polish",
   ],
-  INTERIOR_CLEANING: ["turn-clean", "standard", "deep-detail"],
-  RESTROOM_DUMP: ["pump-only", "pump-and-refresh"],
-  RESTOCK_CONSUMABLES: [],
-  ADD_ON: ["wax", "ceramic-coat", "vinyl-wrap"],
+  INTERIOR_CLEANING: [
+    "Standard",
+    "Deep clean",
+    "Detail",
+    "Sanitization",
+    "Floor / mat",
+    "Upholstery",
+    "Window",
+  ],
+  RESTROOM_DUMP: [
+    "Black water pump-out",
+    "Gray water pump-out",
+    "Black tank flush",
+    "Fresh water fill",
+    "Tank deodorize",
+  ],
+  RESTOCK_CONSUMABLES: [
+    "Restroom supplies",
+    "Cleaning supplies",
+    "Bottled water",
+    "Coffee & tea supplies",
+    "Cups, lids & napkins",
+    "Snacks",
+    "Tank chemicals",
+  ],
+  ADD_ON: [
+    "Wax / paint protection",
+    "Engine bay clean",
+    "Tire / wheel detail",
+    "Decal / vinyl care",
+    "Pet hair / odor",
+    "Specialty",
+  ],
 };
