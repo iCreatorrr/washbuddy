@@ -184,16 +184,47 @@ const INCOMPAT_GLYPH_FILL = "#94A3B8";
 // SVG viewBox to scale this down without losing the path.
 const PIN_PATH = "M16 1 C7.16 1 1 7.16 1 16 C1 22 5 28 16 39 C27 28 31 22 31 16 C31 7.16 24.84 1 16 1 Z";
 
-// Glyph paths in 32×40 viewBox space, centered roughly at (16, 14)
-// inside the pin's circular head. Hand-drawn approximations per
-// EID §6.9; production swaps the `wash` glyph for the WashBuddy
-// logomark when product provides the asset.
-const GLYPH_PATHS: Record<WashPinGlyph, string> = {
-  wash: "M16 8 C13 12 11 15 11 17.5 A5 5 0 0 0 21 17.5 C21 15 19 12 16 8 Z",
-  interior: "M11 11 H21 V13 H17.5 V19 H14.5 V13 H11 Z",
-  dump: "M11 11 H21 M12.5 14 L16 17 L19.5 14 M14 17 L16 19 L18 17",
-  restock: "M11 11 H21 V19 H11 Z M13 13 L19 17 M13 17 L19 13",
-  addon: "M16 9.5 L17.5 13.2 L21.4 13.7 L18.4 16.3 L19.2 20.2 L16 18.3 L12.8 20.2 L13.6 16.3 L10.6 13.7 L14.5 13.2 Z",
+// Glyph SVG fragments in 32×40 viewBox space, centered roughly at
+// (16, 14) inside the pin's circular head. Each glyph uses the
+// rendering most legible at icon size — closed-path fill for the
+// shapes that read well solid (water drop, star), stroke-only line
+// art for the shapes that need open contours (squeegee, drain
+// chevrons, sealed-box rectangle).
+//
+// Originally a single `Record<WashPinGlyph, string>` of `d`
+// attributes, but the open contours rendered as invisible no-ops
+// because `fill` won't fill an unclosed path. Phase B CP1.5 splits
+// rendering per glyph so each can pick its own technique.
+//
+// TODO(asset, EID §6.9): the `wash` glyph is a hand-drawn water-
+// drop approximation. Production should swap in the actual
+// WashBuddy logomark SVG once product provides it.
+const GLYPH_FRAGMENT: Record<WashPinGlyph, (fill: string) => string> = {
+  // Filled teardrop — point up, round bottom. Standard water-drop motif.
+  wash: (fill) => `<path d="M16 8 C13 12 11 15 11 17.5 A5 5 0 0 0 21 17.5 C21 15 19 12 16 8 Z" fill="${fill}"/>`,
+
+  // Squeegee / wiper — diagonal blade from upper-right (~20,11) to
+  // lower-left (~11,19) with a short perpendicular handle at the
+  // upper-right end. Stroke-only; legible at small sizes where a
+  // filled vacuum silhouette would collapse to an unrecognizable
+  // blob. EID §3.5 explicitly accepts vacuum-or-squeegee for
+  // INTERIOR_CLEANING.
+  interior: (fill) => `<g stroke="${fill}" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="11" y1="19" x2="20" y2="11"/><line x1="17.7" y1="9.2" x2="20" y2="11"/></g>`,
+
+  // Drain — top horizontal grate bar with two downward chevrons
+  // suggesting water flowing into the drain.
+  dump: (fill) => `<g stroke="${fill}" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="11" y1="11.5" x2="21" y2="11.5"/><polyline points="13,14 16,17 19,14"/><polyline points="14.5,17.2 16,18.7 17.5,17.2"/></g>`,
+
+  // Sealed package — rectangle outline with a horizontal divider
+  // line through the middle (reads as packing tape). Stroke-only
+  // box keeps the silhouette obvious without competing with the
+  // teardrop pin shape behind it.
+  restock: (fill) => `<g stroke="${fill}" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="11" y="11" width="10" height="8" rx="0.5"/><line x1="11" y1="15" x2="21" y2="15"/></g>`,
+
+  // 5-pointed star — closed polygon, fills cleanly. 10 vertices
+  // alternating outer (5) and inner (5) per the standard star
+  // construction.
+  addon: (fill) => `<path d="M16 9.5 L17.5 13.2 L21.4 13.7 L18.4 16.3 L19.2 20.2 L16 18.3 L12.8 20.2 L13.6 16.3 L10.6 13.7 L14.5 13.2 Z" fill="${fill}"/>`,
 };
 
 function escHtml(s: string): string {
@@ -234,7 +265,7 @@ export function renderWashPinHtml(input: RenderWashPinInput): string {
     <svg width="${w}" height="${h}" viewBox="0 0 32 40" style="overflow:visible;display:block;${shadow ? `filter:${shadow};` : ""}">
       ${ringSvg}
       <path d="${PIN_PATH}" fill="${fill}" stroke="${stroke.color}" stroke-width="${stroke.width}"${dashAttr}/>
-      <path d="${GLYPH_PATHS[glyph]}" fill="${glyphFill}" stroke="${glyphFill}" stroke-width="0.5" stroke-linejoin="round" stroke-linecap="round"/>
+      ${GLYPH_FRAGMENT[glyph](glyphFill)}
     </svg>`;
 
   // Label — positioned above the pin; bottom-center of the label sits

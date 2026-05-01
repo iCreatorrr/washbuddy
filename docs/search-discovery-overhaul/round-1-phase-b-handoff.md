@@ -78,3 +78,45 @@ Phase A's interim surfaces still in place (CP4 retires them):
 - Route-planner-era `bindPopup` pattern (Round 2 replaces with the dedicated pin-callout component).
 
 Phase B Checkpoint 2 (clustering) is unblocked.
+
+---
+
+## Checkpoint 1.5 — Glyph rewrite for legibility
+
+**Commit:** `<this commit>`. Single follow-up commit before dispatching CP2. Replit verification of CP1 surfaced the `INTERIOR_CLEANING` glyph rendering as a literal "T" character (the original path was a T-shape silhouette with proportions that read as a letter, not a vacuum). All five glyphs audited and rewritten where needed; rendering refactored so each glyph picks its own technique (filled vs stroke) instead of a one-size-fits-all `path/fill+stroke` template.
+
+### What shipped
+
+[wash-pin.tsx](artifacts/washbuddy-web/src/components/customer/wash-pin.tsx): `GLYPH_PATHS: Record<WashPinGlyph, string>` replaced with `GLYPH_FRAGMENT: Record<WashPinGlyph, (fill) => string>`. Each glyph returns its own SVG markup — closed-path fill for shapes that read well solid, stroke-only line art for shapes that need open contours. The original CP1 fill+stroke template silently produced invisible no-ops for `dump` and the X-mark inside `restock` because `fill` won't fill an unclosed path.
+
+### Glyph designs (paste these into the verification harness)
+
+| Category enum | Glyph name | Render style | SVG fragment |
+|---|---|---|---|
+| `EXTERIOR_WASH` | `wash` | Filled teardrop | `<path d="M16 8 C13 12 11 15 11 17.5 A5 5 0 0 0 21 17.5 C21 15 19 12 16 8 Z" fill="…"/>` |
+| `INTERIOR_CLEANING` | `interior` | Stroke (1.6) | Diagonal blade `(11,19)→(20,11)` plus perpendicular handle `(17.7,9.2)→(20,11)`. Reads as a squeegee/wiper. EID §3.5 explicitly accepts vacuum-or-squeegee. |
+| `RESTROOM_DUMP` | `dump` | Stroke (1.6) | Top horizontal grate bar `y=11.5, x=11..21` plus two downward chevrons `(13,14)→(16,17)→(19,14)` and `(14.5,17.2)→(16,18.7)→(17.5,17.2)`. Reads as water flowing into a drain. |
+| `RESTOCK_CONSUMABLES` | `restock` | Stroke (1.5) | Rounded rectangle `x=11,y=11,w=10,h=8,rx=0.5` plus horizontal divider `(11,15)→(21,15)`. Reads as a sealed package with packing tape. |
+| `ADD_ON` | `addon` | Filled 5-pointed star | `<path d="M16 9.5 L17.5 13.2 L21.4 13.7 L18.4 16.3 L19.2 20.2 L16 18.3 L12.8 20.2 L13.6 16.3 L10.6 13.7 L14.5 13.2 Z" fill="…"/>` (10 vertices, alternating outer/inner). |
+
+All glyphs designed in the 32×40 viewBox space, centered roughly at (16, 14) inside the pin's circular head. Stroke-based glyphs use `stroke-linecap="round"` and `stroke-linejoin="round"` so the strokes don't shear at endpoints. Stroke widths chosen so the visible weight at 22-32px pin sizes stays around 1px effective — heavy enough to read, thin enough not to overpower the pin shape behind.
+
+### Why the original `interior` failed
+
+Original path: `M11 11 H21 V13 H17.5 V19 H14.5 V13 H11 Z`. Tracing this:
+- (11,11) → (21,11) → (21,13) → (17.5,13) → (17.5,19) → (14.5,19) → (14.5,13) → (11,13) → close.
+
+That literally draws a T-shape — top horizontal bar (10 wide × 2 tall) with a centered vertical stem (3 wide × 6 tall). At icon size, the proportions read as the letter T rather than as a vacuum silhouette. The fix replaces it with a stroke-based squeegee — a different visual language that doesn't risk being mistaken for a glyph from the Latin alphabet.
+
+### Verification
+
+- TypeScript: **21 errors**, baseline holds. Zero new in wash-pin.tsx.
+- Production build: succeeds. find-a-wash chunk: 191.65 → 192.07 kB raw / 57.25 → 57.32 kB gzipped. Negligible change (+0.4 kB raw, +0.07 kB gzipped) — the rewrite is mostly a render-strategy shift, not new code volume.
+
+### Acknowledged test gap (not a regression)
+
+The CP1 test protocol included "select services to verify labels render." That test wasn't runnable on CP1 — there's no service picker UI on `/find-a-wash` until Round 3 per EID §4.2. Labels are wired in code (the `label` parameter on `renderWashPinHtml`, the top-tier and mid-tier rendering paths, and the `computeHiddenLabels` collision helper) but the UI gate that would supply a label string doesn't exist yet. CP1's behavior of rendering pins without labels is the intended state for this checkpoint and shouldn't show up as a regression in later verification passes.
+
+### Open items for CP2
+
+Unchanged from the CP1 handoff section above. CP2 dispatches after the user verifies the new glyphs render recognizably on Replit.
