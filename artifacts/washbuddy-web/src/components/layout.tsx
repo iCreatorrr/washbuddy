@@ -3,11 +3,31 @@ import { useAuth } from "@/contexts/auth";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import { Button } from "./ui";
-import { LogOut, Menu, User, MapPin, Calendar, Truck, LayoutDashboard, Settings, Users, Droplets, Route, Star, Shield, ClipboardList, RotateCcw, Building2, BarChart3, X, ArrowLeft } from "lucide-react";
+import { LogOut, Menu, User, MapPin, Calendar, Truck, LayoutDashboard, Settings, Users, Droplets, Route, Star, Shield, ClipboardList, RotateCcw, Building2, BarChart3, X, ArrowLeft, Bookmark } from "lucide-react";
 import { NotificationBell } from "./notification-bell";
 import { motion } from "framer-motion";
 
-export function AppLayout({ children }: { children: React.ReactNode }) {
+/**
+ * Lets pages that suppress the AppLayout mobile header (currently
+ * just `/find-a-wash` per Round 1 Phase A — EID §3.1) trigger the
+ * shared mobile menu without rebuilding the menu themselves. The
+ * dropdown panel is still owned by AppLayout; pages just toggle
+ * `isOpen` from their own header replacement (e.g., the floating
+ * top-right cluster on find-a-wash).
+ */
+type MobileMenuController = {
+  isOpen: boolean;
+  setOpen: (open: boolean) => void;
+  toggle: () => void;
+};
+const MobileMenuContext = React.createContext<MobileMenuController | null>(null);
+export function useMobileMenu(): MobileMenuController {
+  const ctx = React.useContext(MobileMenuContext);
+  if (!ctx) throw new Error("useMobileMenu must be used within AppLayout");
+  return ctx;
+}
+
+export function AppLayout({ children, hideMobileHeader = false }: { children: React.ReactNode; hideMobileHeader?: boolean }) {
   const { user, logout, hasRole } = useAuth();
   const [location] = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
@@ -65,8 +85,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       return items;
     }
     const customerItems = [
-      { label: "Find a Wash", icon: MapPin, href: "/search" },
-      { label: "Route Planner", icon: Route, href: "/route-planner" },
+      { label: "Find a Wash", icon: MapPin, href: "/find-a-wash" },
+      { label: "Saved", icon: Bookmark, href: "/saved" },
       { label: "My Bookings", icon: Calendar, href: "/bookings" },
       { label: "My Vehicles", icon: Truck, href: "/vehicles" },
     ];
@@ -85,7 +105,20 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     return "border-l-4 border-cyan-500";
   };
 
+  const menuController: MobileMenuController = {
+    isOpen: isMobileMenuOpen,
+    setOpen: setIsMobileMenuOpen,
+    toggle: () => setIsMobileMenuOpen((v) => !v),
+  };
+
+  // When the mobile header is suppressed (find-a-wash) the dropdown
+  // doesn't need to clear a 73px sticky header — anchor it at the
+  // top of the viewport instead. The page renders its own top-right
+  // hamburger trigger that calls into this controller.
+  const dropdownTopOffset = hideMobileHeader ? "top-0" : "top-[73px]";
+
   return (
+    <MobileMenuContext.Provider value={menuController}>
     <div className="min-h-screen bg-slate-50 flex">
       {/* Sidebar Desktop */}
       <aside className={cn("hidden lg:flex flex-col w-72 bg-slate-900 text-white fixed h-full z-20", getRoleAccent())}>
@@ -144,32 +177,37 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           the viewport, breaking mobile. min-w-0 caps main at its allotted
           flex space and lets descendants' overflow-x-auto actually clip. */}
       <main className="flex-1 lg:pl-72 flex flex-col min-h-screen relative min-w-0">
-        {/* Mobile Header */}
-        <header className="lg:hidden flex items-center justify-between p-4 bg-white border-b border-slate-200 sticky top-0 z-30 glass-panel">
-          <div className="flex items-center gap-2">
-            {/* In-app back button — popped browser history when there's
-                in-session navigation, otherwise stays hidden so the
-                landing page doesn't show a confusing "back to nothing". */}
-            {window.history.length > 1 && location !== "/" && (
-              <button
-                type="button"
-                onClick={() => window.history.back()}
-                aria-label="Back"
-                className="p-2 -ml-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </button>
-            )}
-            <Droplets className="h-6 w-6 text-blue-600" />
-            <span className="text-xl font-display font-bold text-slate-900">WashBuddy</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <NotificationBell />
-            <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}>
-              {isMobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-            </Button>
-          </div>
-        </header>
+        {/* Mobile Header — suppressed when `hideMobileHeader` is set
+            (find-a-wash provides its own floating top-left button +
+            top-right cluster per EID §3.1). Desktop sidebar header
+            is unaffected; this only governs the mobile sticky bar. */}
+        {!hideMobileHeader && (
+          <header className="lg:hidden flex items-center justify-between p-4 bg-white border-b border-slate-200 sticky top-0 z-30 glass-panel">
+            <div className="flex items-center gap-2">
+              {/* In-app back button — popped browser history when there's
+                  in-session navigation, otherwise stays hidden so the
+                  landing page doesn't show a confusing "back to nothing". */}
+              {window.history.length > 1 && location !== "/" && (
+                <button
+                  type="button"
+                  onClick={() => window.history.back()}
+                  aria-label="Back"
+                  className="p-2 -ml-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
+              )}
+              <Droplets className="h-6 w-6 text-blue-600" />
+              <span className="text-xl font-display font-bold text-slate-900">WashBuddy</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <NotificationBell />
+              <Button variant="ghost" size="icon" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}>
+                {isMobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+              </Button>
+            </div>
+          </header>
+        )}
 
         {/* Mobile Menu Dropdown — backdrop dismisses on tap. No
             AnimatePresence and no exit animation: a 300ms height/
@@ -188,14 +226,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               animate={{ opacity: 1 }}
               transition={{ duration: 0.15 }}
               onClick={() => setIsMobileMenuOpen(false)}
-              className="lg:hidden fixed inset-0 top-[73px] bg-black/40 z-10"
+              className={cn("lg:hidden fixed inset-0 bg-black/40 z-10", dropdownTopOffset)}
               aria-hidden
             />
             <motion.div
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               transition={{ duration: 0.15 }}
-              className="lg:hidden bg-slate-900 text-white overflow-hidden border-b border-slate-800 sticky top-[73px] z-20"
+              className={cn("lg:hidden bg-slate-900 text-white overflow-hidden border-b border-slate-800 sticky z-20", dropdownTopOffset)}
             >
               <nav className="p-4 space-y-2">
                 {navItems.map((item) => (
@@ -221,5 +259,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </main>
     </div>
+    </MobileMenuContext.Provider>
   );
 }

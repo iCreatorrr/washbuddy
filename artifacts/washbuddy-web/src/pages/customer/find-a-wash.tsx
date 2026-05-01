@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 import { Card, Input, Button, Badge, ErrorState } from "@/components/ui";
-import { MapPin, Navigation, Route, ArrowRight, X, Loader2, ChevronDown, Crosshair, Star, Maximize2, Minimize2, Pencil } from "lucide-react";
+import { MapPin, Navigation, Route, ArrowRight, X, Loader2, ChevronDown, Crosshair, Star, Maximize2, Minimize2, Pencil, ArrowLeft, Menu, Droplets } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { formatCurrency } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -12,6 +12,8 @@ import "leaflet/dist/leaflet.css";
 import { ActiveVehiclePill } from "@/components/customer/active-vehicle-pill";
 import { useActiveVehicle } from "@/contexts/activeVehicle";
 import { deriveSizeClassFromLengthInches } from "@/lib/vehicleBodyType";
+import { useMobileMenu } from "@/components/layout";
+import { NotificationBell } from "@/components/notification-bell";
 
 interface CityOption {
   name: string;
@@ -564,6 +566,24 @@ export default function FindAWash() {
   // Centralized so downstream JSX and effects read `mode` rather
   // than re-checking `destination` themselves.
   const mode: "nearby" | "route" = destination ? "route" : "nearby";
+
+  // The AppLayout mobile header is suppressed on this page (per
+  // EID §3.1). The hamburger trigger we render in the floating
+  // top-right cluster controls the same shared dropdown via
+  // context. Phase B replaces this interim cluster with the
+  // unified collapsed/expanded header.
+  const mobileMenu = useMobileMenu();
+
+  // Top-level vs deep entry — drives the floating top-left
+  // button's icon (logomark vs back chevron). Approach A from the
+  // Checkpoint 2 prompt: `window.history.length` is the same
+  // heuristic AppLayout's previous mobile back button used. Known
+  // limitation: history grows during in-app navigation, so a user
+  // who lands on /find-a-wash, taps a location, then returns,
+  // sees a back chevron even though /find-a-wash was their entry
+  // point. Approach B (a Wouter-aware visit-history hook) replaces
+  // this if the heuristic causes confusion in testing.
+  const isDeepEntry = typeof window !== "undefined" && window.history.length > 1;
 
   const { activeVehicle } = useActiveVehicle();
   const activeVehicleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
@@ -1201,7 +1221,55 @@ export default function FindAWash() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pt-14 lg:pt-0">
+      {/* Floating top-left button — logomark on top-level entry,
+          back chevron when navigated in from another page. Mobile
+          only; desktop uses the AppLayout sidebar's branding and
+          notification bell. EID §3.1 / §3.8. The 36px circle has
+          ~44px effective tap target via the surrounding p-1 span;
+          accessibility note about sub-44 visible size is in the
+          checkpoint-2 verification §2. */}
+      <div className="lg:hidden fixed top-4 left-4 z-[1000] pointer-events-none">
+        <button
+          type="button"
+          onClick={() => {
+            if (isDeepEntry) window.history.back();
+            // logomark tap is a no-op for now; refresh-to-default
+            // semantics land in Phase B per EID §3.8.
+          }}
+          aria-label={isDeepEntry ? "Back" : "WashBuddy home"}
+          className="pointer-events-auto h-9 w-9 rounded-full bg-white/95 backdrop-blur-md flex items-center justify-center shadow-[0_2px_6px_rgba(15,23,42,0.10)] border border-slate-200/80 hover:bg-white transition-colors"
+        >
+          {isDeepEntry ? (
+            <ArrowLeft className="h-5 w-5 text-slate-700" />
+          ) : (
+            <Droplets className="h-5 w-5 text-blue-600" />
+          )}
+        </button>
+      </div>
+
+      {/* Floating top-right cluster — interim Phase A placement
+          for the bell + hamburger trigger while the AppLayout
+          mobile header is suppressed. Phase B integrates these
+          into the unified collapsed/expanded header. */}
+      <div className="lg:hidden fixed top-4 right-4 z-[1000] flex items-center gap-1 pointer-events-none">
+        <div className="pointer-events-auto bg-white/95 backdrop-blur-md rounded-full shadow-[0_2px_6px_rgba(15,23,42,0.10)] border border-slate-200/80 p-1">
+          <NotificationBell />
+        </div>
+        <button
+          type="button"
+          onClick={mobileMenu.toggle}
+          aria-label={mobileMenu.isOpen ? "Close menu" : "Open menu"}
+          className="pointer-events-auto h-9 w-9 rounded-full bg-white/95 backdrop-blur-md flex items-center justify-center shadow-[0_2px_6px_rgba(15,23,42,0.10)] border border-slate-200/80 hover:bg-white transition-colors"
+        >
+          {mobileMenu.isOpen ? (
+            <X className="h-5 w-5 text-slate-700" />
+          ) : (
+            <Menu className="h-5 w-5 text-slate-700" />
+          )}
+        </button>
+      </div>
+
       <div className="flex items-center gap-3 max-w-full">
         <div className="min-w-0 max-w-full">
           <ActiveVehiclePill />

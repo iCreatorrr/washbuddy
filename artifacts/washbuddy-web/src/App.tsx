@@ -18,6 +18,7 @@ const LocationDetail = lazy(() => import("./pages/customer/location-detail"));
 const MyBookings = lazy(() => import("./pages/customer/my-bookings"));
 const MyVehicles = lazy(() => import("./pages/customer/my-vehicles"));
 const FindAWash = lazy(() => import("./pages/customer/find-a-wash"));
+const Saved = lazy(() => import("./pages/customer/saved"));
 const ProviderDashboard = lazy(() => import("./pages/provider/dashboard"));
 const DailyBoard = lazy(() => import("./pages/provider/daily-board"));
 const BayTimeline = lazy(() => import("./pages/provider/bay-timeline"));
@@ -61,7 +62,15 @@ function isFleetOperator(hasRole: (r: string) => boolean) {
   return hasRole("FLEET_ADMIN") || hasRole("DISPATCHER") || hasRole("MAINTENANCE_MANAGER") || hasRole("READ_ONLY_ANALYST");
 }
 
-function RouteGuard({ children, allowedRoles }: { children: React.ReactNode, allowedRoles?: string[] }) {
+function RouteGuard({
+  children,
+  allowedRoles,
+  hideMobileHeader = false,
+}: {
+  children: React.ReactNode;
+  allowedRoles?: string[];
+  hideMobileHeader?: boolean;
+}) {
   const { user, isLoading, hasRole } = useAuth();
   const [location, setLocation] = useLocation();
 
@@ -83,7 +92,7 @@ function RouteGuard({ children, allowedRoles }: { children: React.ReactNode, all
   if (isLoading || !user) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>;
   if (!hasAccess) return null;
 
-  return <AppLayout>{children}</AppLayout>;
+  return <AppLayout hideMobileHeader={hideMobileHeader}>{children}</AppLayout>;
 }
 
 /**
@@ -146,7 +155,10 @@ function Router() {
 
       {/* Customer Routes */}
       <Route path="/find-a-wash">
-        <RouteGuard><FindAWash /></RouteGuard>
+        <RouteGuard hideMobileHeader><FindAWash /></RouteGuard>
+      </Route>
+      <Route path="/saved">
+        <RouteGuard><Saved /></RouteGuard>
       </Route>
       {/* Legacy URLs redirect to the merged page. The page files
           (search.tsx, route-planner.tsx) stay until Round 5; they
