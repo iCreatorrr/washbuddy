@@ -82,7 +82,7 @@ These are the architectural and behavioral decisions that define the redesign. E
 
 ### 4.1 Single merged page; mode shifts implicitly via destination
 
-A single page, `/find-a-wash`, replaces both `/customer/search` and `/customer/route-planner`. The page operates in **nearby mode** when no destination is set and **route mode** when a destination is set. The mode shift is implicit — no mode picker. Two reasons:
+A single page, `/find-a-wash`, replaces both `/search` and `/route-planner`. The page operates in **nearby mode** when no destination is set and **route mode** when a destination is set. The mode shift is implicit — no mode picker. Two reasons:
 
 - It matches how users think. A user who hasn't set a destination is implicitly searching "near me right now"; one who has set a destination is implicitly searching "along this route." Forcing them to choose is unnecessary cognitive overhead.
 - It mirrors the Google Maps and Apple Maps pattern, which users now expect from any map-driven discovery experience.

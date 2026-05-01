@@ -65,23 +65,29 @@ pnpm -F @workspace/washbuddy-web run build
 
 | Old route | New behavior |
 |---|---|
-| `/customer/search` | Permanent redirect to `/find-a-wash` |
-| `/customer/route-planner` | Permanent redirect to `/find-a-wash`, preserving `?destination=` query param |
+| `/search` | Permanent redirect to `/find-a-wash` |
+| `/route-planner` | Permanent redirect to `/find-a-wash`, preserving the full querystring (existing route-planner params: `from`, `to`, `vehicleClass`) |
 | `/find-a-wash` | New canonical merged page |
+
+Note: actual route paths in `App.tsx` are `/search` and `/route-planner` (not `/customer/search` and `/customer/route-planner` as earlier drafts of this spec stated). The `customer/` segment exists in the page filenames under `pages/customer/`, not in the URL.
 
 Wouter does not have a built-in `<Redirect>` component. Implementation pattern:
 
 ```tsx
-<Route path="/customer/search">
+<Route path="/route-planner">
   {() => {
     const [, setLocation] = useLocation();
-    useEffect(() => { setLocation('/find-a-wash', { replace: true }); }, []);
+    useEffect(() => {
+      setLocation('/find-a-wash' + window.location.search, { replace: true });
+    }, []);
     return null;
   }}
 </Route>
 ```
 
-Verify the pattern against the project's existing redirect handling in `app.tsx` or wherever routes are registered.
+For `/search` the same pattern applies without the querystring carry-over (search.tsx had no meaningful query params to preserve).
+
+Verify the pattern against the project's existing redirect handling in `App.tsx` or wherever routes are registered.
 
 ### 2.2 Page state
 
@@ -907,7 +913,7 @@ CTAs for these capabilities on the location detail page are phone-call links, no
 - Add the "search this area" button per §3.2.
 - Add pin labels at zoom thresholds per §3.5.
 - Add pin clustering per §3.5 (Leaflet.markercluster).
-- Add redirects from `/customer/search` and `/customer/route-planner` to `/find-a-wash`.
+- Add redirects from `/search` and `/route-planner` to `/find-a-wash` (preserving the route-planner querystring so `?from=&to=` round-trip).
 - Update `artifacts/washbuddy-web/src/components/layout.tsx` hamburger menu: replace "Find a Wash" + "Route Planner" with single "Find a Wash" entry pointing to `/find-a-wash`. Add stub "Saved" entry pointing to a placeholder page.
 - Implement floating logomark/back button per §3.8.
 - New page works in nearby mode (no destination) and route mode (with destination), with the correct mode-determined behavior (sort, distance metric, time selector visibility, etc.).
