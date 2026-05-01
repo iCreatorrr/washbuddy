@@ -13,6 +13,7 @@ import { useAuth } from "@/contexts/auth";
 import { ActiveVehiclePill } from "@/components/customer/active-vehicle-pill";
 import { useActiveVehicle } from "@/contexts/activeVehicle";
 import { deriveSizeClassFromLengthInches } from "@/lib/vehicleBodyType";
+import { matchesSearch } from "@/lib/search-helpers";
 
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 3959;
@@ -30,73 +31,6 @@ function formatDistance(miles: number): string {
   if (miles < 1) return `${Math.round(miles * 5280)} ft`;
   if (miles < 10) return `${miles.toFixed(1)} mi`;
   return `${Math.round(miles)} mi`;
-}
-
-const STATE_NAMES: Record<string, string> = {
-  AL: "alabama", AK: "alaska", AZ: "arizona", AR: "arkansas", CA: "california",
-  CO: "colorado", CT: "connecticut", DE: "delaware", FL: "florida", GA: "georgia",
-  HI: "hawaii", ID: "idaho", IL: "illinois", IN: "indiana", IA: "iowa",
-  KS: "kansas", KY: "kentucky", LA: "louisiana", ME: "maine", MD: "maryland",
-  MA: "massachusetts", MI: "michigan", MN: "minnesota", MS: "mississippi", MO: "missouri",
-  MT: "montana", NE: "nebraska", NV: "nevada", NH: "new hampshire", NJ: "new jersey",
-  NM: "new mexico", NY: "new york", NC: "north carolina", ND: "north dakota", OH: "ohio",
-  OK: "oklahoma", OR: "oregon", PA: "pennsylvania", RI: "rhode island", SC: "south carolina",
-  SD: "south dakota", TN: "tennessee", TX: "texas", UT: "utah", VT: "vermont",
-  VA: "virginia", WA: "washington", WV: "west virginia", WI: "wisconsin", WY: "wyoming",
-  DC: "district of columbia",
-  AB: "alberta", BC: "british columbia", MB: "manitoba", NB: "new brunswick",
-  NL: "newfoundland", NS: "nova scotia", NT: "northwest territories", NU: "nunavut",
-  ON: "ontario", PE: "prince edward island", QC: "quebec", SK: "saskatchewan", YT: "yukon",
-};
-
-const METRO_ALIASES: Record<string, string[]> = {
-  "new york": ["bronx", "brooklyn", "queens", "staten island", "manhattan", "new york"],
-  "nyc": ["bronx", "brooklyn", "queens", "staten island", "manhattan", "new york"],
-  "los angeles": ["los angeles", "la", "hollywood", "long beach", "pasadena", "glendale"],
-  "chicago": ["chicago", "evanston", "cicero"],
-  "dallas": ["dallas", "fort worth", "arlington", "plano", "irving"],
-  "philadelphia": ["philadelphia", "camden"],
-  "houston": ["houston", "pasadena", "sugar land"],
-  "detroit": ["detroit", "dearborn", "warren", "flint"],
-  "boston": ["boston", "cambridge", "somerville", "quincy"],
-  "san francisco": ["san francisco", "oakland", "berkeley", "daly city"],
-  "dc": ["washington", "arlington", "alexandria"],
-  "washington dc": ["washington", "arlington", "alexandria"],
-};
-
-function resolveStateCode(term: string): string | null {
-  const t = term.toLowerCase().trim();
-  if (t.length === 2) {
-    const upper = t.toUpperCase();
-    if (STATE_NAMES[upper]) return upper;
-  }
-  for (const [code, name] of Object.entries(STATE_NAMES)) {
-    if (name === t) return code;
-  }
-  return null;
-}
-
-function matchesSearch(loc: { name: string; city: string; addressLine1?: string; stateCode?: string; postalCode?: string }, term: string): boolean {
-  if (!term) return true;
-  const t = term.toLowerCase().trim();
-
-  const stateCode = resolveStateCode(t);
-  if (stateCode) {
-    return (loc.stateCode || "").toUpperCase() === stateCode;
-  }
-
-  const metroCities = METRO_ALIASES[t];
-  if (metroCities) {
-    const cityLow = loc.city.toLowerCase();
-    return metroCities.some(alias => cityLow.includes(alias));
-  }
-
-  const fields = [
-    loc.name, loc.city, loc.addressLine1 || "", loc.stateCode || "", loc.postalCode || "",
-  ].map(f => f.toLowerCase());
-
-  const terms = t.split(/\s+/);
-  return terms.every(word => fields.some(f => f.includes(word)));
 }
 
 type LocationWithMeta = {

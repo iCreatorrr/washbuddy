@@ -9,11 +9,15 @@ import { Toaster } from "sonner";
 // Lazy-loaded pages (route-based code splitting)
 const Login = lazy(() => import("./pages/auth/login"));
 const Register = lazy(() => import("./pages/auth/register"));
-const CustomerSearch = lazy(() => import("./pages/customer/search"));
+// Legacy pages search.tsx and route-planner.tsx are no longer
+// imported — the /search and /route-planner routes now redirect
+// to /find-a-wash. The legacy files stay on disk until Round 5
+// deletes them, but Vite won't bundle unreferenced code-split
+// chunks, so we don't carry the dead weight in production.
 const LocationDetail = lazy(() => import("./pages/customer/location-detail"));
 const MyBookings = lazy(() => import("./pages/customer/my-bookings"));
 const MyVehicles = lazy(() => import("./pages/customer/my-vehicles"));
-const RoutePlanner = lazy(() => import("./pages/customer/route-planner"));
+const FindAWash = lazy(() => import("./pages/customer/find-a-wash"));
 const ProviderDashboard = lazy(() => import("./pages/provider/dashboard"));
 const DailyBoard = lazy(() => import("./pages/provider/daily-board"));
 const BayTimeline = lazy(() => import("./pages/provider/bay-timeline"));
@@ -71,7 +75,7 @@ function RouteGuard({ children, allowedRoles }: { children: React.ReactNode, all
         if (hasRole("PLATFORM_SUPER_ADMIN")) setLocation("/admin");
         else if (hasRole("PROVIDER_ADMIN") || hasRole("PROVIDER_STAFF")) setLocation("/provider");
         else if (isFleetOperator(hasRole)) setLocation("/fleet");
-        else setLocation("/search");
+        else setLocation("/find-a-wash");
       }
     }
   }, [user, isLoading, hasRole, hasAccess, location, setLocation]);
@@ -80,6 +84,28 @@ function RouteGuard({ children, allowedRoles }: { children: React.ReactNode, all
   if (!hasAccess) return null;
 
   return <AppLayout>{children}</AppLayout>;
+}
+
+/**
+ * Permanent redirect helper. Wouter has no built-in `<Redirect>`
+ * component; this is the EID §2.1 pattern. Used for the merged
+ * search-and-discovery URLs (`/search` and `/route-planner` both
+ * fold into `/find-a-wash`); the legacy page files stay in the
+ * codebase until Round 5's deletion sweep so the routes that hit
+ * them get redirected here, not 404'd.
+ *
+ * `preserveSearch` keeps the querystring on the redirected URL —
+ * route-planner used `?from=&to=` and the legacy callers (e.g.
+ * "Continue to route planner" deep links) rely on those carrying
+ * over.
+ */
+function RedirectTo({ to, preserveSearch = false }: { to: string; preserveSearch?: boolean }) {
+  const [, setLocation] = useLocation();
+  useEffect(() => {
+    const target = preserveSearch ? to + window.location.search : to;
+    setLocation(target, { replace: true });
+  }, [to, preserveSearch, setLocation]);
+  return null;
 }
 
 function RootRedirect() {
@@ -97,7 +123,7 @@ function RootRedirect() {
       } else if (isFleetOperator(hasRole)) {
         setLocation("/fleet");
       } else {
-        setLocation("/search");
+        setLocation("/find-a-wash");
       }
     }
   }, [user, isLoading, hasRole, setLocation]);
@@ -119,8 +145,19 @@ function Router() {
       </Route>
 
       {/* Customer Routes */}
+      <Route path="/find-a-wash">
+        <RouteGuard><FindAWash /></RouteGuard>
+      </Route>
+      {/* Legacy URLs redirect to the merged page. The page files
+          (search.tsx, route-planner.tsx) stay until Round 5; they
+          aren't reachable via these routes anymore but remain in
+          the bundle as inert imports — the lazy() chunks won't
+          load unless someone deep-links into them after deletion. */}
       <Route path="/search">
-        <RouteGuard><CustomerSearch /></RouteGuard>
+        <RedirectTo to="/find-a-wash" />
+      </Route>
+      <Route path="/route-planner">
+        <RedirectTo to="/find-a-wash" preserveSearch />
       </Route>
       <Route path="/location/:id">
         <RouteGuard><LocationDetail /></RouteGuard>
@@ -130,9 +167,6 @@ function Router() {
       </Route>
       <Route path="/vehicles">
         <RouteGuard><MyVehicles /></RouteGuard>
-      </Route>
-      <Route path="/route-planner">
-        <RouteGuard><RoutePlanner /></RouteGuard>
       </Route>
 
       {/* Provider Routes */}
