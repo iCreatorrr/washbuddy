@@ -408,19 +408,17 @@ function classifyPin(location: Location, rankIdx: number, totalRanked: number, m
 - Low: fill `#94A3B8`, white 1.8px stroke.
 - Incompatible: fill `#E2E8F0`, `#94A3B8` 1.5px dashed stroke (`stroke-dasharray="2 1.5"`).
 
-**Inner glyph by primary service:**
-- Default (water-drop motif from WashBuddy logomark) — exterior wash, or fallback when no specific category.
-- Vacuum/squeegee — interior cleaning.
-- Drain icon — restroom dump.
-- Box icon — restock & consumables.
-- Star or asterisk — add-ons.
+**Inner glyph: WashBuddy water-drop logomark (uniform across all pins).**
 
-The "primary service" for a location is determined by:
-1. If user has selected service categories: the one with the most matches at this location.
-2. Else: the first category in the location's services list.
-3. Else: default water-drop.
+The logomark provides brand identity. Pin color encodes ranking (saturated blue / lighter blue / gray / dashed gray); price or detour label encodes decision-relevant information. Service category info lives in filter chips, card service pills, and detail pages — not in pin glyphs.
 
-**Production note:** the visual reference uses a hand-drawn approximation of the WashBuddy logomark for the water-drop variant. Production should use the actual logomark SVG. Locate the asset in the repo (likely `artifacts/washbuddy-web/public/` or `src/assets/`); if unavailable, request from product before Round 1 ships.
+**Why not per-category glyphs:** UX research shows color is the strongest preattentive attribute for categorical encoding; shape is much weaker. At 32×40px pin sizes with 12-16px glyphs, abstract category icons (squeegee, drain, box) collapse into indistinguishable dark shapes inside the teardrop. Asking users to memorize 5 glyph-to-category mappings violates working memory norms (~7 item cap, with cognitive load rising sharply past 4-5). Category-leading map apps (PlugShare, GasBuddy, Airbnb) encode availability and ranking on pins, not category — category lives in filters and cards.
+
+Operationally: most full-service bus washes offer 3-4 of the 5 service categories. There is no meaningful "primary service" to encode visually the way there is in gas vs. EV charging. Pins answering "does this match my filters" via color tier is the truthful encoding.
+
+**Future consideration (Round 3+):** when filter chips and the service picker ship, a small numeric badge in the pin's lower-right corner could indicate "matches N of your filtered services" (e.g., "3/4" if the user filtered for 4 services and this provider offers 3). This is a layered badge, not a glyph replacement, and it's gated on filter UI existing. Worth piloting; not committed.
+
+**Production note:** the visual reference uses a hand-drawn approximation of the WashBuddy logomark. Production should use the actual logomark SVG. Locate the asset in the repo (likely `artifacts/washbuddy-web/public/` or `src/assets/`); if unavailable, request from product before Round 1 ships.
 
 **Pin labels:**
 

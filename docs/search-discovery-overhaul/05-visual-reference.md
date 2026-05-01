@@ -112,7 +112,9 @@ No font weight other than 400 and 500. No mid-sentence bolding. Sentence case th
 
 ## 4. The pin
 
-The pin is the most-seen element in the app. It encodes ranking through color, primary service through inner glyph, and detour time through the always-visible label on top-tier pins.
+The pin is the most-seen element in the app. It encodes ranking through color and detour time through the always-visible label on top-tier pins. The inner glyph is the WashBuddy water-drop logomark — uniform across all pins, used for brand identity rather than per-category encoding.
+
+**Spec update (Phase B CP1.6):** the inner-glyph specification was changed from 5 per-category variants to a uniform WashBuddy water-drop logomark. Per-category color tokens in §1 still apply to filter chips, card service pills, and detail pages. See EID §3.5 for the rationale (UX research, icon legibility at 32×40px, alignment with category-leading map apps).
 
 ### 4.1 Pin shape and color tiers
 
