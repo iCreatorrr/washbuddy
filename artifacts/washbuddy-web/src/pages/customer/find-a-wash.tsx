@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 import { Card, Input, Button, Badge, ErrorState } from "@/components/ui";
-import { MapPin, Navigation, Route, ArrowRight, X, Loader2, ChevronDown, Crosshair, Star, Maximize2, Minimize2, Pencil, ArrowLeft, Menu, Droplets } from "lucide-react";
+import { MapPin, Navigation, Route, ArrowRight, X, Loader2, ChevronDown, Crosshair, Star, Maximize2, Minimize2, Pencil, ArrowLeft, Menu, Droplets, Building2, Landmark } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { formatCurrency } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -15,12 +15,20 @@ import { deriveSizeClassFromLengthInches } from "@/lib/vehicleBodyType";
 import { useMobileMenu } from "@/components/layout";
 import { NotificationBell } from "@/components/notification-bell";
 
+type PlaceKind = "city" | "address" | "poi" | "other";
+
 interface CityOption {
   name: string;
   state: string;
   lat: number;
   lng: number;
   label: string;
+  // Optional kind tag used by the autocomplete dropdown to choose
+  // an icon and secondary line. Older callers (URL hydration via
+  // getCityByLabel, sessionStorage cache restore) leave this
+  // undefined; the UI treats undefined as "other".
+  kind?: PlaceKind;
+  secondary?: string;
 }
 
 interface NominatimResult {
@@ -28,7 +36,18 @@ interface NominatimResult {
   lat: string;
   lon: string;
   display_name: string;
+  // Nominatim type/class identify what the result is. `class`
+  // examples: 'place' (city/town), 'building'/'highway' (address),
+  // 'amenity'/'shop'/'tourism'/'leisure'/'historic' (POI).
+  class?: string;
+  type?: string;
+  // POIs typically include a top-level `name`.
+  name?: string;
   address?: {
+    house_number?: string;
+    road?: string;
+    suburb?: string;
+    neighbourhood?: string;
     city?: string;
     town?: string;
     village?: string;
@@ -36,20 +55,34 @@ interface NominatimResult {
     municipality?: string;
     state?: string;
     province?: string;
+    postcode?: string;
     country?: string;
     country_code?: string;
+    amenity?: string;
   };
 }
 
-async function searchCities(query: string): Promise<CityOption[]> {
+/**
+ * Freeform Nominatim search. Bug 2 fix (Checkpoint 4) — drops the
+ * `featuretype=city` restriction so this returns the same broad
+ * mix Google Maps' search box does: addresses, POIs/venues, and
+ * cities. The result types each get a different icon and label
+ * pattern in the dropdown so the user can tell what they're
+ * picking.
+ *
+ * `dedupe=1` and `addressdetails=1` are Nominatim flags. Limit 8
+ * picked because the dropdown is `max-h-60 overflow-y-auto`; ~8
+ * rows fits without forcing scroll.
+ */
+async function searchPlaces(query: string): Promise<CityOption[]> {
   if (!query || query.length < 2) return [];
   const params = new URLSearchParams({
     q: query,
     format: "json",
     addressdetails: "1",
+    dedupe: "1",
     limit: "8",
     countrycodes: "us,ca,mx",
-    featuretype: "city",
   });
   try {
     const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
@@ -58,21 +91,71 @@ async function searchCities(query: string): Promise<CityOption[]> {
     if (!res.ok) return [];
     const data: NominatimResult[] = await res.json();
     return data
-      .filter((r) => r.address && (r.address.city || r.address.town || r.address.village || r.address.municipality))
-      .map((r) => {
-        const cityName = r.address!.city || r.address!.town || r.address!.village || r.address!.municipality || "";
-        const stateName = r.address!.state || r.address!.province || "";
-        const stateShort = stateName.length > 3 ? stateName : stateName;
-        const label = stateShort ? `${cityName}, ${stateShort}` : cityName;
+      .map((r): CityOption | null => {
+        const a = r.address ?? {};
+        const lat = parseFloat(r.lat);
+        const lng = parseFloat(r.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+        const cityName = a.city || a.town || a.village || a.municipality || a.hamlet || "";
+        const localArea = a.suburb || a.neighbourhood || cityName;
+        const stateName = a.state || a.province || "";
+
+        const isAddress = !!(a.house_number && a.road);
+        const POI_CLASSES = ["amenity", "shop", "tourism", "leisure", "historic", "railway", "aeroway"];
+        const isPoi = !isAddress && (POI_CLASSES.includes(r.class ?? "") || (!!r.name && !cityName));
+
+        if (isAddress) {
+          const street = `${a.house_number} ${a.road}`;
+          const cityPart = localArea ? `, ${localArea}` : "";
+          const statePart = stateName ? `, ${stateName}` : "";
+          const postal = a.postcode ? ` ${a.postcode}` : "";
+          const label = `${street}${cityPart}${statePart}${postal}`.trim();
+          return {
+            name: street,
+            state: stateName,
+            lat, lng, label,
+            kind: "address",
+            secondary: [localArea, stateName].filter(Boolean).join(", "),
+          };
+        }
+        if (isPoi) {
+          const venueName = (r.name || r.display_name.split(",")[0] || "").trim();
+          const cityPart = cityName ? `, ${cityName}` : "";
+          const label = `${venueName}${cityPart}`.trim();
+          return {
+            name: venueName,
+            state: stateName,
+            lat, lng, label,
+            kind: "poi",
+            secondary: [cityName, stateName].filter(Boolean).join(", "),
+          };
+        }
+        if (cityName) {
+          const label = stateName ? `${cityName}, ${stateName}` : cityName;
+          return {
+            name: cityName,
+            state: stateName,
+            lat, lng, label,
+            kind: "city",
+            secondary: stateName,
+          };
+        }
+        // Generic fallback — region/landmark without a clean
+        // address shape. Use Nominatim's display_name truncated to
+        // its first three components (full strings can run a
+        // dozen levels deep — country + admin + locality + ...).
+        const truncated = r.display_name.split(",").slice(0, 3).map((s) => s.trim()).filter(Boolean).join(", ");
         return {
-          name: cityName,
-          state: stateShort,
-          lat: parseFloat(r.lat),
-          lng: parseFloat(r.lon),
-          label,
+          name: truncated,
+          state: stateName,
+          lat, lng,
+          label: truncated,
+          kind: "other",
         };
       })
-      .filter((c, i, arr) => arr.findIndex((x) => x.label === c.label) === i);
+      .filter((p): p is CityOption => p !== null)
+      .filter((p, i, arr) => arr.findIndex((x) => x.label === p.label) === i);
   } catch {
     return [];
   }
@@ -197,11 +280,11 @@ function CityAutocomplete({
     setIsSearching(true);
     const version = ++searchVersionRef.current;
     debounceRef.current = setTimeout(async () => {
-      const cities = await searchCities(q);
+      const places = await searchPlaces(q);
       if (version !== searchVersionRef.current) return;
       const filtered = exclude
-        ? cities.filter((c) => c.label !== exclude.label)
-        : cities;
+        ? places.filter((c) => c.label !== exclude.label)
+        : places;
       setResults(filtered);
       setIsSearching(false);
     }, 200);
@@ -255,35 +338,63 @@ function CityAutocomplete({
       )}
       <AnimatePresence>
         {isOpen && !value && (query.length >= 2) && (
+          // Bug 5 fix (Checkpoint 4): z-[1000] clears Leaflet's
+          // pane z-indices (200–700). Combined with the search
+          // Card wrapper's `relative z-[1000]` parent stacking
+          // context, the dropdown renders above the map at all
+          // viewports.
+          // TODO(round-3+): formalize a `--z-search-dropdown`
+          // CSS variable per EID §3.2 z-index hierarchy so
+          // hardcoded 1000s aren't scattered.
           <motion.div
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
-            className="absolute z-50 top-full mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden max-h-60 overflow-y-auto"
+            className="absolute z-[1000] top-full mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden max-h-60 overflow-y-auto"
           >
             {isSearching ? (
               <div className="px-4 py-3 text-sm text-slate-400 flex items-center gap-2">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Searching...
               </div>
             ) : results.length > 0 ? (
-              results.map((city, idx) => (
-                <button
-                  key={`${city.label}-${idx}`}
-                  className="w-full text-left px-4 py-2.5 hover:bg-blue-50 text-sm flex items-center gap-2 transition-colors"
-                  onClick={() => {
-                    onChange(city);
-                    setQuery(city.label);
-                    setIsOpen(false);
-                  }}
-                >
-                  <MapPin className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                  <span className="font-medium text-slate-800">{city.name}</span>
-                  <span className="text-slate-400">{city.state}</span>
-                </button>
-              ))
+              results.map((place, idx) => {
+                // Bug 2 (Checkpoint 4): kind drives icon + the
+                // primary/secondary line layout so addresses,
+                // venues, and cities are visually distinct in
+                // the dropdown. Existing lucide icons; no new
+                // assets per the checkpoint scope.
+                const Icon = place.kind === "address"
+                  ? MapPin
+                  : place.kind === "poi"
+                    ? Landmark
+                    : place.kind === "city"
+                      ? Building2
+                      : MapPin;
+                return (
+                  <button
+                    key={`${place.label}-${idx}`}
+                    className="w-full text-left px-4 py-2.5 hover:bg-blue-50 text-sm flex items-start gap-2 transition-colors"
+                    onClick={() => {
+                      onChange(place);
+                      setQuery(place.label);
+                      setIsOpen(false);
+                    }}
+                  >
+                    <Icon className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium text-slate-800 truncate">{place.name}</div>
+                      {place.secondary && (
+                        <div className="text-xs text-slate-400 truncate">{place.secondary}</div>
+                      )}
+                    </div>
+                  </button>
+                );
+              })
             ) : (
+              // Bug 2 (Checkpoint 4) — autocomplete now returns
+              // more than cities; empty-state copy reflects that.
               <div className="px-4 py-3 text-sm text-slate-400">
-                No cities found. Try a different search.
+                No matches found. Try a different search.
               </div>
             )}
           </motion.div>
@@ -432,41 +543,65 @@ async function fetchRoute(from: CityOption, to: CityOption): Promise<RouteResult
 
 function getCityByLabel(label: string): CityOption | null {
   if (!label) return null;
+
+  // Primary: uniform bracket-suffix format used by serializeCityForUrl
+  // for every kind of place (post-Checkpoint-4). My Location now uses
+  // the same shape as cities/addresses/POIs.
+  const coordMatch = label.match(/^(.+?)\s*\[(-?\d+\.?\d*),\s*(-?\d+\.?\d*)\]$/);
+  if (coordMatch) {
+    const displayName = coordMatch[1].trim();
+    const lat = parseFloat(coordMatch[2]);
+    const lng = parseFloat(coordMatch[3]);
+    if (displayName.startsWith("My Location")) {
+      return { name: "My Location", state: "", lat, lng, label: displayName };
+    }
+    const parts = displayName.split(", ");
+    return {
+      name: parts[0] || displayName,
+      state: parts[1] || "",
+      lat,
+      lng,
+      label: displayName,
+    };
+  }
+
+  // Backwards-compat: old My Location label that embedded lat/lng in
+  // the parenthetical (no bracket suffix). Bookmarked URLs from
+  // before Checkpoint 4 still parse correctly; once re-planned, the
+  // URL gets re-serialized with the new format and this branch stops
+  // mattering.
   if (label.startsWith("My Location")) {
     const match = label.match(/My Location \((.*),\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)\)/);
     if (match) {
       return { name: "My Location", state: "", lat: parseFloat(match[2]), lng: parseFloat(match[3]), label };
     }
-    return null;
   }
-  const coordMatch = label.match(/^(.+?)\s*\[(-?\d+\.?\d*),\s*(-?\d+\.?\d*)\]$/);
-  if (coordMatch) {
-    const displayName = coordMatch[1].trim();
-    const parts = displayName.split(", ");
-    return {
-      name: parts[0] || displayName,
-      state: parts[1] || "",
-      lat: parseFloat(coordMatch[2]),
-      lng: parseFloat(coordMatch[3]),
-      label: displayName,
-    };
-  }
+
   return null;
 }
 
 function serializeCityForUrl(city: CityOption): string {
-  if (city.name === "My Location") return city.label;
+  // Bug 3 fix (Checkpoint 4): all options now use the bracketed
+  // [lat,lng] suffix for URL serialization, including My Location.
+  // The previous My Location special case baked lat/lng into the
+  // human-readable label, which then leaked back into the To
+  // input field after a flip.
   return `${city.label} [${city.lat.toFixed(4)},${city.lng.toFixed(4)}]`;
 }
 
 function makeMyLocationOption(lat: number, lng: number, areaName?: string): CityOption {
   const area = areaName || "";
+  // Bug 3 fix (Checkpoint 4): label is human-readable only. lat/lng
+  // is preserved on the lat/lng fields and embedded in the URL by
+  // serializeCityForUrl; it's no longer leaked into the user-facing
+  // string.
   return {
     name: "My Location",
     state: "",
     lat,
     lng,
-    label: `My Location (${area ? `near ${area}` : "detected"}, ${lat.toFixed(4)}, ${lng.toFixed(4)})`,
+    label: area ? `My Location (near ${area})` : "My Location (detected)",
+    kind: "other",
   };
 }
 
@@ -1280,8 +1415,14 @@ export default function FindAWash() {
           otherwise. Drops the gradient hero + verbose copy ("Plan
           your trip and find wash locations…") that ate ~200px above
           the fold on mobile. */}
+      {/* `relative z-[1000]` on both Card variants establishes a
+          stacking context above the map's (z-0). Without it, the
+          autocomplete dropdown — even with its own z-[1000] —
+          would be clipped behind Leaflet's panes at desktop
+          widths where the search Card and the map are visually
+          proximate (Bug 5, Checkpoint 4). */}
       {!formCollapsed || !route ? (
-        <Card className="p-4 sm:p-5 space-y-3">
+        <Card className="p-4 sm:p-5 space-y-3 relative z-[1000]">
           <div className="flex items-end gap-2 sm:gap-3 flex-col sm:flex-row">
             <div className="flex-1 w-full min-w-0">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 block">From</label>
@@ -1432,7 +1573,7 @@ export default function FindAWash() {
         // hid From in the collapsed state, which left the user
         // wondering "did I plan this trip?"). Edit reopens the full
         // form for changes.
-        <Card className="p-3 sm:p-4">
+        <Card className="p-3 sm:p-4 relative z-[1000]">
           <div className="flex items-center gap-3 min-w-0">
             <div className="flex-1 min-w-0">
               <p className="text-xs text-slate-500 leading-tight">
@@ -1551,15 +1692,17 @@ export default function FindAWash() {
                 const averageRating: number | null = (loc as any).averageRating ?? null;
                 const isOpen = !!(loc as any).isOpenNow;
                 // Mode-aware metadata. Nearby mode shows miles from
-                // me as the primary distance. Route mode shows the
-                // placeholder detour time (`+~{etaMins} min detour`,
-                // bolded) followed by the route-corridor distance —
-                // the `~` prefix flags placeholder until Round 4
-                // wires the real per-location OSRM detour endpoint
-                // per EID §3.7 fallback semantics.
+                // me. Route mode shows "detour pending…" until
+                // Round 4 wires the real per-location OSRM detour
+                // endpoint — the prior numeric placeholder
+                // (ETA-from-origin) was actively misleading
+                // because real detour means round-trip incremental
+                // cost, not time-from-origin. Bug 4 (Checkpoint 4).
+                // TODO(round-4): Replace 'detour pending…' with
+                // real detour value from
+                // POST /api/locations/with-detour-times per EID §5.2.
                 const milesFromMe = ((loc as any).distFromOrigin as number) * 0.621371;
                 const kmFromRoute = Math.round((loc as any).distanceToRoute as number);
-                const etaMins = etas[loc.id];
                 const isSelected = selectedLocationId === loc.id;
 
                 const card = (
@@ -1623,15 +1766,7 @@ export default function FindAWash() {
                             <span className="text-slate-300">·</span>
                             {mode === "route" ? (
                               <>
-                                <span className="shrink-0">
-                                  {etaMins != null ? (
-                                    <>
-                                      +~<span className="font-medium text-slate-700">{etaMins} min detour</span>
-                                    </>
-                                  ) : (
-                                    <span className="text-slate-400">detour pending…</span>
-                                  )}
-                                </span>
+                                <span className="shrink-0 text-slate-400">detour pending…</span>
                                 <span className="text-slate-300">·</span>
                                 <span className="shrink-0">{kmFromRoute} km from route</span>
                               </>
