@@ -5,10 +5,12 @@
  * WashBuddy API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ServiceSummaryCategory } from "./serviceSummaryCategory";
 
 export interface ServiceSummary {
   id: string;
   name: string;
   basePriceMinor: number;
   durationMins: number;
+  category: ServiceSummaryCategory;
 }

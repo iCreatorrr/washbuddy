@@ -345,6 +345,13 @@ export const SearchLocationsResponse = zod.object({
             name: zod.string(),
             basePriceMinor: zod.number(),
             durationMins: zod.number(),
+            category: zod.enum([
+              "EXTERIOR_WASH",
+              "INTERIOR_CLEANING",
+              "RESTROOM_DUMP",
+              "RESTOCK_CONSUMABLES",
+              "ADD_ON",
+            ]),
           }),
         )
         .optional(),

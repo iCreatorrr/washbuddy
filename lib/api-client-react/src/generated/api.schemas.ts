@@ -141,11 +141,23 @@ export type LocationSearchResultProvider = {
   name: string;
 };
 
+export type ServiceSummaryCategory =
+  (typeof ServiceSummaryCategory)[keyof typeof ServiceSummaryCategory];
+
+export const ServiceSummaryCategory = {
+  EXTERIOR_WASH: "EXTERIOR_WASH",
+  INTERIOR_CLEANING: "INTERIOR_CLEANING",
+  RESTROOM_DUMP: "RESTROOM_DUMP",
+  RESTOCK_CONSUMABLES: "RESTOCK_CONSUMABLES",
+  ADD_ON: "ADD_ON",
+} as const;
+
 export interface ServiceSummary {
   id: string;
   name: string;
   basePriceMinor: number;
   durationMins: number;
+  category: ServiceSummaryCategory;
 }
 
 export interface OperatingWindowSummary {

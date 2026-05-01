@@ -143,6 +143,11 @@ router.get("/locations/search", async (req, res) => {
             // driver-side "your bus fits" check. ServiceCompatibility is
             // kept for legacy data only — clients should ignore it.
             maxVehicleClass: true,
+            // category is the canonical Round 0 taxonomy field. Driver-
+            // side surfaces (Phase B pin component, future filter chip)
+            // need it to determine the primary-service glyph. Selecting
+            // it here mirrors the OpenAPI ServiceSummary update.
+            category: true,
           },
         },
         // Surface bay supportedClasses so the driver-side list can filter

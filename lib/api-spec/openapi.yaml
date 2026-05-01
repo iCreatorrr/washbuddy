@@ -1432,7 +1432,10 @@ components:
           type: integer
         durationMins:
           type: integer
-      required: [id, name, basePriceMinor, durationMins]
+        category:
+          type: string
+          enum: [EXTERIOR_WASH, INTERIOR_CLEANING, RESTROOM_DUMP, RESTOCK_CONSUMABLES, ADD_ON]
+      required: [id, name, basePriceMinor, durationMins, category]
 
     CreateServiceInput:
       type: object

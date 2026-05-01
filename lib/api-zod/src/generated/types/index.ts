@@ -100,6 +100,7 @@ export * from "./searchLocationsParams";
 export * from "./service";
 export * from "./serviceCategory";
 export * from "./serviceSummary";
+export * from "./serviceSummaryCategory";
 export * from "./setOperatingHours200";
 export * from "./setOperatingHoursBody";
 export * from "./startService200";
