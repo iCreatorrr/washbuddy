@@ -16,6 +16,16 @@ import { deriveSizeClassFromLengthInches } from "@/lib/vehicleBodyType";
 import { useMobileMenu } from "@/components/layout";
 import { NotificationBell } from "@/components/notification-bell";
 import { useScrollDirection } from "@/hooks/use-scroll-direction";
+import {
+  classifyPin,
+  pickPrimaryGlyph,
+  renderWashPinHtml,
+  WASH_PIN_SIZE,
+  WASH_PIN_ANCHOR,
+  WASH_PIN_POPUP_ANCHOR,
+  type WashPinTier,
+  type WashPinGlyph,
+} from "@/components/customer/wash-pin";
 
 type PlaceKind = "city" | "address" | "poi" | "other";
 
@@ -509,43 +519,43 @@ function CityAutocomplete({
   );
 }
 
-const locationIcon = L.divIcon({
-  className: "",
-  html: `<div style="width:28px;height:28px;background:linear-gradient(135deg,#3b82f6,#1d4ed8);border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;">
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-  </div>`,
-  iconSize: [28, 28],
-  iconAnchor: [14, 28],
-  popupAnchor: [0, -30],
-});
+/**
+ * Build an `L.divIcon` for a result-location pin via the wash-pin
+ * component (Phase B Checkpoint 1, EID §3.5). The wash-pin module
+ * stays Leaflet-free; this thin host helper bridges the rendered
+ * HTML into Leaflet's `divIcon` API.
+ *
+ * Replaces the previous `locationIcon`, `activeLocationIcon`, and
+ * `incompatibleLocationIcon` constants — those collapsed three
+ * static treatments into one tier-aware path.
+ */
+function buildWashPinDivIcon(input: {
+  tier: WashPinTier;
+  glyph: WashPinGlyph;
+  label?: string;
+  labelVisible?: boolean;
+  isSelected?: boolean;
+}): L.DivIcon {
+  return L.divIcon({
+    className: "",
+    html: renderWashPinHtml(input),
+    iconSize: WASH_PIN_SIZE[input.tier],
+    iconAnchor: WASH_PIN_ANCHOR[input.tier],
+    popupAnchor: WASH_PIN_POPUP_ANCHOR[input.tier],
+  });
+}
 
-/** Highlighted pin: when the user taps a list card's pin button, the
- * matching marker switches to this icon so the map pin and the card
- * read as the same item. Slightly larger + amber fill so it stands
- * out against the standard blue / gray pins without being garish. */
-const activeLocationIcon = L.divIcon({
-  className: "",
-  html: `<div style="width:36px;height:36px;background:linear-gradient(135deg,#f59e0b,#d97706);border:3px solid white;border-radius:50%;box-shadow:0 4px 14px rgba(245,158,11,0.45);display:flex;align-items:center;justify-content:center;">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-  </div>`,
-  iconSize: [36, 36],
-  iconAnchor: [18, 36],
-  popupAnchor: [0, -36],
-});
-
-/** Greyed-out pin used for locations that physically can't host the
- * driver's active vehicle. Same shape so the map still reads as a
- * location pin, but the saturated blue collapses to slate so the eye
- * skips it the way the dimmed Find a Wash cards do. */
-const incompatibleLocationIcon = L.divIcon({
-  className: "",
-  html: `<div style="width:28px;height:28px;background:linear-gradient(135deg,#cbd5e1,#94a3b8);border:3px solid white;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,0.2);display:flex;align-items:center;justify-content:center;opacity:0.85;">
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-  </div>`,
-  iconSize: [28, 28],
-  iconAnchor: [14, 28],
-  popupAnchor: [0, -30],
-});
+/**
+ * Pull primary-service categories off a location's services list.
+ * Round 0 surfaced `Service.category`; Phase B CP1's companion api
+ * commit threaded it through the search endpoint. Falls back to
+ * `[]` so the wash-pin glyph picker degrades to its default
+ * water-drop when the field is missing or stale.
+ */
+function locationServiceCategories(loc: any): string[] {
+  const svcs: any[] = loc?.services ?? [];
+  return svcs.map((s) => s?.category).filter((c): c is string => !!c);
+}
 
 const startIcon = L.divIcon({
   className: "",
@@ -1134,16 +1144,27 @@ export default function FindAWash() {
 
     const locsToShow = route ? nearbyLocations : initialLocations;
 
-    locsToShow.forEach((loc) => {
+    locsToShow.forEach((loc, rankIdx) => {
       if (loc.latitude == null || loc.longitude == null) return;
-      // Default icon — incompatible gets the dimmed pin; everything
-      // else gets the standard blue. The amber active icon is set
-      // by the selection effect, NOT here. Keeping this effect
-      // free of selection state is what stops the "tap pin →
-      // marker rebuilds → popup closes" two-tap bug. activePinId
-      // is no longer in this effect's dependency array.
+      // Tier classification + glyph drive the icon — wash-pin handles
+      // the visual treatment per EID §3.5. The selection effect
+      // rebuilds the icon for the selected pin (gold ring); this
+      // effect does NOT depend on selection state, which is the
+      // load-bearing invariant from Phase A — keeps marker creation
+      // out of the selection loop and prevents the "tap → rebuild →
+      // popup closes" two-tap bug. Labels deliberately undefined in
+      // CP1: nearby-mode labels need the Round 3 service selector to
+      // compute price; route-mode labels wait on Round 4's real
+      // detour endpoint.
       const incompatible = (loc as any).fitsActiveVehicle === false;
-      const icon = incompatible ? incompatibleLocationIcon : locationIcon;
+      const tier = classifyPin({
+        rankIdx,
+        totalRanked: locsToShow.length,
+        mode,
+        fitsActiveVehicle: !incompatible,
+      });
+      const glyph = pickPrimaryGlyph(locationServiceCategories(loc));
+      const icon = buildWashPinDivIcon({ tier, glyph, isSelected: false });
       const marker = L.marker([loc.latitude, loc.longitude], { icon }).addTo(map);
 
       const popup = L.DomUtil.create("div");
@@ -1426,18 +1447,33 @@ export default function FindAWash() {
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    // Revert all incompatibility-aware default icons; the selected
-    // marker (if any) gets the active icon below. Iterating the
-    // markersByIdRef keeps us in sync with whatever the marker
-    // effect last produced.
+    // Rebuild every marker's icon in tier-aware form; the selected
+    // marker gets `isSelected: true` (gold ring per EID §3.5) and
+    // every other marker reverts. Iterating markersByIdRef keeps us
+    // in sync with whatever the marker effect last produced. No
+    // marker layer teardown — only `setIcon` swaps run here, which
+    // is the Phase A invariant Phase B preserves.
+    const selLocs = route ? nearbyLocations : initialLocations;
     markersByIdRef.current.forEach((marker, id) => {
-      const loc = (route ? nearbyLocations : initialLocations).find((l) => l.id === id);
-      const incompatible = (loc as any)?.fitsActiveVehicle === false;
-      if (id === selectedLocationId && !incompatible) {
-        marker.setIcon(activeLocationIcon);
-      } else {
-        marker.setIcon(incompatible ? incompatibleLocationIcon : locationIcon);
-      }
+      const rankIdx = selLocs.findIndex((l) => l.id === id);
+      const loc = rankIdx >= 0 ? selLocs[rankIdx] : null;
+      if (!loc) return;
+      const fits = (loc as any).fitsActiveVehicle !== false;
+      const tier = classifyPin({
+        rankIdx,
+        totalRanked: selLocs.length,
+        mode,
+        fitsActiveVehicle: fits,
+      });
+      const glyph = pickPrimaryGlyph(locationServiceCategories(loc));
+      // Incompatible pins never get the selected ring — the visual
+      // explainer modal handles "you tapped this and it's not
+      // bookable" instead.
+      marker.setIcon(buildWashPinDivIcon({
+        tier,
+        glyph,
+        isSelected: id === selectedLocationId && fits,
+      }));
     });
 
     if (selectedLocationId == null) {
@@ -1476,7 +1512,7 @@ export default function FindAWash() {
         map.panTo(ll, { animate: true });
       }
     } catch {}
-  }, [selectedLocationId, route, nearbyLocations, initialLocations]);
+  }, [selectedLocationId, route, nearbyLocations, initialLocations, mode]);
 
   // Tap on empty map area → deselect. Leaflet's 'click' fires only
   // on tap (not drag), and individual marker clicks call
