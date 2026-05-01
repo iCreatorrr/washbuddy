@@ -177,3 +177,56 @@ The api-server `Service.category` selection-set fix from CP1 commit `05a29bc` is
 ### Anything that surprised me
 - The per-category glyph system was a remnant of the pre-Round-0 thinking where service taxonomy was supposed to drive most of the UI. Round 0's actual landing (5 broad categories, most providers offering 3-4 of them) made "primary service" mostly fictional for this market. The pin glyph was the most user-visible place where that fiction was being asserted. Dropping it aligns the spec with the operational reality the seed data already encodes.
 - Chunk size went down despite CP1.6 adding ~6 lines of explanatory comments (the spec-correction note in `wash-pin.tsx`'s top docstring). Removing the per-glyph render functions, `pickPrimaryGlyph`, `CATEGORY_TO_GLYPH`, `locationServiceCategories`, the `WashPinGlyph` union type, and the unused glyph imports/params more than offset the comment additions. Removing code is the cheapest way to reduce bundle size — when you can do it.
+
+---
+
+## Checkpoint 2 — Pin clustering
+
+**Commit:** `<this commit>`. Single commit per the prompt's "one logical unit" rule. Ships pin clustering at zoom <11 via `leaflet.markercluster` (BSD-2-Clause, ~10KB gzipped), branded cluster bubbles that inherit the highest-tier member's color, and `zoomToShowLayer` integration so the selection model survives clustering.
+
+### What shipped
+
+**Dependency:** [`leaflet.markercluster@^1.5.3`](artifacts/washbuddy-web/package.json) and `@types/leaflet.markercluster@^1.5.6` added to [artifacts/washbuddy-web/package.json](artifacts/washbuddy-web/package.json). The plugin attaches `markerClusterGroup` to the `L` namespace as a side effect of importing `"leaflet.markercluster"`; `@types/leaflet.markercluster` provides the type augmentation.
+
+**CSS imports** added at the top of [find-a-wash.tsx](artifacts/washbuddy-web/src/pages/customer/find-a-wash.tsx) alongside the existing `leaflet/dist/leaflet.css`: `leaflet.markercluster/dist/MarkerCluster.css` (positioning) and `MarkerCluster.Default.css` (default cluster styles, mostly overridden by our `iconCreateFunction`). Mirrors the project's existing co-located CSS-import pattern; no global stylesheet entry point.
+
+**[wash-pin.tsx](artifacts/washbuddy-web/src/components/customer/wash-pin.tsx)** new exports:
+- `pickHighestTier(tiers: WashPinTier[])` — pure function. Priority order `top > mid > low > incompatible`. Empty input falls through to `incompatible`. An all-incompatible cluster correctly stays at `incompatible` (no false promotion).
+- `WASH_PIN_TIER_FILL` — re-exports `TIER_FILL` so cluster styling pulls from the same color tokens as individual pins (single source of truth).
+- `renderWashClusterHtml({ tier, count })` — produces the cluster bubble's HTML string. Returns `{ html, size }` so the host can pass `size` into `L.divIcon`'s `iconSize`. Diameter scales with count (32 / 40 / 48 px for ≤9 / 10–99 / 100+ — reasonable defaults, tunable). Circular bubble (not teardrop — clusters represent aggregations, not individual decision targets, matching Google Maps / Airbnb cluster conventions). Background fill = highest-tier member's color via `TIER_FILL`. Stroke uses the same dashed treatment for `incompatible` tier so all-incompatible clusters render gray dashed.
+
+**[find-a-wash.tsx](artifacts/washbuddy-web/src/pages/customer/find-a-wash.tsx)** changes:
+- New `clusterGroupRef = useRef<L.MarkerClusterGroup | null>(null)` alongside the existing `markersByIdRef` and `endpointsRef`.
+- Marker effect creates the cluster group on first run with `disableClusteringAtZoom: 11`, `maxClusterRadius: 40`, `animate: true`, `spiderfyOnMaxZoom: true`, `showCoverageOnHover: false`, and the custom `iconCreateFunction`. Subsequent runs call `clusterGroupRef.current.clearLayers()` before adding new markers (instead of removing markers individually from the map) so the cluster group's internal indices stay consistent.
+- Result-location markers are added to `clusterGroupRef.current.addLayer(marker)` instead of `marker.addTo(map)`. Tier is stashed on marker options via `{ icon, ...({ washPinTier: tier } as Partial<L.MarkerOptions>) }`. The `iconCreateFunction` reads `(m.options as any).washPinTier` from each child marker.
+- **Endpoint markers stay direct on the map** — `startMarker`, `endMarker`, and the My-Location marker continue to use `.addTo(map)`. They're route polyline endpoints, not result locations; clustering them would group "START" with nearby washes which is incoherent.
+- Selection effect's pan-if-off-screen logic moved into a `finishSelection` callback. When the marker is currently inside a cluster, `cluster.zoomToShowLayer(marker, finishSelection)` expands the cluster (zooming in if necessary) and fires the callback synchronously after the marker becomes visible. If the marker is already visible (zoom ≥11 or inside a non-clustered group), `zoomToShowLayer` no-ops and fires `finishSelection` synchronously. Try/catch wraps the call as a safety net for the rare race where the cluster group is mid-rebuild.
+- Map teardown effect drops `clusterGroupRef.current = null` so a fresh map mount creates a new cluster group rather than reusing a detached instance.
+
+### Spec sections governing
+- [02-eid.md §3.5](docs/search-discovery-overhaul/02-eid.md) — clustering spec (zoom <11, 40px radius, count + highest-tier color, tap to expand).
+- [02-eid.md §3.2](docs/search-discovery-overhaul/02-eid.md) — z-index hierarchy. Clusters use Leaflet's default pane z-ordering (no explicit `zIndexOffset`). If clusters paint over top-tier individual pins in testing, a `zIndexOffset: -100` on the cluster div-icon is the safety valve.
+
+### Verification
+
+- TypeScript: **21 errors**, baseline holds. Zero new in either touched file.
+- Production build: **environmental issue, not code-related.** The `pnpm install` for `leaflet.markercluster` triggered a known pnpm-on-Windows quirk where the resolver scrubbed Windows-native optional binaries (`@rollup/rollup-win32-x64-msvc`, `lightningcss-win32-x64-msvc`, `@tailwindcss/oxide-win32-x64-msvc`) from `.pnpm/`. Local `vite build` fails with "Cannot find module @rollup/rollup-win32-x64-msvc" / "lightningcss" — neither comes from CP2's actual changes. Replit's Linux install will pull the corresponding `linux-x64-gnu` binaries fresh and succeed. CP1.6's chunk size baseline of 190.73 kB raw / 56.79 kB gzipped will grow by roughly the markercluster footprint (~10KB gzip claimed by spec); the user can confirm the actual delta on Replit deploy.
+- Code-level all-incompatible cluster check: traced through `pickHighestTier` — priority order `top:3 > mid:2 > low:1 > incompatible:0`. Loop iterates without any `p > bestPrio` hit when all inputs are `incompatible` (priority 0). Returns `'incompatible'`. The cluster bubble's `incompatible` branch sets fill `#E2E8F0`, stroke `#94A3B8 1.5px dashed`, text color `#475569` — gray dashed, matching individual incompatible pins.
+
+### Decisions made
+- **Cluster shape: circular bubble**, not teardrop. The teardrop says "this specific point" — clusters represent aggregations, so a circle reads correctly as "group" (matching the Google Maps / Airbnb / generic-cluster convention). EID §3.5 specifies the spec; the audit confirmed the visual choice.
+- **Sizing thresholds 32 / 40 / 48 px at counts ≤9 / 10–99 / 100+** — defaults from the prompt, kept as-is. No visual tuning yet (Replit will surface if any look awkward).
+- **`zoomToShowLayer` over manual fallback.** The card-tap → pin-select flow is too central to leave behind a "but only at zoom ≥11" caveat. The integration was actually small (one wrap of `finishSelection` in a `cluster.hasLayer(marker)` check, with try/catch).
+- **Tier stash via marker options spread cast.** `L.MarkerOptions` doesn't formally allow extension without module augmentation; `Partial<L.MarkerOptions>` cast is the standard Leaflet plugin pattern. Module augmentation would be cleaner but adds a `.d.ts` for one extra field — not worth the ceremony for one consumer.
+- **`pickHighestTier` empty-input default = `incompatible`.** A cluster with no readable tiers shouldn't promote itself to top-tier blue. `incompatible` is the safest visual no-op; in practice this branch only fires if all child markers somehow lost their stashed tier (unlikely given the marker-creation path).
+
+### Open items for next round (Phase B CP3)
+- **"Search this area" button** per EID §3.2. Floating pill in upper-middle of map, visible only when <50% of currently-listed locations are in visible bounds. Tap re-queries relative to visible bounds. The cluster group's `getVisibleParent(marker)` and `eachLayer` APIs make the bounds-vs-results check straightforward — CP3 can use the same `clusterGroupRef`.
+- **`inVisibleBounds` for tier classification** lights up in CP3. The `classifyPin` signature already accepts the optional input; CP3 wires `!map.getBounds().contains([loc.lat, loc.lng])` per pin and the `low` tier rule from EID §3.5 starts firing.
+- **Cluster z-index safety valve.** If Replit testing shows clusters painting over selected top-tier pins (gold ring obscured), add `zIndexOffset: -100` to the cluster's `iconCreateFunction` div-icon.
+
+### Anything that surprised me
+- **`L.MarkerClusterGroup`'s lifecycle versus React effect re-runs.** First instinct was to recreate the group on every effect re-run. That accumulates dangling cluster instances on the map, breaks `zoomToShowLayer` (the marker's current cluster isn't the same as the new one), and creates a memory leak. The right pattern: lazy-init in a ref, `clearLayers()` between runs, drop the ref on map teardown. Same shape as `mapInstanceRef` itself — a long-lived Leaflet primitive that survives effect churn.
+- **Type augmentation friction with marker-options stash.** The `L.MarkerOptions` interface in `@types/leaflet` is closed (no index signature for plugin extensions). The plugin pattern of stashing custom keys via cast (`{ washPinTier: tier } as Partial<L.MarkerOptions>`) works but isn't pretty. Module augmentation would clean it up at the cost of a `.d.ts` file in the project — punted; one cast site is acceptable.
+- **`leaflet.markercluster`'s default `Default.css` styles are visually loud** (yellow / orange / blue gradients with letter-spacing 0). Custom `iconCreateFunction` overrides the visuals entirely, but the CSS still imports for positioning + spiderfy classes. Worth knowing if a future change touches cluster styling — overriding the colors via CSS instead of `iconCreateFunction` would still leave the default classes wrapping the bubble.
+- **Local Windows pnpm + native deps interaction.** The first install reported Windows-native binaries as `+`-added; subsequent installs for new packages list them with `-` (removed). Pre-existing pnpm/Windows quirk unrelated to CP2 — flag for any future contributor running local builds on Windows. Replit's Linux env doesn't trigger this.

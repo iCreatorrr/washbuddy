@@ -211,6 +211,96 @@ export function renderWashPinHtml(input: RenderWashPinInput): string {
 }
 
 /**
+ * Tier priority for cluster color inheritance and other "highest tier
+ * wins" rollups. Higher number = higher priority. Per EID §3.5,
+ * clusters render in the color of their highest-tier member.
+ */
+const TIER_PRIORITY: Record<WashPinTier, number> = {
+  top: 3,
+  mid: 2,
+  low: 1,
+  incompatible: 0,
+};
+
+/**
+ * Pick the highest-priority tier from a set of pin tiers. Used by
+ * the cluster icon renderer to inherit the color of the most-
+ * relevant member. Empty input falls through to 'incompatible' —
+ * a cluster with no known tiers shouldn't promote itself, and
+ * 'incompatible' (slate gray) is the safest visual no-op.
+ *
+ * Priority order: top > mid > low > incompatible. An all-
+ * incompatible cluster renders gray dashed, not falsely promoted.
+ */
+export function pickHighestTier(tiers: ReadonlyArray<WashPinTier>): WashPinTier {
+  if (tiers.length === 0) return "incompatible";
+  let best = tiers[0];
+  let bestPrio = TIER_PRIORITY[best];
+  for (let i = 1; i < tiers.length; i++) {
+    const p = TIER_PRIORITY[tiers[i]];
+    if (p > bestPrio) {
+      best = tiers[i];
+      bestPrio = p;
+    }
+  }
+  return best;
+}
+
+/**
+ * Tier color tokens, exported so cluster styling can pull from the
+ * same palette as individual pins. Map the tier directly; the
+ * cluster bubble uses the fill as its background.
+ */
+export const WASH_PIN_TIER_FILL: Record<WashPinTier, string> = TIER_FILL;
+
+/**
+ * Render the HTML string for a cluster bubble (Phase B CP2). Used
+ * inside `L.markerClusterGroup`'s `iconCreateFunction`. The bubble
+ * is a circular shape (clusters represent aggregations, not
+ * individual decision targets — circular reads as "group" the way
+ * Google Maps and Airbnb cluster bubbles do, and the teardrop
+ * shape feels wrong for a count). Background uses the highest-tier
+ * member's fill so a cluster of mostly-mid-tier pins with one top-
+ * tier still reads as top-tier blue.
+ *
+ * Diameter scales with count: 32px for ≤9, 40px for 10–99, 48px
+ * for 100+. Tunable; the thresholds are reasonable defaults rather
+ * than a spec-mandated formula.
+ *
+ * Incompatible-tier cluster: renders with the slate fill + dashed
+ * outline, matching individual incompatible pins. The "all
+ * incompatible cluster" edge case is the test that
+ * `pickHighestTier` upstream is doing the right thing.
+ */
+export function renderWashClusterHtml({
+  tier,
+  count,
+}: {
+  tier: WashPinTier;
+  count: number;
+}): { html: string; size: number } {
+  const size = count >= 100 ? 48 : count >= 10 ? 40 : 32;
+  const fill = TIER_FILL[tier];
+  const stroke = TIER_STROKE[tier];
+  const shadow = TIER_SHADOW[tier] ?? "drop-shadow(0 3px 6px rgba(15,23,42,0.20))";
+  // Text color: white on the saturated/mid blues; slate on the
+  // washed-out incompatible fill (white-on-#E2E8F0 fails contrast).
+  const textColor = tier === "incompatible" ? "#475569" : "#FFFFFF";
+  const fontSize = size >= 48 ? 13 : size >= 40 ? 12.5 : 12;
+  const dashAttr = stroke.dash ? `;stroke-dasharray:${stroke.dash}` : "";
+  // Use SVG for the bubble so the dashed outline + drop shadow
+  // render consistently with individual pins. `overflow: visible`
+  // for the same reason — shadow would otherwise clip.
+  const html = `<div style="position:relative;width:${size}px;height:${size}px;line-height:0;">
+    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="overflow:visible;display:block;filter:${shadow};">
+      <circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - stroke.width}" style="fill:${fill};stroke:${stroke.color};stroke-width:${stroke.width}${dashAttr}"/>
+    </svg>
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:${textColor};font:500 ${fontSize}px/1 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;letter-spacing:0.2px;pointer-events:none;">${count}</div>
+  </div>`;
+  return { html, size };
+}
+
+/**
  * Pin label collision rule per EID §3.5. Pure function — Leaflet-free
  * so this module stays portable. The host computes container-pixel
  * coordinates via `map.latLngToContainerPoint()` and passes them in;

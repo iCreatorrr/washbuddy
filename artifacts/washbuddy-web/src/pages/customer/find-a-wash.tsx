@@ -10,6 +10,12 @@ import { formatCurrency } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+// Marker clustering (Phase B CP2). Plugin attaches `markerClusterGroup`
+// to the L namespace as a side effect; the type augmentation comes
+// via @types/leaflet.markercluster.
+import "leaflet.markercluster";
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import { ActiveVehiclePill } from "@/components/customer/active-vehicle-pill";
 import { useActiveVehicle } from "@/contexts/activeVehicle";
 import { deriveSizeClassFromLengthInches } from "@/lib/vehicleBodyType";
@@ -18,7 +24,9 @@ import { NotificationBell } from "@/components/notification-bell";
 import { useScrollDirection } from "@/hooks/use-scroll-direction";
 import {
   classifyPin,
+  pickHighestTier,
   renderWashPinHtml,
+  renderWashClusterHtml,
   WASH_PIN_SIZE,
   WASH_PIN_ANCHOR,
   WASH_PIN_POPUP_ANCHOR,
@@ -963,6 +971,13 @@ export default function FindAWash() {
   // separately because they don't participate in selection.
   const markersByIdRef = useRef<Map<string, L.Marker>>(new Map());
   const endpointsRef = useRef<L.Marker[]>([]);
+  // Phase B CP2 — single cluster group instance for the result-
+  // location markers. Endpoint markers (start, destination,
+  // my-location) stay direct on the map and are never added here.
+  // The group is created once and persisted across marker-effect
+  // re-runs; `clearLayers()` runs at the top of each re-run before
+  // the new markers are added, so re-renders don't accumulate.
+  const clusterGroupRef = useRef<L.MarkerClusterGroup | null>(null);
   // Tracks which location id is currently shown on the map so the
   // selection effect doesn't double-open a popup that's already open.
   const openPopupIdRef = useRef<string | null>(null);
@@ -1066,6 +1081,10 @@ export default function FindAWash() {
         map.remove();
       } catch {}
       mapInstanceRef.current = null;
+      // Cluster group's lifecycle is bound to the map's — once the
+      // map is removed, drop the ref so the next mount creates a
+      // fresh group rather than reusing a detached instance.
+      clusterGroupRef.current = null;
     };
   }, []);
 
@@ -1077,8 +1096,46 @@ export default function FindAWash() {
       map.removeLayer(routeLayerRef.current);
       routeLayerRef.current = null;
     }
-    markersByIdRef.current.forEach((m) => map.removeLayer(m));
-    markersByIdRef.current.clear();
+    // Result-location markers all live in clusterGroupRef. Clear
+    // its layers (instead of looping markersByIdRef × removeLayer)
+    // so the cluster group's internal state stays consistent.
+    if (clusterGroupRef.current) {
+      clusterGroupRef.current.clearLayers();
+    } else {
+      // First mount of the marker effect — create the cluster
+      // group, install its iconCreateFunction (per EID §3.5), and
+      // add it to the map. Persists across effect re-runs.
+      clusterGroupRef.current = L.markerClusterGroup({
+        // EID §3.5: cluster at zoom <11; pins within 40px cluster.
+        disableClusteringAtZoom: 11,
+        maxClusterRadius: 40,
+        // Default markercluster animations; explicit so a future
+        // tweak is obvious.
+        animate: true,
+        spiderfyOnMaxZoom: true,
+        showCoverageOnHover: false,
+        iconCreateFunction: (cluster) => {
+          // Read the stashed tier off each child marker — set at
+          // marker creation below via `(opts as any).washPinTier`.
+          // pickHighestTier degrades to 'incompatible' if none are
+          // set, which is the safe visual no-op.
+          const childMarkers = cluster.getAllChildMarkers();
+          const tiers: WashPinTier[] = childMarkers
+            .map((m) => (m.options as any).washPinTier)
+            .filter((t): t is WashPinTier => !!t);
+          const tier = pickHighestTier(tiers);
+          const count = cluster.getChildCount();
+          const { html, size } = renderWashClusterHtml({ tier, count });
+          return L.divIcon({
+            className: "",
+            html,
+            iconSize: [size, size],
+            iconAnchor: [size / 2, size / 2],
+          });
+        },
+      });
+      map.addLayer(clusterGroupRef.current);
+    }
     endpointsRef.current.forEach((m) => map.removeLayer(m));
     endpointsRef.current = [];
 
@@ -1150,7 +1207,19 @@ export default function FindAWash() {
         fitsActiveVehicle: !incompatible,
       });
       const icon = buildWashPinDivIcon({ tier, isSelected: false });
-      const marker = L.marker([loc.latitude, loc.longitude], { icon }).addTo(map);
+      // Stash the tier on marker options so the cluster group's
+      // iconCreateFunction can read it without re-deriving.
+      // Plugin-pattern type cast — Leaflet's MarkerOptions doesn't
+      // formally allow extension without module augmentation.
+      const marker = L.marker([loc.latitude, loc.longitude], {
+        icon,
+        ...({ washPinTier: tier } as Partial<L.MarkerOptions>),
+      });
+      // Add to cluster group instead of the map directly. The
+      // cluster group decides whether to render the marker
+      // individually or as part of a cluster bubble based on
+      // current zoom + maxClusterRadius.
+      clusterGroupRef.current?.addLayer(marker);
 
       const popup = L.DomUtil.create("div");
       popup.style.cssText = "font-family:system-ui;min-width:220px;max-width:260px;";
@@ -1478,23 +1547,47 @@ export default function FindAWash() {
       return;
     }
 
-    if (openPopupIdRef.current !== selectedLocationId) {
-      try { marker.openPopup(); } catch {}
-      openPopupIdRef.current = selectedLocationId;
-    }
-
-    // Pan-if-off-screen — the only map-view change tied to selection.
-    // panTo without a zoom argument preserves the user's current zoom
-    // level. autoPanPadding from 2g-2.1 (the popup option) handles
-    // the popup's own clearance from controls; this just gets the
-    // pin into bounds when a card-tap selected an off-screen one.
-    try {
-      const ll = marker.getLatLng();
-      const bounds = map.getBounds();
-      if (!bounds.contains(ll)) {
-        map.panTo(ll, { animate: true });
+    // Phase B CP2 — when the selected pin is currently inside a
+    // cluster, the marker exists in markersByIdRef but its DOM
+    // element isn't on the visible layer yet. zoomToShowLayer
+    // expands the cluster (zooms in if needed) and fires the
+    // callback with the marker now visible. The popup-open and
+    // pan-if-off-screen logic runs from the callback so it
+    // operates on the post-expansion state. If the marker is
+    // already visible (zoom ≥11 or already in a non-clustered
+    // group), zoomToShowLayer's callback fires synchronously.
+    const finishSelection = () => {
+      if (!mountedRef.current) return;
+      if (openPopupIdRef.current !== selectedLocationId) {
+        try { marker.openPopup(); } catch {}
+        openPopupIdRef.current = selectedLocationId;
       }
-    } catch {}
+      // Pan-if-off-screen — the only map-view change tied to selection.
+      // panTo without a zoom argument preserves the user's zoom level.
+      try {
+        const ll = marker.getLatLng();
+        const bounds = map.getBounds();
+        if (!bounds.contains(ll)) {
+          map.panTo(ll, { animate: true });
+        }
+      } catch {}
+    };
+
+    const cluster = clusterGroupRef.current;
+    if (cluster && cluster.hasLayer(marker)) {
+      // hasLayer is true whether the marker is rendered individually
+      // or hidden inside a cluster — zoomToShowLayer no-ops in the
+      // already-visible case (callback fires sync).
+      try {
+        cluster.zoomToShowLayer(marker, finishSelection);
+      } catch {
+        // Safety net for the rare race where the cluster group is
+        // mid-rebuild — just run the selection logic directly.
+        finishSelection();
+      }
+    } else {
+      finishSelection();
+    }
   }, [selectedLocationId, route, nearbyLocations, initialLocations, mode]);
 
   // Tap on empty map area → deselect. Leaflet's 'click' fires only
