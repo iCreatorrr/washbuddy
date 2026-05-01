@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -253,7 +254,22 @@ function CityAutocomplete({
   const [isSearching, setIsSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // The dropdown is portaled to <body> (Checkpoint 5, Approach A —
+  // resolves the cascading z-index regressions from Checkpoint 4)
+  // so it lives outside the search Card's stacking context entirely
+  // and reliably clears Leaflet's panes at every viewport. This ref
+  // is the click-outside companion to containerRef — without it the
+  // mousedown handler would fire on every click inside the dropdown
+  // and close it on selection.
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Portaled dropdown's pixel-precise position. Computed from the
+  // input's getBoundingClientRect when the dropdown opens, and
+  // re-computed on scroll/resize while open. `null` when the
+  // dropdown isn't mounted — guards against rendering at (0,0)
+  // before the first measurement.
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   useEffect(() => {
     setQuery(value?.label || "");
@@ -261,13 +277,41 @@ function CityAutocomplete({
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const insideTrigger = containerRef.current?.contains(target);
+      const insideDropdown = dropdownRef.current?.contains(target);
+      if (!insideTrigger && !insideDropdown) {
         setIsOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // Position the portaled dropdown under the input. Recomputes on
+  // mount-when-open, on window scroll, and on window resize so the
+  // dropdown follows the input through page scroll and orientation
+  // change. Listeners are attached only while the dropdown is open
+  // and torn down on close.
+  useEffect(() => {
+    const shouldShowDropdown = isOpen && !value && query.length >= 2;
+    if (!shouldShowDropdown) {
+      setDropdownPos(null);
+      return;
+    }
+    const recompute = () => {
+      const r = inputRef.current?.getBoundingClientRect();
+      if (!r) return;
+      setDropdownPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    recompute();
+    window.addEventListener("scroll", recompute, true);
+    window.addEventListener("resize", recompute);
+    return () => {
+      window.removeEventListener("scroll", recompute, true);
+      window.removeEventListener("resize", recompute);
+    };
+  }, [isOpen, value, query]);
 
   const searchVersionRef = useRef(0);
   const handleSearch = useCallback((q: string) => {
@@ -336,70 +380,79 @@ function CityAutocomplete({
           <X className="h-4 w-4" />
         </button>
       )}
-      <AnimatePresence>
-        {isOpen && !value && (query.length >= 2) && (
-          // Bug 5 fix (Checkpoint 4): z-[1000] clears Leaflet's
-          // pane z-indices (200–700). Combined with the search
-          // Card wrapper's `relative z-[1000]` parent stacking
-          // context, the dropdown renders above the map at all
-          // viewports.
-          // TODO(round-3+): formalize a `--z-search-dropdown`
-          // CSS variable per EID §3.2 z-index hierarchy so
-          // hardcoded 1000s aren't scattered.
-          <motion.div
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            className="absolute z-[1000] top-full mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden max-h-60 overflow-y-auto"
-          >
-            {isSearching ? (
-              <div className="px-4 py-3 text-sm text-slate-400 flex items-center gap-2">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Searching...
-              </div>
-            ) : results.length > 0 ? (
-              results.map((place, idx) => {
-                // Bug 2 (Checkpoint 4): kind drives icon + the
-                // primary/secondary line layout so addresses,
-                // venues, and cities are visually distinct in
-                // the dropdown. Existing lucide icons; no new
-                // assets per the checkpoint scope.
-                const Icon = place.kind === "address"
-                  ? MapPin
-                  : place.kind === "poi"
-                    ? Landmark
-                    : place.kind === "city"
-                      ? Building2
-                      : MapPin;
-                return (
-                  <button
-                    key={`${place.label}-${idx}`}
-                    className="w-full text-left px-4 py-2.5 hover:bg-blue-50 text-sm flex items-start gap-2 transition-colors"
-                    onClick={() => {
-                      onChange(place);
-                      setQuery(place.label);
-                      setIsOpen(false);
-                    }}
-                  >
-                    <Icon className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium text-slate-800 truncate">{place.name}</div>
-                      {place.secondary && (
-                        <div className="text-xs text-slate-400 truncate">{place.secondary}</div>
-                      )}
-                    </div>
-                  </button>
-                );
-              })
-            ) : (
-              // Bug 2 (Checkpoint 4) — autocomplete now returns
-              // more than cities; empty-state copy reflects that.
-              <div className="px-4 py-3 text-sm text-slate-400">
-                No matches found. Try a different search.
-              </div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Portaled dropdown (Checkpoint 5, Approach A) — renders
+          into <body> via createPortal so it lives outside the
+          search Card's stacking context and clears Leaflet's
+          panes (200–700) at all viewports without the parent
+          Card needing an elevated z-index. AnimatePresence wraps
+          the portal call so framer-motion's exit animation still
+          runs on close. Position is `position:fixed` at the
+          coordinates computed from the input's bounding rect,
+          tracked via the scroll/resize listeners above.
+          TODO(round-3+): formalize a `--z-search-dropdown` CSS
+          variable per EID §3.2 z-index hierarchy. */}
+      {createPortal(
+        <AnimatePresence>
+          {isOpen && !value && (query.length >= 2) && dropdownPos && (
+            <motion.div
+              ref={dropdownRef}
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              style={{
+                position: "fixed",
+                top: dropdownPos.top,
+                left: dropdownPos.left,
+                width: dropdownPos.width,
+              }}
+              className="z-[1000] bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden max-h-60 overflow-y-auto"
+            >
+              {isSearching ? (
+                <div className="px-4 py-3 text-sm text-slate-400 flex items-center gap-2">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Searching...
+                </div>
+              ) : results.length > 0 ? (
+                results.map((place, idx) => {
+                  // Bug 2 (Checkpoint 4): kind drives icon +
+                  // primary/secondary lines so addresses, venues,
+                  // and cities are visually distinct.
+                  const Icon = place.kind === "address"
+                    ? MapPin
+                    : place.kind === "poi"
+                      ? Landmark
+                      : place.kind === "city"
+                        ? Building2
+                        : MapPin;
+                  return (
+                    <button
+                      key={`${place.label}-${idx}`}
+                      className="w-full text-left px-4 py-2.5 hover:bg-blue-50 text-sm flex items-start gap-2 transition-colors"
+                      onClick={() => {
+                        onChange(place);
+                        setQuery(place.label);
+                        setIsOpen(false);
+                      }}
+                    >
+                      <Icon className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-slate-800 truncate">{place.name}</div>
+                        {place.secondary && (
+                          <div className="text-xs text-slate-400 truncate">{place.secondary}</div>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="px-4 py-3 text-sm text-slate-400">
+                  No matches found. Try a different search.
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 }
@@ -1364,7 +1417,7 @@ export default function FindAWash() {
           ~44px effective tap target via the surrounding p-1 span;
           accessibility note about sub-44 visible size is in the
           checkpoint-2 verification §2. */}
-      <div className="lg:hidden fixed top-4 left-4 z-[1000] pointer-events-none">
+      <div className="lg:hidden fixed top-4 left-4 z-40 pointer-events-none">
         <button
           type="button"
           onClick={() => {
@@ -1387,7 +1440,7 @@ export default function FindAWash() {
           for the bell + hamburger trigger while the AppLayout
           mobile header is suppressed. Phase B integrates these
           into the unified collapsed/expanded header. */}
-      <div className="lg:hidden fixed top-4 right-4 z-[1000] flex items-center gap-1 pointer-events-none">
+      <div className="lg:hidden fixed top-4 right-4 z-40 flex items-center gap-1 pointer-events-none">
         <div className="pointer-events-auto bg-white/95 backdrop-blur-md rounded-full shadow-[0_2px_6px_rgba(15,23,42,0.10)] border border-slate-200/80 p-1">
           <NotificationBell />
         </div>
@@ -1415,14 +1468,15 @@ export default function FindAWash() {
           otherwise. Drops the gradient hero + verbose copy ("Plan
           your trip and find wash locations…") that ate ~200px above
           the fold on mobile. */}
-      {/* `relative z-[1000]` on both Card variants establishes a
-          stacking context above the map's (z-0). Without it, the
-          autocomplete dropdown — even with its own z-[1000] —
-          would be clipped behind Leaflet's panes at desktop
-          widths where the search Card and the map are visually
-          proximate (Bug 5, Checkpoint 4). */}
+      {/* The autocomplete dropdown portals to <body> at z-[1000]
+          (Checkpoint 5, Approach A), so neither search Card
+          variant needs an elevated stacking context. Reverting
+          the Checkpoint 4 `relative z-[1000]` resolves the
+          cascade where the Card painted over the notifications
+          dropdown, the active vehicle picker, and any other
+          fixed-position dropdown opened from outside the Card. */}
       {!formCollapsed || !route ? (
-        <Card className="p-4 sm:p-5 space-y-3 relative z-[1000]">
+        <Card className="p-4 sm:p-5 space-y-3">
           <div className="flex items-end gap-2 sm:gap-3 flex-col sm:flex-row">
             <div className="flex-1 w-full min-w-0">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 block">From</label>
@@ -1573,16 +1627,22 @@ export default function FindAWash() {
         // hid From in the collapsed state, which left the user
         // wondering "did I plan this trip?"). Edit reopens the full
         // form for changes.
-        <Card className="p-3 sm:p-4 relative z-[1000]">
+        <Card className="p-3 sm:p-4">
           <div className="flex items-center gap-3 min-w-0">
             <div className="flex-1 min-w-0">
-              <p className="text-xs text-slate-500 leading-tight">
+              {/* truncate sits on the <p> (block-level) so a long
+                  label gets ellipsis. Inner <span>'s `truncate` on
+                  inline elements is a no-op — that was the bug
+                  where long destinations collided with the Edit
+                  button (Checkpoint 5). The outer flex item has
+                  min-w-0; Edit button has shrink-0. */}
+              <p className="text-xs text-slate-500 leading-tight truncate">
                 <span className="font-semibold text-slate-700">From:</span>{" "}
-                <span className="truncate">{origin?.name === "My Location" ? "My Location" : (origin?.label || "—")}</span>
+                {origin?.name === "My Location" ? "My Location" : (origin?.label || "—")}
               </p>
-              <p className="text-xs text-slate-500 leading-tight mt-0.5">
+              <p className="text-xs text-slate-500 leading-tight mt-0.5 truncate">
                 <span className="font-semibold text-slate-700">To:</span>{" "}
-                <span className="truncate">{destination?.label || "—"}</span>
+                {destination?.label || "—"}
               </p>
             </div>
             <button

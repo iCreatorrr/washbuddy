@@ -113,3 +113,41 @@ Per the Checkpoint 1 prompt's explicit allowance:
 - The bottom sheet replaces the inline-popup pattern in find-a-wash.tsx (search for `bindPopup`). The pin-tap behavior already calls `selectLocationRef.current?.(loc.id)`; Phase B's sheet hooks into the same `selectedLocationId` state.
 - The unified collapsed/expanded header in EID §3.1 replaces the existing route-planner-style search Card and the floating top-right cluster from Checkpoint 2. The cluster is interim — when the new header lands, remove the floating cluster and the `pt-14 lg:pt-0` content padding compensation.
 - `lib/search-helpers.ts` is ready to consume; Phase B's unified search pill imports `matchesSearch` for nearby-mode city search.
+
+---
+
+## Checkpoint 5 — Z-index regression + text truncation
+
+**Commit:** `<this commit>`. Three regressions surfaced after Checkpoint 4 (autocomplete dropdown overlapping the bell + vehicle pickers, floating cluster painting over fixed-position dropdowns, long destination text colliding with Edit) plus the truncation polish, fixed as one logical unit.
+
+### What shipped
+- [`pages/customer/find-a-wash.tsx`](artifacts/washbuddy-web/src/pages/customer/find-a-wash.tsx) — `CityAutocomplete` dropdown is now portaled to `<body>` via `createPortal` (Approach A from the audit). `position: fixed` at coordinates computed from the input's `getBoundingClientRect()`; recomputed on `window.scroll` (capture phase, to catch nested scroll containers) and `resize` while open; listeners attached/torn down with the open state. Click-outside check now compares against both `containerRef` and a new `dropdownRef` so clicks inside the portaled dropdown don't dismiss it. Both search Card variants drop the Checkpoint 4 `relative z-[1000]`. Floating top-left button + top-right cluster `z-[1000]` → `z-40` (below `z-50` fixed dropdowns; well below the portaled `z-[1000]`). Collapsed-summary From/To `<p>`s gain `truncate` (block-level, where it actually works) and the dead inner `<span className="truncate">` wrappers are removed.
+
+### Spec sections governing
+- EID §3.1 (search header presentation modes) — informs the cluster's interim status.
+- EID §3.2 (z-index hierarchy) — `--z-header: 1000` is reserved for Phase B's collapsed-pill header. Phase A's interim cluster is **not** that header; it's a temporary affordance and intentionally sits at `z-40` to defer to fixed-position dropdowns. Phase B's redesigned header lives at z-1000 once it lands.
+- Checkpoints 1–4 handoffs above — context for what mustn't regress.
+
+### Verification (code + build)
+- TypeScript: **21 errors**, baseline holds. Zero new in find-a-wash.tsx.
+- Production build: succeeds.
+- find-a-wash chunk: 186.59 kB → 187.89 kB raw (54.83 kB → 55.34 kB gzipped). Modest +1.3 kB / +0.5 kB gzipped from the portal logic + position state. `createPortal` from `react-dom` was already a transitive dep; no `package.json` change.
+- Replit live verification (user-side): bell dropdown + vehicle picker render above search Card; autocomplete clears the map at 1024 / 1440px; truncation works at 320–1440px with the Edit button always tappable.
+
+### Decisions made
+- **Approach A (portal)** over Approach B (conditional z-index) and C (lower Leaflet). Codebase precedent: shadcn's [`ui/popover.tsx`](artifacts/washbuddy-web/src/components/ui/popover.tsx) uses Radix `Portal`. Approach B leaves a transient elevated stacking context that re-cascades on interleaved interactions (autocomplete open → bell tap). Approach C is global and fragile.
+- **Cluster z-tier `z-40`**, not `z-50`. `z-40` keeps the cluster above page content but below fixed-position dropdowns at `z-50` (vehicle pill, notification bell), which document order alone wasn't enough to fix.
+- **`truncate` on `<p>`** (block-level), not the inner `<span>` (inline, no-op). Outer flex item already has `min-w-0`; Edit button already has `shrink-0`. No structural change.
+
+### Open items for Phase B
+- The interim floating top-right cluster (bell + hamburger) and floating top-left button (logomark / chevron) are **replaced**, not relabeled, when the EID §3.1 collapsed↔expanded header lands. Phase B's audit step should plan to delete the `lg:hidden fixed top-4 ... z-40` blocks at the start of `find-a-wash.tsx`'s return, the `pt-14 lg:pt-0` content compensation, and `useMobileMenu()`'s consumption pattern from this page (the menu controller stays in AppLayout for other consumers).
+- Phase B's redesigned header sits at `--z-header: 1000` per EID §3.2. Don't permanent-elevate parent containers — Approach A's portal pattern is the way to keep dropdowns above the map without cascade. Reuse `createPortal` for the Phase B unified search pill's autocomplete.
+- The `dropdownPos` recompute is positional only — it doesn't constrain the dropdown to remain inside the viewport when the input scrolls partly off-screen. If Phase B's header has scroll-collapse animation, revisit (likely a `bottom`/`flip` policy via Floating UI or Radix `Popover`).
+
+### Anything that surprised me
+- The `CityAutocomplete` mounted with the dropdown initially closed and the listeners only attach when it opens, so the first paint after the user types has no position computed yet. Guard: `dropdownPos &&` in the render condition prevents an at-(0,0) flash before the first `recompute()` runs. Cheap to add, and it makes the open-handler order order-independent.
+- `window.addEventListener("scroll", recompute, true)` with capture-phase `true` is required to catch scrolls in nested scroll containers (Leaflet's panes, the bottom card list when added in Round 2). Without capture, only document-level scrolls fire.
+- Bug 4 from Checkpoint 4 (`detour pending…`) wasn't in scope, but the regression sweep confirmed it still works — the card meta line wasn't touched in this checkpoint.
+
+### Known follow-ups (not in scope)
+- **Home-page back chevron**: the `window.history.length > 1` heuristic shows a chevron after a same-page round-trip (`/find-a-wash` → `/location/:id` → back). Phase B can swap to a Wouter-aware visit-history hook if needed.
