@@ -15,6 +15,7 @@ import { useActiveVehicle } from "@/contexts/activeVehicle";
 import { deriveSizeClassFromLengthInches } from "@/lib/vehicleBodyType";
 import { useMobileMenu } from "@/components/layout";
 import { NotificationBell } from "@/components/notification-bell";
+import { useScrollDirection } from "@/hooks/use-scroll-direction";
 
 type PlaceKind = "city" | "address" | "poi" | "other";
 
@@ -64,6 +65,20 @@ interface NominatimResult {
 }
 
 /**
+ * Soft viewbox bias for Nominatim. ±5° around the user's position
+ * is roughly a 500km box at temperate latitudes — enough to bias
+ * toward "this side of the continent" without being so tight that
+ * cross-region searches (Toronto user → NYC's Central Park) fail
+ * to surface. We pass it without `bounded=1`, so it's a ranking
+ * hint, not a hard filter. Tunable: ±10° if post-launch search
+ * quality issues surface.
+ */
+function bboxAround(lat: number, lng: number, deg = 5): string {
+  // Nominatim viewbox order: <x1>,<y1>,<x2>,<y2> = west,north,east,south.
+  return `${lng - deg},${lat + deg},${lng + deg},${lat - deg}`;
+}
+
+/**
  * Freeform Nominatim search. Bug 2 fix (Checkpoint 4) — drops the
  * `featuretype=city` restriction so this returns the same broad
  * mix Google Maps' search box does: addresses, POIs/venues, and
@@ -71,20 +86,37 @@ interface NominatimResult {
  * pattern in the dropdown so the user can tell what they're
  * picking.
  *
+ * Checkpoint 6 additions:
+ * - `countrycodes=us,ca` (no `mx`) tightens to Decision 06's US +
+ *   Canada launch scope. Update this single string when Mexico
+ *   joins.
+ * - `viewbox` provides a soft geographic bias when we know the
+ *   user's position. Resolves the "rogers centre returns
+ *   Philadelphia" class of bug where Nominatim's global
+ *   importance ranking surfaced unrelated cities.
+ * - `namedetails=1` ensures Nominatim returns the venue `name`
+ *   field on POI results so the dropdown can show
+ *   "Scotiabank Arena" as the primary line and the address as the
+ *   secondary line.
+ *
  * `dedupe=1` and `addressdetails=1` are Nominatim flags. Limit 8
  * picked because the dropdown is `max-h-60 overflow-y-auto`; ~8
  * rows fits without forcing scroll.
  */
-async function searchPlaces(query: string): Promise<CityOption[]> {
+async function searchPlaces(query: string, userLat?: number, userLng?: number): Promise<CityOption[]> {
   if (!query || query.length < 2) return [];
   const params = new URLSearchParams({
     q: query,
     format: "json",
     addressdetails: "1",
+    namedetails: "1",
     dedupe: "1",
     limit: "8",
-    countrycodes: "us,ca,mx",
+    countrycodes: "us,ca",
   });
+  if (Number.isFinite(userLat) && Number.isFinite(userLng)) {
+    params.set("viewbox", bboxAround(userLat as number, userLng as number));
+  }
   try {
     const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
       headers: { "Accept-Language": "en" },
@@ -122,6 +154,16 @@ async function searchPlaces(query: string): Promise<CityOption[]> {
         }
         if (isPoi) {
           const venueName = (r.name || r.display_name.split(",")[0] || "").trim();
+          // Bug C / Checkpoint 6: secondary line is the address
+          // when Nominatim returns one alongside the POI — the
+          // Google Places / Apple Maps "venue / address" pattern.
+          // Falls back to city + state when the response has no
+          // street components (less common but possible for
+          // landmark-style POIs).
+          const street = a.house_number && a.road
+            ? `${a.house_number} ${a.road}`
+            : a.road || "";
+          const addressLine = [street, cityName, stateName].filter(Boolean).join(", ");
           const cityPart = cityName ? `, ${cityName}` : "";
           const label = `${venueName}${cityPart}`.trim();
           return {
@@ -129,7 +171,7 @@ async function searchPlaces(query: string): Promise<CityOption[]> {
             state: stateName,
             lat, lng, label,
             kind: "poi",
-            secondary: [cityName, stateName].filter(Boolean).join(", "),
+            secondary: addressLine || [cityName, stateName].filter(Boolean).join(", "),
           };
         }
         if (cityName) {
@@ -242,11 +284,18 @@ function CityAutocomplete({
   onChange,
   placeholder,
   exclude,
+  userLat,
+  userLng,
 }: {
   value: CityOption | null;
   onChange: (city: CityOption | null) => void;
   placeholder: string;
   exclude?: CityOption | null;
+  // When the user's position is known (origin set, geolocation
+  // granted), forwarded to Nominatim as a soft viewbox bias —
+  // Bug C / Checkpoint 6.
+  userLat?: number;
+  userLng?: number;
 }) {
   const [query, setQuery] = useState(value?.label || "");
   const [isOpen, setIsOpen] = useState(false);
@@ -323,8 +372,11 @@ function CityAutocomplete({
     }
     setIsSearching(true);
     const version = ++searchVersionRef.current;
+    // userLat/userLng captured by closure; the useCallback deps
+    // below ensure the closure refreshes when geolocation arrives
+    // or the user picks a different origin.
     debounceRef.current = setTimeout(async () => {
-      const places = await searchPlaces(q);
+      const places = await searchPlaces(q, userLat, userLng);
       if (version !== searchVersionRef.current) return;
       const filtered = exclude
         ? places.filter((c) => c.label !== exclude.label)
@@ -332,7 +384,7 @@ function CityAutocomplete({
       setResults(filtered);
       setIsSearching(false);
     }, 200);
-  }, [exclude]);
+  }, [exclude, userLat, userLng]);
 
   return (
     <div ref={containerRef} className="relative">
@@ -594,6 +646,43 @@ async function fetchRoute(from: CityOption, to: CityOption): Promise<RouteResult
   };
 }
 
+/**
+ * Strict invariant (Bug A / Checkpoint 6): the user-facing label
+ * for a My Location option must NEVER contain raw lat/lng. Coords
+ * live on the lat/lng fields of CityOption only. This sanitizer
+ * is called from every path that parses a label back into an
+ * option (URL hydration, legacy backcompat, cache restoration) so
+ * a single defensive layer catches every code path that could
+ * leak lat/lng into the To input after a flip.
+ *
+ * Handles formatting variants observed in legacy URLs: differing
+ * decimal precision (4 vs 6 places), optional whitespace around
+ * commas, and labels with or without the "near " prefix.
+ */
+function sanitizeMyLocationLabel(rawLabel: string): string {
+  if (!rawLabel.startsWith("My Location")) return rawLabel;
+  // Try to recover the area portion: everything before the trailing
+  // "..., <lat>, <lng>)" tail. Lazy match on the area so we stop at
+  // the first comma-then-coordinate, not the last. The legacy
+  // makeMyLocationOption produced two shapes:
+  //   - `My Location (near {area}, {lat}, {lng})` when reverse-geocode succeeded
+  //   - `My Location (detected, {lat}, {lng})` when it failed
+  // Both are handled below.
+  const areaMatch = rawLabel.match(/^My Location \((?:near\s+)?(.+?)\s*,\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*\)\s*$/);
+  if (areaMatch) {
+    const area = areaMatch[1].trim();
+    if (!area || area === "detected") return "My Location (detected)";
+    return `My Location (near ${area})`;
+  }
+  // Fallback for any My Location label that still contains a
+  // lat/lng-shaped substring (`<digits>.<digits>, <digits>.<digits>`)
+  // — even if our primary regex didn't match. Strip it.
+  if (/-?\d+\.\d+\s*,\s*-?\d+\.\d+/.test(rawLabel)) {
+    return "My Location (detected)";
+  }
+  return rawLabel;
+}
+
 function getCityByLabel(label: string): CityOption | null {
   if (!label) return null;
 
@@ -606,7 +695,10 @@ function getCityByLabel(label: string): CityOption | null {
     const lat = parseFloat(coordMatch[2]);
     const lng = parseFloat(coordMatch[3]);
     if (displayName.startsWith("My Location")) {
-      return { name: "My Location", state: "", lat, lng, label: displayName };
+      // Defense-in-depth (Bug A / Checkpoint 6): even in the
+      // post-Checkpoint-4 bracket format, ensure no stray
+      // lat/lng leaked into the displayName itself.
+      return { name: "My Location", state: "", lat, lng, label: sanitizeMyLocationLabel(displayName) };
     }
     const parts = displayName.split(", ");
     return {
@@ -620,13 +712,18 @@ function getCityByLabel(label: string): CityOption | null {
 
   // Backwards-compat: old My Location label that embedded lat/lng in
   // the parenthetical (no bracket suffix). Bookmarked URLs from
-  // before Checkpoint 4 still parse correctly; once re-planned, the
-  // URL gets re-serialized with the new format and this branch stops
-  // mattering.
+  // before Checkpoint 4 still hydrate cleanly because we sanitize
+  // the label before storing it in state — Bug A / Checkpoint 6.
   if (label.startsWith("My Location")) {
-    const match = label.match(/My Location \((.*),\s*(-?\d+\.?\d*),\s*(-?\d+\.?\d*)\)/);
+    const match = label.match(/My Location \((.*),\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\)/);
     if (match) {
-      return { name: "My Location", state: "", lat: parseFloat(match[2]), lng: parseFloat(match[3]), label };
+      return {
+        name: "My Location",
+        state: "",
+        lat: parseFloat(match[2]),
+        lng: parseFloat(match[3]),
+        label: sanitizeMyLocationLabel(label),
+      };
     }
   }
 
@@ -772,6 +869,15 @@ export default function FindAWash() {
   // point. Approach B (a Wouter-aware visit-history hook) replaces
   // this if the heuristic causes confusion in testing.
   const isDeepEntry = typeof window !== "undefined" && window.history.length > 1;
+
+  // Scroll-aware floating chrome (Bug B / Checkpoint 6). The
+  // top-left button + top-right cluster hide on scroll-down past
+  // the map and reveal on scroll-up — Pinterest / Material
+  // Design pattern. `isAtTop` keeps the chrome pinned while the
+  // user is at the top of the page so they don't see a hide-then-
+  // reveal flicker on tiny scroll deltas at rest.
+  const { direction: scrollDirection, isAtTop } = useScrollDirection();
+  const showFloatingChrome = isAtTop || scrollDirection === "up";
 
   const { activeVehicle } = useActiveVehicle();
   const activeVehicleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
@@ -1417,7 +1523,12 @@ export default function FindAWash() {
           ~44px effective tap target via the surrounding p-1 span;
           accessibility note about sub-44 visible size is in the
           checkpoint-2 verification §2. */}
-      <div className="lg:hidden fixed top-4 left-4 z-40 pointer-events-none">
+      <motion.div
+        className="lg:hidden fixed top-4 left-4 z-40 pointer-events-none"
+        initial={false}
+        animate={{ y: showFloatingChrome ? 0 : -80, opacity: showFloatingChrome ? 1 : 0 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
+      >
         <button
           type="button"
           onClick={() => {
@@ -1426,6 +1537,8 @@ export default function FindAWash() {
             // semantics land in Phase B per EID §3.8.
           }}
           aria-label={isDeepEntry ? "Back" : "WashBuddy home"}
+          aria-hidden={!showFloatingChrome}
+          tabIndex={showFloatingChrome ? 0 : -1}
           className="pointer-events-auto h-9 w-9 rounded-full bg-white/95 backdrop-blur-md flex items-center justify-center shadow-[0_2px_6px_rgba(15,23,42,0.10)] border border-slate-200/80 hover:bg-white transition-colors"
         >
           {isDeepEntry ? (
@@ -1434,13 +1547,21 @@ export default function FindAWash() {
             <Droplets className="h-5 w-5 text-blue-600" />
           )}
         </button>
-      </div>
+      </motion.div>
 
       {/* Floating top-right cluster — interim Phase A placement
           for the bell + hamburger trigger while the AppLayout
-          mobile header is suppressed. Phase B integrates these
-          into the unified collapsed/expanded header. */}
-      <div className="lg:hidden fixed top-4 right-4 z-40 flex items-center gap-1 pointer-events-none">
+          mobile header is suppressed. Hides on scroll-down (Bug B
+          / Checkpoint 6) so it doesn't float over result cards
+          when the user is reading the list. Phase B integrates
+          these into the unified collapsed/expanded header. */}
+      <motion.div
+        className="lg:hidden fixed top-4 right-4 z-40 flex items-center gap-1 pointer-events-none"
+        initial={false}
+        animate={{ y: showFloatingChrome ? 0 : -80, opacity: showFloatingChrome ? 1 : 0 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
+        aria-hidden={!showFloatingChrome}
+      >
         <div className="pointer-events-auto bg-white/95 backdrop-blur-md rounded-full shadow-[0_2px_6px_rgba(15,23,42,0.10)] border border-slate-200/80 p-1">
           <NotificationBell />
         </div>
@@ -1448,6 +1569,7 @@ export default function FindAWash() {
           type="button"
           onClick={mobileMenu.toggle}
           aria-label={mobileMenu.isOpen ? "Close menu" : "Open menu"}
+          tabIndex={showFloatingChrome ? 0 : -1}
           className="pointer-events-auto h-9 w-9 rounded-full bg-white/95 backdrop-blur-md flex items-center justify-center shadow-[0_2px_6px_rgba(15,23,42,0.10)] border border-slate-200/80 hover:bg-white transition-colors"
         >
           {mobileMenu.isOpen ? (
@@ -1456,7 +1578,7 @@ export default function FindAWash() {
             <Menu className="h-5 w-5 text-slate-700" />
           )}
         </button>
-      </div>
+      </motion.div>
 
       <div className="flex items-center gap-3 max-w-full">
         <div className="min-w-0 max-w-full">
@@ -1517,6 +1639,8 @@ export default function FindAWash() {
                     }}
                     placeholder="Start city..."
                     exclude={destination}
+                    userLat={origin?.lat ?? destination?.lat}
+                    userLng={origin?.lng ?? destination?.lng}
                   />
                   {!origin && geoStatus !== "unavailable" && (
                     <button
@@ -1587,6 +1711,8 @@ export default function FindAWash() {
                 }}
                 placeholder="Destination city..."
                 exclude={origin}
+                userLat={origin?.lat ?? destination?.lat}
+                userLng={origin?.lng ?? destination?.lng}
               />
             </div>
 

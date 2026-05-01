@@ -151,3 +151,85 @@ Per the Checkpoint 1 prompt's explicit allowance:
 
 ### Known follow-ups (not in scope)
 - **Home-page back chevron**: the `window.history.length > 1` heuristic shows a chevron after a same-page round-trip (`/find-a-wash` → `/location/:id` → back). Phase B can swap to a Wouter-aware visit-history hook if needed.
+
+---
+
+## Checkpoint 6 — Desktop lat/lng leak, scroll-aware cluster, POI quality
+
+**Commit:** `<this commit>`. Three live-test issues from Checkpoint 5 closed as one logical unit; closes Phase A.
+
+### What shipped
+- **Bug A — Desktop lat/lng leak.** Root cause: legacy compatibility branch in `getCityByLabel` returned the input `label` verbatim — preserving lat/lng for pre-Checkpoint-4 URL bookmarks. The From field has a special render that bypasses `value.label` (line 1483, only shows literal "My Location"), but the To field uses `CityAutocomplete` which renders `value.label` verbatim. After `handleSwap`, the legacy My Location label moves to To and the embedded coords become visible. Mobile (375px) hid it via `text-overflow: ellipsis`; desktop revealed it.
+
+  Fix: new `sanitizeMyLocationLabel(rawLabel)` strips trailing `<lat>, <lng>` tails via a tightened lazy-area regex. Tolerates 4 vs 6 decimal places, optional spaces around commas, with/without `near ` prefix, and the legacy "detected" no-area fallback. Defense-in-depth: also called in the bracket-format branch as a belt-and-suspenders for any future label-construction path that might leak. Strict invariant going forward: lat/lng lives ONLY on the lat/lng fields of CityOption, never in `label`.
+
+- **Bug B — Scroll-aware cluster.** New reusable hook [`hooks/use-scroll-direction.ts`](artifacts/washbuddy-web/src/hooks/use-scroll-direction.ts) returns `{ direction: 'up' | 'down', isAtTop }`. 10px threshold against jitter, `requestAnimationFrame`-batched listener, passive scroll. Floating top-left button + top-right cluster wrapped in `motion.div` with `animate={{ y: showFloatingChrome ? 0 : -80, opacity: ... }}`, `duration: 0.2`. `showFloatingChrome = isAtTop || direction === 'up'` keeps chrome pinned at top and re-shows on the first upward scroll (Pinterest / Material pattern). `aria-hidden` + `tabIndex={-1}` on hide so keyboard / screen reader can't focus invisible chrome.
+
+- **Bug C — POI search quality.** `searchPlaces(query, userLat?, userLng?)` gains optional user position; `bboxAround(lat, lng, ±5°)` builds a soft `viewbox` bias when known. Nominatim params now: `countrycodes=us,ca` (dropped `mx` per Decision 06), `namedetails=1` for the venue `name`, `viewbox` when position known, no `bounded=1` (so distant cross-region results still surface, just lower-ranked). POI branch's `secondary` line now uses `{house_number} {road}, {city}, {state}` when an address is present alongside the POI — Google Places "venue / address" pattern. Both `<CityAutocomplete>` instances now receive `userLat={origin?.lat ?? destination?.lat}` and `userLng={origin?.lng ?? destination?.lng}` so search bias works whether the user has set From or just To.
+
+### Spec sections governing
+- [Decision 06](docs/strategic-decisions/06-cross-border.md) — drives `countrycodes=us,ca`. **When WashBuddy expands to Mexico or beyond, this single string updates alongside the rest of the cross-border surface (currency, tax, OSRM region data).**
+- EID §3.1 (search header presentation modes) — confirms the floating cluster is interim and replaced by Phase B's collapsed-pill header.
+- Checkpoints 1–5 handoff sections above — context for what mustn't regress.
+
+### Verification (code + build)
+- TypeScript: **21 errors**, baseline holds.
+- Production build: succeeds.
+- find-a-wash chunk: 187.89 kB → 189.50 kB raw (55.34 kB → 55.90 kB gzipped). +1.6 kB / +0.6 kB gzipped from the scroll-aware framer-motion wiring + sanitizer + viewbox helper. New hook is code-split with the page chunk, no separate bundle.
+- Replit live verification (user-side): the 5 example queries (rogers centre, scotiabank arena, 1 yonge street toronto, central park, 155 kirk drive thornhill), legacy URL paste-test, mobile flip, desktop scroll behavior.
+
+### Decisions made
+- **`viewbox` ±5°, not ±10°.** Soft bias with room for cross-region search to still work. Tunable; the prompt explicitly noted ±10° is a one-line change if quality issues surface post-launch.
+- **Hook lives at `hooks/use-scroll-direction.ts`, not inline.** Phase B's redesigned header consumes the same primitive; placing it in `hooks/` upfront avoids a refactor later.
+- **`aria-hidden` + `tabIndex={-1}` on hidden chrome**, not removed from the DOM. Preserves the Checkpoint 5 portal positioning (the back/hamburger button DOM stays mounted), avoids re-mount cost on every scroll-direction flip.
+- **Bug A defense-in-depth**: even in the bracket-format branch (the post-Checkpoint-4 happy path), `sanitizeMyLocationLabel` runs on the displayName. Costs nothing for clean labels (regex misses → returns input as-is) and catches any future code path that might construct a leaky label.
+
+### Open items for next round (Phase B audit)
+- The interim floating top-left button + top-right cluster + their `pt-14 lg:pt-0` content compensation are **replaced** (not relabeled) by Phase B's EID §3.1 collapsed↔expanded header. Phase B's audit step should plan to delete the `motion.div` floating chrome blocks and the `useMobileMenu` consumption pattern from this page (the menu controller stays in AppLayout for other consumers).
+- The `useScrollDirection` hook is reusable and intended for Phase B's redesigned header — likely the same hide-on-scroll-down pattern at the EID §3.2 `--z-header: 1000` tier.
+- The `bboxAround` viewbox helper and `userLat`/`userLng` plumbing on `CityAutocomplete` is permanent. Phase B's unified search pill consumes the same component (or descendant of it) and inherits the bias.
+- Strict invariant for future label work: lat/lng lives only on `lat`/`lng` fields of `CityOption`. `sanitizeMyLocationLabel` is the load-bearing enforcer for legacy-URL hydration paths.
+
+### Anything that surprised me
+- Bug A's intermittent / desktop-only manifestation — the bug had been present since Checkpoint 4's clean `makeMyLocationOption`, but only legacy URL bookmarks triggered it, and the visible symptom required two conditions (My Location → flip to To, and a viewport wide enough that ellipsis didn't visually clip the trailing coords). Three layers of camouflage: stale state, asymmetric From/To rendering, and viewport-dependent visibility.
+- Nominatim's `viewbox` param ordering: `<x1>,<y1>,<x2>,<y2>` = west,north,east,south. Easy to flip lat/lng or top/bottom by accident; the helper's signature `bboxAround(lat, lng, deg)` keeps it tidy at the call site.
+- `useCallback` deps: `handleSearch` had `[exclude]`. After adding `userLat`/`userLng` props, those need to be in the deps too — otherwise the closure captures stale geolocation and Nominatim queries fire without the bias once the user picks an origin. Subtle but easy to miss.
+
+---
+
+## Phase A complete
+
+| Round | Commits | Focus |
+|---|---|---|
+| Round 0 | 5 commits | Service taxonomy migration + handoff |
+| Round 1 Phase A · Checkpoint 1 | `45a58a4` | Page merge structure, redirects, mode-aware card meta |
+| Round 1 Phase A · Checkpoint 2 | `b326656` | Hamburger update, /saved stub, AppLayout `hideMobileHeader`, floating chrome v1 |
+| Round 1 Phase A · Checkpoint 3 | `1478aeb` | Don't-regress sweep + cumulative handoff |
+| Round 1 Phase A · Checkpoint 4 | `4573a05` | Detour-pending text, Nominatim expansion, To-field display, MyLocation leak, dropdown z-index |
+| Round 1 Phase A · Checkpoint 5 | `72190b9` | Portal dropdown, lower cluster z-index, fix truncate |
+| Round 1 Phase A · Checkpoint 6 | `<this commit>` | Desktop lat/lng leak, scroll-aware cluster, POI quality |
+| Spec | `ba953d9`, `8f1445f`, `03d1cf4` | Path corrections, gate banner clarification, strategic decisions |
+
+### What's interim and replaced in Phase B
+- The floating top-left button + top-right cluster (bell + hamburger). EID §3.1 collapsed↔expanded header replaces them at the canonical `--z-header: 1000` tier.
+- The `pt-14 lg:pt-0` content compensation that reserves space for the floating chrome.
+- The mode-aware card meta line in its current form (still using the route-planner-era card layout). Phase B / Round 2's bottom sheet rebuild brings the new result-card component per EID §3.4.
+- The route-planner-era inline form Card (full search Card with From/To autocomplete + Plan Route button). Replaced by the unified search pill in collapsed mode + expanded card per EID §3.1.
+- The route-planner-era Leaflet popup pattern (`bindPopup` on each marker). Phase B / Round 2's `pin-callout.tsx` per EID §3.6 replaces it.
+- The route-planner-era pin icons (`locationIcon`, `activeLocationIcon`, `incompatibleLocationIcon`). Phase B / Round 2's `wash-pin.tsx` per EID §3.5 replaces them with tier classification, glyphs, and labels.
+
+### What's permanent and Phase B builds on
+- `/find-a-wash` as the canonical route; redirects from `/search` and `/route-planner` (the latter preserves the querystring).
+- The `mode = destination ? 'route' : 'nearby'` derivation as the single source of truth for mode-dependent behavior.
+- The page-merge structural foundation in find-a-wash.tsx — pin selection model (`selectedLocationId`, `markersByIdRef`, `lastFitKeyRef` for fit-bounds gating).
+- [`lib/search-helpers.ts`](artifacts/washbuddy-web/src/lib/search-helpers.ts) — STATE_NAMES, METRO_ALIASES, `matchesSearch` for nearby-mode city search.
+- The `AppLayout` `hideMobileHeader` prop + `MobileMenuContext` / `useMobileMenu` hook in [`components/layout.tsx`](artifacts/washbuddy-web/src/components/layout.tsx).
+- The `RedirectTo` helper in [`App.tsx`](artifacts/washbuddy-web/src/App.tsx) — Wouter-compatible redirect pattern.
+- The `createPortal` autocomplete dropdown pattern in `CityAutocomplete` — sidesteps stacking-context inheritance for Phase B's unified search pill.
+- [`hooks/use-scroll-direction.ts`](artifacts/washbuddy-web/src/hooks/use-scroll-direction.ts) — reusable hide-on-scroll primitive.
+- The `bboxAround` viewbox helper + `userLat`/`userLng` propagation in `searchPlaces` — geographic biasing for Nominatim. `countrycodes=us,ca` is the single line to change for cross-border expansion.
+- Strict label invariant: lat/lng never in `CityOption.label`. `sanitizeMyLocationLabel` enforces on URL hydration.
+- The /saved stub route + page (real surface lands in v1.5).
+- The full taxonomy migration from Round 0.
+
+Phase A status: **complete pending Replit verification of Checkpoint 6**. Phase B prompt drafting unblocked.
