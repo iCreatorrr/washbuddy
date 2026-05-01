@@ -26,7 +26,7 @@ The `OperatingWindow` model exists in the schema but isn't populated by the seed
 
 ### OpenAPI spec must be updated for new endpoints
 
-The OpenAPI spec at `lib/api-spec/openapi.yaml` is the source of truth for API contracts. When adding new endpoints, update the spec first, then regenerate the typed client with Orval (`cd lib/api-spec && pnpm run generate`). New endpoints added without updating the spec will lack typed hooks on the frontend.
+The OpenAPI spec at `lib/api-spec/openapi.yaml` is the source of truth for API contracts. When adding new endpoints, update the spec first, then regenerate the typed client with Orval (`cd lib/api-spec && pnpm run codegen`). New endpoints added without updating the spec will lack typed hooks on the frontend.
 
 ## Resolved issues
 

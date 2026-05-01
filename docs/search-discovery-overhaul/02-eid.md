@@ -879,7 +879,7 @@ CTAs for these capabilities on the location detail page are phone-call links, no
 - Add `ServiceCategory` enum and three new fields on `Service` model per §5.1.
 - Backfill existing test data via keyword matching script.
 - Update OpenAPI spec at `lib/api-spec/openapi.yaml` to expose the new fields on Service responses.
-- Regenerate API client (`pnpm --filter @workspace/api-client-react generate` or equivalent).
+- Regenerate API client (`pnpm --filter @workspace/api-spec codegen` or equivalent).
 - Create frontend constants file at `artifacts/washbuddy-web/src/lib/service-taxonomy.ts`.
 - Update provider-side service-creation form (`artifacts/washbuddy-web/src/pages/provider/...`) to add a category dropdown. Existing form is in the provider settings flow.
 
