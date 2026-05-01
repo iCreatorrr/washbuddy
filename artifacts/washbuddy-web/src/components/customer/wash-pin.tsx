@@ -6,16 +6,15 @@
  * HTML string passed into `L.divIcon`.
  *
  * Spec: EID §3.5. Visual reference: 05-visual-reference.md §4. The
- * pin encodes three signals — tier (color + size), primary service
- * (glyph), and price/detour (label, when host supplies it). Booking
- * mode is intentionally NOT encoded per Decision 08 (invisible
- * primary surface).
+ * pin encodes two signals — tier (color + size), and price/detour
+ * (label, when host supplies it). The inner glyph is the WashBuddy
+ * water-drop logomark, uniform across every pin (brand identity, not
+ * categorical encoding). Booking mode is intentionally NOT encoded
+ * per Decision 08 (invisible primary surface).
  *
  * Phase B Checkpoint 1 ships:
  * - All four tiers (top / mid / low / incompatible) with the spec's
  *   sizes, fills, strokes, and shadows.
- * - All five glyphs (wash / interior / dump / restock / addon) keyed
- *   off Round 0's `Service.category` enum.
  * - Selected state with gold ring (3px outset around the pin shape).
  * - Label rendering paths for top + mid tiers (host gates by mode +
  *   zoom; CP1 hosts pass `undefined` until Round 3 / Round 4 wire the
@@ -24,13 +23,20 @@
  *   `inVisibleBounds?`) for CP3 and Round 4 to light up without
  *   touching this module.
  *
- * TODO(asset): the default `wash` glyph is a hand-drawn water-drop
- * approximation. EID §6.9 says production should use the actual
- * WashBuddy logomark SVG. Swap when product provides the asset.
+ * Phase B Checkpoint 1.6 spec correction: per-category glyphs were
+ * removed (squeegee / drain / box / star) in favor of the uniform
+ * water-drop logomark. UX research showed shape variants don't
+ * survive at 32×40px pin sizes (color is the strongest preattentive
+ * categorical encoding; shape is much weaker). Service-category
+ * info lives in filter chips, card service pills, and detail pages
+ * — not in pin glyphs. See EID §3.5 for full rationale.
+ *
+ * TODO(asset): the inline water-drop is a hand-drawn approximation.
+ * EID §6.9 says production should use the actual WashBuddy logomark
+ * SVG. Swap when product provides the asset.
  */
 
 export type WashPinTier = "top" | "mid" | "low" | "incompatible";
-export type WashPinGlyph = "wash" | "interior" | "dump" | "restock" | "addon";
 
 /**
  * Inputs to `classifyPin`. `detourMinutes` and `inVisibleBounds` are
@@ -59,53 +65,6 @@ export function classifyPin(input: ClassifyPinInput): WashPinTier {
   if (input.inVisibleBounds === false) return "low";
   return "mid";
 }
-
-/**
- * Pick the inner glyph for a location's pin per EID §3.5:
- *   1. If user has selected service categories: the category with
- *      the most matches at this location.
- *   2. Else: the first category in the location's services list.
- *   3. Else: default water-drop ('wash').
- *
- * `serviceCategories` is the `category` field of each service at the
- * location. Round 0 surfaced this on `Service`; Phase B CP1's
- * companion api commit threads it through the search endpoint.
- */
-export function pickPrimaryGlyph(
-  serviceCategories: ReadonlyArray<string | null | undefined> | null | undefined,
-  selectedCategories: ReadonlyArray<string> = [],
-): WashPinGlyph {
-  const cats = (serviceCategories ?? []).filter((c): c is string => !!c);
-  if (cats.length === 0) return "wash";
-  if (selectedCategories.length > 0) {
-    const counts = new Map<string, number>();
-    for (const cat of cats) {
-      if (selectedCategories.includes(cat)) {
-        counts.set(cat, (counts.get(cat) ?? 0) + 1);
-      }
-    }
-    if (counts.size > 0) {
-      let best = cats[0];
-      let bestCount = -1;
-      for (const [cat, count] of counts.entries()) {
-        if (count > bestCount) {
-          best = cat;
-          bestCount = count;
-        }
-      }
-      return CATEGORY_TO_GLYPH[best] ?? "wash";
-    }
-  }
-  return CATEGORY_TO_GLYPH[cats[0]] ?? "wash";
-}
-
-const CATEGORY_TO_GLYPH: Record<string, WashPinGlyph> = {
-  EXTERIOR_WASH: "wash",
-  INTERIOR_CLEANING: "interior",
-  RESTROOM_DUMP: "dump",
-  RESTOCK_CONSUMABLES: "restock",
-  ADD_ON: "addon",
-};
 
 /** iconSize for `L.divIcon`. Width × height of the pin shape only;
  *  labels and the selected ring extend beyond via overflow:visible. */
@@ -145,7 +104,6 @@ export const WASH_PIN_LABEL_DIMS: Record<"top" | "mid", { w: number; h: number }
 
 interface RenderWashPinInput {
   tier: WashPinTier;
-  glyph: WashPinGlyph;
   /** Label text. When undefined, no label renders. Top-tier shows
    *  whenever supplied; mid-tier is host-gated by zoom ≥13. */
   label?: string;
@@ -184,48 +142,14 @@ const INCOMPAT_GLYPH_FILL = "#94A3B8";
 // SVG viewBox to scale this down without losing the path.
 const PIN_PATH = "M16 1 C7.16 1 1 7.16 1 16 C1 22 5 28 16 39 C27 28 31 22 31 16 C31 7.16 24.84 1 16 1 Z";
 
-// Glyph SVG fragments in 32×40 viewBox space, centered roughly at
-// (16, 14) inside the pin's circular head. Each glyph uses the
-// rendering most legible at icon size — closed-path fill for the
-// shapes that read well solid (water drop, star), stroke-only line
-// art for the shapes that need open contours (squeegee, drain
-// chevrons, sealed-box rectangle).
+// Inner glyph — uniform WashBuddy water-drop logomark across every
+// pin (Phase B CP1.6 spec correction; see EID §3.5). Drawn at
+// (16, 14) inside the pin's circular head in the 32×40 viewBox.
+// Filled teardrop, point up.
 //
-// Originally a single `Record<WashPinGlyph, string>` of `d`
-// attributes, but the open contours rendered as invisible no-ops
-// because `fill` won't fill an unclosed path. Phase B CP1.5 splits
-// rendering per glyph so each can pick its own technique.
-//
-// TODO(asset, EID §6.9): the `wash` glyph is a hand-drawn water-
-// drop approximation. Production should swap in the actual
-// WashBuddy logomark SVG once product provides it.
-const GLYPH_FRAGMENT: Record<WashPinGlyph, (fill: string) => string> = {
-  // Filled teardrop — point up, round bottom. Standard water-drop motif.
-  wash: (fill) => `<path d="M16 8 C13 12 11 15 11 17.5 A5 5 0 0 0 21 17.5 C21 15 19 12 16 8 Z" fill="${fill}"/>`,
-
-  // Squeegee / wiper — diagonal blade from upper-right (~20,11) to
-  // lower-left (~11,19) with a short perpendicular handle at the
-  // upper-right end. Stroke-only; legible at small sizes where a
-  // filled vacuum silhouette would collapse to an unrecognizable
-  // blob. EID §3.5 explicitly accepts vacuum-or-squeegee for
-  // INTERIOR_CLEANING.
-  interior: (fill) => `<g stroke="${fill}" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="11" y1="19" x2="20" y2="11"/><line x1="17.7" y1="9.2" x2="20" y2="11"/></g>`,
-
-  // Drain — top horizontal grate bar with two downward chevrons
-  // suggesting water flowing into the drain.
-  dump: (fill) => `<g stroke="${fill}" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"><line x1="11" y1="11.5" x2="21" y2="11.5"/><polyline points="13,14 16,17 19,14"/><polyline points="14.5,17.2 16,18.7 17.5,17.2"/></g>`,
-
-  // Sealed package — rectangle outline with a horizontal divider
-  // line through the middle (reads as packing tape). Stroke-only
-  // box keeps the silhouette obvious without competing with the
-  // teardrop pin shape behind it.
-  restock: (fill) => `<g stroke="${fill}" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><rect x="11" y="11" width="10" height="8" rx="0.5"/><line x1="11" y1="15" x2="21" y2="15"/></g>`,
-
-  // 5-pointed star — closed polygon, fills cleanly. 10 vertices
-  // alternating outer (5) and inner (5) per the standard star
-  // construction.
-  addon: (fill) => `<path d="M16 9.5 L17.5 13.2 L21.4 13.7 L18.4 16.3 L19.2 20.2 L16 18.3 L12.8 20.2 L13.6 16.3 L10.6 13.7 L14.5 13.2 Z" fill="${fill}"/>`,
-};
+// TODO(asset, EID §6.9): hand-drawn approximation. Production should
+// swap in the actual WashBuddy logomark SVG once product provides it.
+const GLYPH_PATH = "M16 8 C13 12 11 15 11 17.5 A5 5 0 0 0 21 17.5 C21 15 19 12 16 8 Z";
 
 function escHtml(s: string): string {
   return s
@@ -243,7 +167,7 @@ function escHtml(s: string): string {
  * mounts).
  */
 export function renderWashPinHtml(input: RenderWashPinInput): string {
-  const { tier, glyph, label, labelVisible = true, isSelected = false } = input;
+  const { tier, label, labelVisible = true, isSelected = false } = input;
   const [w, h] = WASH_PIN_SIZE[tier];
   const fill = TIER_FILL[tier];
   const stroke = TIER_STROKE[tier];
@@ -265,7 +189,7 @@ export function renderWashPinHtml(input: RenderWashPinInput): string {
     <svg width="${w}" height="${h}" viewBox="0 0 32 40" style="overflow:visible;display:block;${shadow ? `filter:${shadow};` : ""}">
       ${ringSvg}
       <path d="${PIN_PATH}" fill="${fill}" stroke="${stroke.color}" stroke-width="${stroke.width}"${dashAttr}/>
-      ${GLYPH_FRAGMENT[glyph](glyphFill)}
+      <path d="${GLYPH_PATH}" fill="${glyphFill}"/>
     </svg>`;
 
   // Label — positioned above the pin; bottom-center of the label sits

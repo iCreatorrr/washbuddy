@@ -18,13 +18,11 @@ import { NotificationBell } from "@/components/notification-bell";
 import { useScrollDirection } from "@/hooks/use-scroll-direction";
 import {
   classifyPin,
-  pickPrimaryGlyph,
   renderWashPinHtml,
   WASH_PIN_SIZE,
   WASH_PIN_ANCHOR,
   WASH_PIN_POPUP_ANCHOR,
   type WashPinTier,
-  type WashPinGlyph,
 } from "@/components/customer/wash-pin";
 
 type PlaceKind = "city" | "address" | "poi" | "other";
@@ -521,9 +519,10 @@ function CityAutocomplete({
 
 /**
  * Build an `L.divIcon` for a result-location pin via the wash-pin
- * component (Phase B Checkpoint 1, EID §3.5). The wash-pin module
- * stays Leaflet-free; this thin host helper bridges the rendered
- * HTML into Leaflet's `divIcon` API.
+ * component (Phase B Checkpoint 1, EID §3.5; CP1.6 spec correction
+ * dropped per-category glyphs). The wash-pin module stays
+ * Leaflet-free; this thin host helper bridges the rendered HTML
+ * into Leaflet's `divIcon` API.
  *
  * Replaces the previous `locationIcon`, `activeLocationIcon`, and
  * `incompatibleLocationIcon` constants — those collapsed three
@@ -531,7 +530,6 @@ function CityAutocomplete({
  */
 function buildWashPinDivIcon(input: {
   tier: WashPinTier;
-  glyph: WashPinGlyph;
   label?: string;
   labelVisible?: boolean;
   isSelected?: boolean;
@@ -543,18 +541,6 @@ function buildWashPinDivIcon(input: {
     iconAnchor: WASH_PIN_ANCHOR[input.tier],
     popupAnchor: WASH_PIN_POPUP_ANCHOR[input.tier],
   });
-}
-
-/**
- * Pull primary-service categories off a location's services list.
- * Round 0 surfaced `Service.category`; Phase B CP1's companion api
- * commit threaded it through the search endpoint. Falls back to
- * `[]` so the wash-pin glyph picker degrades to its default
- * water-drop when the field is missing or stale.
- */
-function locationServiceCategories(loc: any): string[] {
-  const svcs: any[] = loc?.services ?? [];
-  return svcs.map((s) => s?.category).filter((c): c is string => !!c);
 }
 
 const startIcon = L.divIcon({
@@ -1163,8 +1149,7 @@ export default function FindAWash() {
         mode,
         fitsActiveVehicle: !incompatible,
       });
-      const glyph = pickPrimaryGlyph(locationServiceCategories(loc));
-      const icon = buildWashPinDivIcon({ tier, glyph, isSelected: false });
+      const icon = buildWashPinDivIcon({ tier, isSelected: false });
       const marker = L.marker([loc.latitude, loc.longitude], { icon }).addTo(map);
 
       const popup = L.DomUtil.create("div");
@@ -1465,13 +1450,11 @@ export default function FindAWash() {
         mode,
         fitsActiveVehicle: fits,
       });
-      const glyph = pickPrimaryGlyph(locationServiceCategories(loc));
       // Incompatible pins never get the selected ring — the visual
       // explainer modal handles "you tapped this and it's not
       // bookable" instead.
       marker.setIcon(buildWashPinDivIcon({
         tier,
-        glyph,
         isSelected: id === selectedLocationId && fits,
       }));
     });

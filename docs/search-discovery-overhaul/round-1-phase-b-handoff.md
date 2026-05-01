@@ -120,3 +120,60 @@ The CP1 test protocol included "select services to verify labels render." That t
 ### Open items for CP2
 
 Unchanged from the CP1 handoff section above. CP2 dispatches after the user verifies the new glyphs render recognizably on Replit.
+
+---
+
+## Checkpoint 1.6 — Drop per-category glyphs, unify on brand logomark
+
+**Commits:** `4639bb2` (spec update), `<this commit>` (code simplification). Two-commit checkpoint per the prompt's spec-before-code direction. **This is a spec correction, not a feature addition** — CP1.5's verification on Replit showed the per-category glyphs (squeegee, drain, box, star) collapse into indistinguishable shapes at typical pin sizes, and the encoding burden was misaligned with how category-leading map apps use pin glyphs.
+
+### What shipped
+
+**Spec (commit 1):** [02-eid.md §3.5](docs/search-discovery-overhaul/02-eid.md) "Inner glyph" subsection rewritten — uniform WashBuddy water-drop logomark across every pin. Rationale block grounds the change in UX research (color > shape for preattentive categorical encoding; ~7-item working memory cap; legibility at 32×40px) and references category-leading map apps (PlugShare, GasBuddy, Airbnb encode availability and ranking on pins, not category). [05-visual-reference.md §4](docs/search-discovery-overhaul/05-visual-reference.md) header updated; the per-category color tokens in §1 stay (they apply to filter chips, card service pills, detail pages — surfaces with room to be legibly displayed).
+
+**Future consideration documented in spec:** when filter chips and the service picker ship in Round 3, a small numeric "matches N of your filtered services" badge in the pin's lower-right corner could indicate per-pin filter alignment. Layered on the pin, not a glyph replacement. Worth piloting; not committed.
+
+**Code (commit 2):** [wash-pin.tsx](artifacts/washbuddy-web/src/components/customer/wash-pin.tsx) — removed:
+- `WashPinGlyph` type
+- `pickPrimaryGlyph` function (~30 lines including JSDoc)
+- `CATEGORY_TO_GLYPH` map
+- `glyph` parameter on `RenderWashPinInput`
+- `GLYPH_FRAGMENT` table with the five per-category render functions
+
+Replaced with: a single inline `GLYPH_PATH` constant (the same teardrop fill that worked correctly for `wash` in CP1.5) rendered as a `<path d="..." fill="..."/>` inside `renderWashPinHtml`. Renderer simplified by ~50 lines.
+
+[find-a-wash.tsx](artifacts/washbuddy-web/src/pages/customer/find-a-wash.tsx) — removed:
+- `pickPrimaryGlyph` and `WashPinGlyph` imports
+- `locationServiceCategories(loc)` host helper (its only consumer was the glyph computation)
+- `glyph` field on the `buildWashPinDivIcon` input shape
+- Glyph computation in the marker creation effect (`pickPrimaryGlyph(locationServiceCategories(loc))`)
+- Glyph computation in the selection effect
+
+The api-server `Service.category` selection-set fix from CP1 commit `05a29bc` is **kept** — it remains useful for Round 2's card service pills and Round 3's filter chips. CP1.6 doesn't reach into the backend.
+
+### Spec sections governing
+- [02-eid.md §3.5](docs/search-discovery-overhaul/02-eid.md) — pin spec (post-CP1.6 rewrite).
+- [05-visual-reference.md §4](docs/search-discovery-overhaul/05-visual-reference.md) — visual reference banner pointing at EID §3.5.
+
+### Verification
+- TypeScript: **21 errors**, baseline holds. Zero new in either touched file.
+- Production build: succeeds.
+- find-a-wash chunk size deltas:
+  - CP1: 191.65 kB raw / 55.91 kB gzipped
+  - CP1.5: 192.07 kB raw / 57.32 kB gzipped (per-glyph render refactor)
+  - **CP1.6: 190.73 kB raw / 56.79 kB gzipped** (–1.34 kB raw, –0.53 kB gzipped vs CP1.5; –0.92 kB raw vs CP1 baseline)
+  - The number going down is the kind of thing future engineers appreciate seeing.
+
+### Decisions made
+- **Spec-before-code split into two commits** per the prompt's discipline. Commit 1 is `docs(eid)`-tagged; commit 2 is `Phase B CP1.6`-tagged. Bisecting is straightforward if either part regresses.
+- **Production-note phrasing updated** in EID §3.5: the original "the water-drop variant" implied multiple variants exist. Post-CP1.6 there's only the uniform glyph, so "the water-drop variant" became "the WashBuddy logomark."
+- **Backend Service.category select stays** — Round 2 cards and Round 3 filters consume it. Reverting it would force a re-add later.
+- **Glyph SVG inline, not via a `GLYPH_PATH` indirection helper** — there's only one path now; a function-returning-string for a single value is overkill. The path is a plain `const`, used once in `renderWashPinHtml`.
+
+### Open items for next round (Phase B CP2)
+- Unchanged from CP1 handoff: pin clustering via `leaflet.markercluster` (BSD-2-Clause, ~10KB gzipped — verify before committing). Cluster pin shows count + inherits highest-relevance color of its members. The CP1.6 simplification (no glyph variability) makes the cluster pin's design easier — the cluster pin can use the same uniform water-drop glyph or just a count badge.
+- The spec's "future consideration" — a numeric "matches N filters" badge in the pin's lower-right corner — is gated on Round 3's filter UI. Worth picking up there.
+
+### Anything that surprised me
+- The per-category glyph system was a remnant of the pre-Round-0 thinking where service taxonomy was supposed to drive most of the UI. Round 0's actual landing (5 broad categories, most providers offering 3-4 of them) made "primary service" mostly fictional for this market. The pin glyph was the most user-visible place where that fiction was being asserted. Dropping it aligns the spec with the operational reality the seed data already encodes.
+- Chunk size went down despite CP1.6 adding ~6 lines of explanatory comments (the spec-correction note in `wash-pin.tsx`'s top docstring). Removing the per-glyph render functions, `pickPrimaryGlyph`, `CATEGORY_TO_GLYPH`, `locationServiceCategories`, the `WashPinGlyph` union type, and the unused glyph imports/params more than offset the comment additions. Removing code is the cheapest way to reduce bundle size — when you can do it.
