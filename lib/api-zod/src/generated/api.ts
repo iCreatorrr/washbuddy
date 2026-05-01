@@ -391,6 +391,15 @@ export const ListServicesResponse = zod.object({
       leadTimeMins: zod.number().optional(),
       requiresConfirmation: zod.boolean().optional(),
       isVisible: zod.boolean(),
+      category: zod.enum([
+        "EXTERIOR_WASH",
+        "INTERIOR_CLEANING",
+        "RESTROOM_DUMP",
+        "RESTOCK_CONSUMABLES",
+        "ADD_ON",
+      ]),
+      subcategory: zod.string().nullish(),
+      labels: zod.array(zod.string()),
     }),
   ),
 });
@@ -412,6 +421,17 @@ export const CreateServiceBody = zod.object({
   capacityPerSlot: zod.number().optional(),
   leadTimeMins: zod.number().optional(),
   requiresConfirmation: zod.boolean().optional(),
+  category: zod
+    .enum([
+      "EXTERIOR_WASH",
+      "INTERIOR_CLEANING",
+      "RESTROOM_DUMP",
+      "RESTOCK_CONSUMABLES",
+      "ADD_ON",
+    ])
+    .optional(),
+  subcategory: zod.string().optional(),
+  labels: zod.array(zod.string()).optional(),
 });
 
 /**
@@ -432,6 +452,17 @@ export const UpdateServiceBody = zod.object({
   capacityPerSlot: zod.number().optional(),
   leadTimeMins: zod.number().optional(),
   isVisible: zod.boolean().optional(),
+  category: zod
+    .enum([
+      "EXTERIOR_WASH",
+      "INTERIOR_CLEANING",
+      "RESTROOM_DUMP",
+      "RESTOCK_CONSUMABLES",
+      "ADD_ON",
+    ])
+    .optional(),
+  subcategory: zod.string().nullish(),
+  labels: zod.array(zod.string()).optional(),
 });
 
 export const UpdateServiceResponse = zod.object({
@@ -448,6 +479,15 @@ export const UpdateServiceResponse = zod.object({
     leadTimeMins: zod.number().optional(),
     requiresConfirmation: zod.boolean().optional(),
     isVisible: zod.boolean(),
+    category: zod.enum([
+      "EXTERIOR_WASH",
+      "INTERIOR_CLEANING",
+      "RESTROOM_DUMP",
+      "RESTOCK_CONSUMABLES",
+      "ADD_ON",
+    ]),
+    subcategory: zod.string().nullish(),
+    labels: zod.array(zod.string()),
   }),
 });
 
@@ -728,6 +768,15 @@ export const GetBookingResponse = zod.object({
         leadTimeMins: zod.number().optional(),
         requiresConfirmation: zod.boolean().optional(),
         isVisible: zod.boolean(),
+        category: zod.enum([
+          "EXTERIOR_WASH",
+          "INTERIOR_CLEANING",
+          "RESTROOM_DUMP",
+          "RESTOCK_CONSUMABLES",
+          "ADD_ON",
+        ]),
+        subcategory: zod.string().nullish(),
+        labels: zod.array(zod.string()),
       })
       .optional(),
     customer: zod

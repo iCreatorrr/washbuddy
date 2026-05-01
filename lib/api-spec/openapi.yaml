@@ -1410,7 +1410,16 @@ components:
           type: boolean
         isVisible:
           type: boolean
-      required: [id, locationId, name, durationMins, basePriceMinor, platformFeeMinor, currencyCode, capacityPerSlot, isVisible]
+        category:
+          type: string
+          enum: [EXTERIOR_WASH, INTERIOR_CLEANING, RESTROOM_DUMP, RESTOCK_CONSUMABLES, ADD_ON]
+        subcategory:
+          type: ["string", "null"]
+        labels:
+          type: array
+          items:
+            type: string
+      required: [id, locationId, name, durationMins, basePriceMinor, platformFeeMinor, currencyCode, capacityPerSlot, isVisible, category, labels]
 
     ServiceSummary:
       type: object
@@ -1444,6 +1453,15 @@ components:
           type: integer
         requiresConfirmation:
           type: boolean
+        category:
+          type: string
+          enum: [EXTERIOR_WASH, INTERIOR_CLEANING, RESTROOM_DUMP, RESTOCK_CONSUMABLES, ADD_ON]
+        subcategory:
+          type: string
+        labels:
+          type: array
+          items:
+            type: string
       required: [name, durationMins, basePriceMinor]
 
     UpdateServiceInput:
@@ -1465,6 +1483,15 @@ components:
           type: integer
         isVisible:
           type: boolean
+        category:
+          type: string
+          enum: [EXTERIOR_WASH, INTERIOR_CLEANING, RESTROOM_DUMP, RESTOCK_CONSUMABLES, ADD_ON]
+        subcategory:
+          type: ["string", "null"]
+        labels:
+          type: array
+          items:
+            type: string
 
     Vehicle:
       type: object

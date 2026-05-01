@@ -5,6 +5,7 @@
  * WashBuddy API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { UpdateServiceInputCategory } from "./updateServiceInputCategory";
 
 export interface UpdateServiceInput {
   name?: string;
@@ -15,4 +16,8 @@ export interface UpdateServiceInput {
   capacityPerSlot?: number;
   leadTimeMins?: number;
   isVisible?: boolean;
+  category?: UpdateServiceInputCategory;
+  /** @nullable */
+  subcategory?: string | null;
+  labels?: string[];
 }

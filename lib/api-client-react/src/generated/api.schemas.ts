@@ -176,6 +176,17 @@ export interface OperatingWindowInput {
   closeTime: string;
 }
 
+export type ServiceCategory =
+  (typeof ServiceCategory)[keyof typeof ServiceCategory];
+
+export const ServiceCategory = {
+  EXTERIOR_WASH: "EXTERIOR_WASH",
+  INTERIOR_CLEANING: "INTERIOR_CLEANING",
+  RESTROOM_DUMP: "RESTROOM_DUMP",
+  RESTOCK_CONSUMABLES: "RESTOCK_CONSUMABLES",
+  ADD_ON: "ADD_ON",
+} as const;
+
 export interface Service {
   id: string;
   locationId: string;
@@ -190,7 +201,22 @@ export interface Service {
   leadTimeMins?: number;
   requiresConfirmation?: boolean;
   isVisible: boolean;
+  category: ServiceCategory;
+  /** @nullable */
+  subcategory?: string | null;
+  labels: string[];
 }
+
+export type CreateServiceInputCategory =
+  (typeof CreateServiceInputCategory)[keyof typeof CreateServiceInputCategory];
+
+export const CreateServiceInputCategory = {
+  EXTERIOR_WASH: "EXTERIOR_WASH",
+  INTERIOR_CLEANING: "INTERIOR_CLEANING",
+  RESTROOM_DUMP: "RESTROOM_DUMP",
+  RESTOCK_CONSUMABLES: "RESTOCK_CONSUMABLES",
+  ADD_ON: "ADD_ON",
+} as const;
 
 export interface CreateServiceInput {
   name: string;
@@ -201,7 +227,21 @@ export interface CreateServiceInput {
   capacityPerSlot?: number;
   leadTimeMins?: number;
   requiresConfirmation?: boolean;
+  category?: CreateServiceInputCategory;
+  subcategory?: string;
+  labels?: string[];
 }
+
+export type UpdateServiceInputCategory =
+  (typeof UpdateServiceInputCategory)[keyof typeof UpdateServiceInputCategory];
+
+export const UpdateServiceInputCategory = {
+  EXTERIOR_WASH: "EXTERIOR_WASH",
+  INTERIOR_CLEANING: "INTERIOR_CLEANING",
+  RESTROOM_DUMP: "RESTROOM_DUMP",
+  RESTOCK_CONSUMABLES: "RESTOCK_CONSUMABLES",
+  ADD_ON: "ADD_ON",
+} as const;
 
 export interface UpdateServiceInput {
   name?: string;
@@ -212,6 +252,10 @@ export interface UpdateServiceInput {
   capacityPerSlot?: number;
   leadTimeMins?: number;
   isVisible?: boolean;
+  category?: UpdateServiceInputCategory;
+  /** @nullable */
+  subcategory?: string | null;
+  labels?: string[];
 }
 
 export interface Vehicle {

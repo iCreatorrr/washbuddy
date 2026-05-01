@@ -25,8 +25,11 @@ const SERVICE_SUGGESTIONS = ["Exterior Bus Wash", "Full Detail", "Interior Clean
 
 interface HourWindow { open: string; close: string }
 interface DaySchedule { isOpen: boolean; windows: HourWindow[] }
+import { CATEGORY_DISPLAY_NAMES, SERVICE_CATEGORIES, type ServiceCategory } from "@/lib/service-taxonomy";
+
 interface ServiceData {
   name: string; description: string; durationMins: string; price: string;
+  category: ServiceCategory;
   requiresConfirmation: boolean; maxLength: string; maxHeight: string; supportedTypes: string[];
 }
 
@@ -69,6 +72,7 @@ export default function ProviderOnboarding() {
   const [editingService, setEditingService] = useState<number | null>(null);
   const [svcForm, setSvcForm] = useState<ServiceData>({
     name: "", description: "", durationMins: "30", price: "",
+    category: "EXTERIOR_WASH",
     requiresConfirmation: true, maxLength: "540", maxHeight: "162", supportedTypes: ["STANDARD", "COACH", "MINIBUS", "SHUTTLE"],
   });
 
@@ -178,6 +182,7 @@ export default function ProviderOnboarding() {
         body: JSON.stringify({
           name: svcForm.name.trim(),
           description: svcForm.description.trim() || null,
+          category: svcForm.category,
           durationMins: parseInt(svcForm.durationMins),
           basePriceMinor: priceMinor,
           currencyCode,
@@ -199,7 +204,7 @@ export default function ProviderOnboarding() {
       } else {
         setServices([...services, { ...svcForm }]);
       }
-      setSvcForm({ name: "", description: "", durationMins: "30", price: "", requiresConfirmation: true, maxLength: "540", maxHeight: "162", supportedTypes: ["STANDARD", "COACH", "MINIBUS", "SHUTTLE"] });
+      setSvcForm({ name: "", description: "", durationMins: "30", price: "", category: "EXTERIOR_WASH", requiresConfirmation: true, maxLength: "540", maxHeight: "162", supportedTypes: ["STANDARD", "COACH", "MINIBUS", "SHUTTLE"] });
       setShowServiceForm(false);
       toast.success("Service saved!");
     } catch (err: any) { toast.error(err.message); }
@@ -385,6 +390,19 @@ export default function ProviderOnboarding() {
                 ))}</div>
               </div>
               <div><Label>Description</Label><textarea className="w-full border border-slate-200 rounded-xl p-3 text-sm" rows={2} value={svcForm.description} onChange={(e) => setSvcForm({ ...svcForm, description: e.target.value })} placeholder="Brief description..." /></div>
+              <div>
+                <Label>Category *</Label>
+                <select
+                  className="w-full h-10 px-3 border border-slate-200 rounded-xl text-sm bg-white"
+                  value={svcForm.category}
+                  onChange={(e) => setSvcForm({ ...svcForm, category: e.target.value as ServiceCategory })}
+                >
+                  {SERVICE_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>{CATEGORY_DISPLAY_NAMES[c]}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400 mt-0.5">How drivers will discover this service in search.</p>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div><Label>Duration (minutes) *</Label><Input type="number" min="5" value={svcForm.durationMins} onChange={(e) => setSvcForm({ ...svcForm, durationMins: e.target.value })} /></div>
                 <div><Label>Price ({currencyCode}) *</Label><Input type="number" step="0.01" min="0" value={svcForm.price} onChange={(e) => setSvcForm({ ...svcForm, price: e.target.value })} placeholder="e.g., 125.00" /></div>

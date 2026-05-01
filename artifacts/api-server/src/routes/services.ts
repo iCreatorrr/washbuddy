@@ -28,6 +28,7 @@ router.post("/providers/:providerId/locations/:locationId/services", requireAuth
       name, description, durationMins, basePriceMinor, currencyCode,
       platformFeeMinor, capacityPerSlot, leadTimeMins, requiresConfirmation,
       isVisible, compatibilityRules, maxVehicleClass,
+      category, subcategory, labels,
     } = req.body;
 
     if (!name || !durationMins || basePriceMinor === undefined || !currencyCode || platformFeeMinor === undefined) {
@@ -61,6 +62,9 @@ router.post("/providers/:providerId/locations/:locationId/services", requireAuth
         requiresConfirmation: requiresConfirmation ?? false,
         isVisible: isVisible ?? false,
         maxVehicleClass: maxVehicleClass || "EXTRA_LARGE",
+        ...(category !== undefined ? { category } : {}),
+        ...(subcategory !== undefined ? { subcategory: subcategory || null } : {}),
+        ...(Array.isArray(labels) ? { labels } : {}),
         compatibilityRules: compatibilityRules?.length
           ? {
               createMany: {
@@ -103,6 +107,7 @@ router.patch("/providers/:providerId/locations/:locationId/services/:serviceId",
       name, description, durationMins, basePriceMinor, currencyCode,
       platformFeeMinor, capacityPerSlot, leadTimeMins, requiresConfirmation,
       isVisible, maxVehicleClass,
+      category, subcategory, labels,
     } = req.body;
 
     const data: Record<string, unknown> = {};
@@ -117,6 +122,9 @@ router.patch("/providers/:providerId/locations/:locationId/services/:serviceId",
     if (requiresConfirmation !== undefined) data.requiresConfirmation = requiresConfirmation;
     if (isVisible !== undefined) data.isVisible = isVisible;
     if (maxVehicleClass !== undefined) data.maxVehicleClass = maxVehicleClass;
+    if (category !== undefined) data.category = category;
+    if (subcategory !== undefined) data.subcategory = subcategory || null;
+    if (Array.isArray(labels)) data.labels = labels;
 
     const service = await prisma.service.update({
       where: { id: req.params.serviceId },

@@ -6,6 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/utils";
+import { CATEGORY_DISPLAY_NAMES, SERVICE_CATEGORIES, type ServiceCategory } from "@/lib/service-taxonomy";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -33,6 +34,7 @@ interface ServiceData {
   basePriceMinor: number;
   requiresConfirmation: boolean;
   isVisible: boolean;
+  category?: ServiceCategory;
   pricing?: { vehicleClass: string; priceMinor: number; durationMins: number; isAvailable: boolean }[];
 }
 
@@ -52,6 +54,7 @@ export function ServicesTab({ providerId }: { providerId: string }) {
   // Edit form state
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [category, setCategory] = useState<ServiceCategory>("EXTERIOR_WASH");
   const [requiresConfirmation, setRequiresConfirmation] = useState(true);
   const [isVisible, setIsVisible] = useState(true);
   const [pricing, setPricing] = useState<Record<string, PricingRow>>({});
@@ -91,6 +94,7 @@ export function ServicesTab({ providerId }: { providerId: string }) {
     setEditService(svc || ({} as ServiceData));
     setName(svc?.name || "");
     setDescription(svc?.description || "");
+    setCategory(svc?.category ?? "EXTERIOR_WASH");
     setRequiresConfirmation(svc?.requiresConfirmation ?? true);
     setIsVisible(svc?.isVisible ?? true);
 
@@ -167,7 +171,7 @@ export function ServicesTab({ providerId }: { providerId: string }) {
           headers: { "Content-Type": "application/json" },
           credentials: "include",
           body: JSON.stringify({
-            name, description, durationMins, basePriceMinor,
+            name, description, category, durationMins, basePriceMinor,
             currencyCode: "USD", platformFeeMinor: 0,
             requiresConfirmation, isVisible,
           }),
@@ -187,7 +191,7 @@ export function ServicesTab({ providerId }: { providerId: string }) {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ name, description, basePriceMinor, durationMins, requiresConfirmation, isVisible, pricing: pricingArray }),
+          body: JSON.stringify({ name, description, category, basePriceMinor, durationMins, requiresConfirmation, isVisible, pricing: pricingArray }),
         });
       }
       toast.success(isNew ? "Service created" : "Service updated");
@@ -284,6 +288,19 @@ export function ServicesTab({ providerId }: { providerId: string }) {
             <div>
               <Label>Description</Label>
               <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} placeholder="Brief description of the service" />
+            </div>
+            <div>
+              <Label>Category</Label>
+              <select
+                className="w-full h-10 px-3 border border-slate-200 rounded-xl text-sm bg-white"
+                value={category}
+                onChange={(e) => setCategory(e.target.value as ServiceCategory)}
+              >
+                {SERVICE_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{CATEGORY_DISPLAY_NAMES[c]}</option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-400 mt-0.5">How drivers will discover this service in search.</p>
             </div>
 
             {/* Pricing Matrix */}

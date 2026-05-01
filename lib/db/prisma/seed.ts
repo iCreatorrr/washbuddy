@@ -160,9 +160,18 @@ const LOCATION_TEMPLATES: LocationTemplate[] = [
 
 // ─── SERVICE TEMPLATES ─────────────────────────────────────────────────────
 
+type ServiceCategoryLiteral =
+  | "EXTERIOR_WASH"
+  | "INTERIOR_CLEANING"
+  | "RESTROOM_DUMP"
+  | "RESTOCK_CONSUMABLES"
+  | "ADD_ON";
+
 interface ServiceTemplate {
   name: string;
   description: string;
+  category: ServiceCategoryLiteral;
+  labels?: string[];
   durationMinsRange: [number, number];
   usdPriceRange: [number, number]; // in dollars
   cadMultiplier: number; // CAD prices ~1.25x USD
@@ -172,6 +181,7 @@ const SERVICE_MENU: ServiceTemplate[] = [
   {
     name: "Exterior Wash",
     description: "Complete exterior wash including roof, sides, front, and rear. Removes road grime, salt, and debris.",
+    category: "EXTERIOR_WASH",
     durationMinsRange: [20, 45],
     usdPriceRange: [45, 85],
     cadMultiplier: 1.28,
@@ -179,6 +189,7 @@ const SERVICE_MENU: ServiceTemplate[] = [
   {
     name: "Interior Clean",
     description: "Thorough interior cleaning including floors, seats, windows, dashboard, and driver area.",
+    category: "INTERIOR_CLEANING",
     durationMinsRange: [30, 60],
     usdPriceRange: [60, 120],
     cadMultiplier: 1.28,
@@ -186,6 +197,7 @@ const SERVICE_MENU: ServiceTemplate[] = [
   {
     name: "Undercarriage Wash",
     description: "High-pressure undercarriage cleaning to remove salt, mud, and corrosive buildup.",
+    category: "EXTERIOR_WASH",
     durationMinsRange: [15, 30],
     usdPriceRange: [35, 65],
     cadMultiplier: 1.28,
@@ -193,6 +205,8 @@ const SERVICE_MENU: ServiceTemplate[] = [
   {
     name: "Full Detail",
     description: "Premium full-service detail including exterior wash, interior deep clean, engine bay, and protective coating.",
+    category: "EXTERIOR_WASH",
+    labels: ["detail", "full-service", "interior"],
     durationMinsRange: [60, 120],
     usdPriceRange: [150, 250],
     cadMultiplier: 1.28,
@@ -200,6 +214,7 @@ const SERVICE_MENU: ServiceTemplate[] = [
   {
     name: "Express Wash",
     description: "Quick automated exterior rinse and dry. Perfect for routine maintenance between full washes.",
+    category: "EXTERIOR_WASH",
     durationMinsRange: [10, 20],
     usdPriceRange: [25, 45],
     cadMultiplier: 1.28,
@@ -738,6 +753,8 @@ async function main() {
             locationId: location.id,
             name: svcTmpl.name,
             description: svcTmpl.description,
+            category: svcTmpl.category,
+            labels: svcTmpl.labels ?? [],
             durationMins,
             basePriceMinor: dollars(basePrice),
             currencyCode: tmpl.currencyCode,
