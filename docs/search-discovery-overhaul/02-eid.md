@@ -1075,7 +1075,7 @@ Across all rounds, these items must continue to work as they do today:
 - Receipt vehicle data integrity (read from booking record, not active vehicle context).
 - My Bookings tab strip mobile fit + URL-driven active tab.
 - Compact active vehicle pill rendering.
-- Find a Wash defensive gate banner when user lands on a location they have an upcoming booking at — preserve in the merged page.
+- Defensive gate banner when user lands on a location they already have an upcoming booking at — preserve. The banner is implemented in `pages/customer/location-detail.tsx` (the `/location/:id` page), not in the search/find-a-wash page itself. The merged search work doesn't touch that code path; verify navigation flows from the merged page still trigger the banner correctly.
 - Pin selection model (single `selectedLocationId`, no marker-layer teardown).
 - Existing search.tsx metro alias logic — extracted to utility module, not discarded.
 - Booking flow detail screens.
