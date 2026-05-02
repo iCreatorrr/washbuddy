@@ -283,9 +283,15 @@ The api-server `Service.category` selection-set fix from CP1 commit `05a29bc` is
 
 ---
 
-## Checkpoint 3.5 — Vite Leaflet dedupe (preventive)
+## Checkpoint 3.5 — Vite Leaflet dedupe (preventive; misdiagnosed at the time)
 
-**Commit:** `<this commit>`. Single-line config edit. Runtime behavior on Replit didn't change in CP3 — but the underlying conditions for a stack-overflow regression did change in CP2, and Replit testing surfaced the crash. CP3.5 makes the cache-clear fix permanent.
+**Commit:** `f9f8d87`. Single-line config edit added in response to a Replit `Maximum call stack size exceeded` crash on destination set. **The diagnosis at the time was wrong.** The Replit agent pattern-matched the stack-overflow trace to a known Vite + Leaflet duplicate-copy failure mode (real bug class, well-documented online) and recommended `resolve.dedupe` + `optimizeDeps.include` for `leaflet`. Both were added; the running session's symptoms cleared after a `.vite` cache clear and restart, which the dedupe was credited with making permanent.
+
+**The crash actually came back after CP3.5 shipped** — same recursion trace, but now with all `LatLngBounds` frames at the same Vite version hash (`v=44f4182e`), proving single Leaflet copy. The duplicate-copy theory was never the cause; the cache clear had cleared a stale pre-bundle, not a duplicate-copy condition. The actual root cause is the [Hotfix entry below](#hotfix--latlngbounds-recursion-the-actual-fix) — Prisma `Decimal` columns serializing as JSON strings.
+
+**Why the dedupe stays anyway:** the duplicate-copy failure mode is real. `leaflet.markercluster` does reach into `leaflet`'s exports and Vite's pre-bundle resolution can theoretically split `leaflet` into two slots under the right HMR conditions, even with this codebase's clean dependency tree. The `resolve.dedupe` and `optimizeDeps.include` entries close that real-but-latent failure mode preventively. The institutional record needs to make clear: this commit fixes a future failure mode, not the destination-set crash it was originally credited with fixing.
+
+**Lesson for future engineers reading this cold:** the symptoms looked like the documented Vite + Leaflet duplicate-copy issue (Symbol.hasInstance recursion in a `LatLngBounds` trace), but the load-bearing diagnostic was the version hash on each frame in the trace. When all frames share a `?v=...` hash, it's a single copy. Don't pattern-match to a known runtime quirk without confirming against the trace's specifics.
 
 ### What shipped
 
@@ -316,5 +322,66 @@ Either alone reduces the risk; both together close it. Inline comment in the con
 - Unchanged from CP3 handoff. CP4 dispatches after the user re-runs CP3's full test protocol (cleared cache, restarted workflow, "Search this area" verified end-to-end on Replit) so any latent CP3 issue surfaces *before* CP4's structural header rewrite layers on top of it.
 
 ### Anything that surprised me
-- **The crash mode is a known Vite + Leaflet pattern.** Searching the dual-copy-Leaflet failure mode online turns up the same `LatLngBounds.extend → toLatLng → recurse` trace from other Vite + Leaflet projects. The standard fix is exactly the `dedupe` + `optimizeDeps.include` pattern in this commit. Nothing custom; if a future contributor hits a similar `instanceof X returns false for an X` symptom in a different Leaflet primitive (`LatLng`, `Bounds`, `Layer`), the same fix shape applies.
-- **Adding a plugin (`leaflet.markercluster`) was enough to flip the failure mode from latent to active.** Pre-CP2, Leaflet was used by exactly one place (`L` import in find-a-wash.tsx); Vite's dep-cache had one slot, no `instanceof` mismatch possible. CP2's plugin import (`import "leaflet.markercluster"`) reaches into Leaflet's exports as a side effect, which can ask Vite to resolve `leaflet` separately for the plugin's bundling needs. That's the "second slot" the dedupe is closing.
+*Original write-up's "surprises" attributed the crash to the duplicate-copy Vite + Leaflet failure mode. That diagnosis was wrong (see the retro-correction at the top of this section and the Hotfix section below). The dedupe still closes a real preventive concern, but the technical surprise narrative no longer holds.* The actual surprise — captured in the Hotfix section — was that Prisma's Decimal serialization had been silently producing string-typed lat/lng since the endpoint shipped, and the bug only manifested once `leaflet.markercluster` started consuming the field for bounds aggregation.
+
+---
+
+## Hotfix — LatLngBounds recursion (the actual fix)
+
+**Commit:** `<this commit>`. Step 2 of a two-step hotfix; step 1 (`e751fb6`) added diagnostic console.logs that captured the response shape on Replit and revealed the actual root cause.
+
+### What was actually wrong
+
+`Location.latitude` and `Location.longitude` are Prisma `@db.Decimal(9, 6)` columns. Prisma's `Decimal` type serializes to a **string** in JSON (`"43.622994"`, not `43.622994`), even though the OpenAPI contract types these fields as `number`. The mismatch had been silent since the endpoint shipped:
+
+- **Phase A** used the values for `haversineKm` distance math, where JavaScript's `*`/`-` operators auto-coerce strings to numbers. The math worked; nobody noticed the type mismatch.
+- **Phase B CP1** added `wash-pin` and called `L.marker([loc.latitude, loc.longitude], ...)`. Leaflet's `toLatLng` coerces `[string, string]` arrays via `+` arithmetic, so individual marker construction worked.
+- **Phase B CP2** added `leaflet.markercluster`, which aggregates child marker bounds via `LatLngBounds.extend` on each marker's `_latlng`. The cluster's bounds construction takes a different path — when `LatLngBounds.extend` receives a value that isn't a `LatLng` or `LatLngBounds` instance and `toLatLng` returns null for it, it falls into `this.extend(toLatLngBounds(obj))`. `toLatLngBounds` calls `new LatLngBounds(obj)`, which iterates `obj.length` and calls `extend(item)` on each element. With string-typed lat/lng flowing into this path under specific cluster-aggregation conditions, the recursion stops bottoming out and the stack overflows.
+
+The diagnostic from step 1 confirmed the wire format empirically: `latType: "string", latValue: "43.622994"`.
+
+### Why CP3.5's diagnosis was wrong
+
+CP3.5 was triggered by the same crash trace (`Maximum call stack size exceeded` inside `LatLngBounds.extend`), and the Replit agent matched it to a documented Vite + Leaflet failure mode where two copies of Leaflet load simultaneously and `obj instanceof LatLng` returns false against the wrong copy. That failure mode produces an identical-looking trace; the load-bearing differentiator is whether the `LatLngBounds` frames in the stack reference the same Vite version hash (single copy) or different ones (duplicate copy). The hashes weren't checked at the time. After CP3.5 shipped, the crash recurred and the new trace's frames all shared `v=44f4182e` — proving single copy, ruling out the duplicate-copy theory.
+
+The dedupe + optimizeDeps additions from CP3.5 stay in `vite.config.ts` because they close a real-but-latent failure mode that could surface in the future (HMR cycles, transitive deps adding a second `leaflet`). They just didn't fix the destination-set crash they were originally credited with fixing.
+
+### The fix
+
+New file [`lib/normalize-location.ts`](artifacts/washbuddy-web/src/lib/normalize-location.ts) — single shared boundary normalizer. Two exports:
+- `normalizeLocation(loc)` — coerces `latitude`/`longitude` from string to number on a single location object. NaN-result fields become `null` so downstream `latitude != null` filters continue to work.
+- `normalizeLocationsResponse(data)` — applies `normalizeLocation` to every entry in a search-response shape (`{ locations: [...] }`).
+
+Applied at every client-side site that fetches Location-shaped data:
+- [find-a-wash.tsx](artifacts/washbuddy-web/src/pages/customer/find-a-wash.tsx) — search response landing site (the consumer that crashed).
+- [search.tsx](artifacts/washbuddy-web/src/pages/customer/search.tsx) — legacy page, still in repo until Round 5.
+- [route-planner.tsx](artifacts/washbuddy-web/src/pages/customer/route-planner.tsx) — legacy page, still in repo until Round 5.
+- [location-detail.tsx](artifacts/washbuddy-web/src/pages/customer/location-detail.tsx) — both the single-location fetch (`/api/locations/:id`) and the search fallback.
+
+Diagnostic `[diag-hotfix]` console.logs from step 1 removed in this same commit.
+
+### Spec sections governing
+- N/A — bug fix, no spec change.
+- The OpenAPI contract at [`lib/api-spec/openapi.yaml`](lib/api-spec/openapi.yaml) types `latitude`/`longitude` as `number`; the runtime is now consistent with the contract on the consumer side. The api-server is still the truer boundary for this fix (the wire format itself is wrong, not just the consumer's reading of it). Tracked as a future cleanup pass — see Open items.
+
+### Verification
+- TypeScript: **21 errors**, baseline holds. Zero new in any of the 5 touched files.
+- Replit (post-deploy):
+  - `/find-a-wash` loads in nearby mode without crash.
+  - Setting a destination triggers route + nearby-locations fetch + cluster bounds aggregation — no `Maximum call stack size exceeded`.
+  - Pin clustering + tier colors + selection model from CP1/CP2/CP3 all continue to work.
+
+### Decisions made
+- **Client-side fix at the four call sites, not server-side.** Per the user's hotfix direction. Long-term the api-server should match its own OpenAPI contract (a Prisma response transformer would coerce `Decimal` → `number` once, at the wire boundary, for every consumer). Tracked for a future cleanup pass; the client-side fix unblocks today.
+- **Single shared helper, not a per-call-site `Number()` cast.** Per the user's "fix at the boundary so this can't recur in future code paths" direction. Future fetch sites that consume `Location`-shaped data import `normalizeLocation` / `normalizeLocationsResponse` and the recursion can't recur.
+- **NaN-results become null, not 0.** A non-numeric latitude string would produce `NaN` from `parseFloat`. `NaN` would fail downstream in different ways (Leaflet would throw "Invalid LatLng"; cluster aggregation would still misbehave). Coercing to `null` makes the existing `latitude != null` filters in find-a-wash.tsx (line 1229, 1417, 1427) catch and skip the bad row cleanly.
+- **Legacy pages (search.tsx, route-planner.tsx) get the fix too.** They redirect to `/find-a-wash` on first navigation, but the underlying query still runs during the brief window before the redirect fires. Adding the helper there is one line per file and prevents a recurrence if anyone hits those URLs directly during the migration window. They get deleted in Round 5 anyway.
+
+### Open items
+- **Server-side coercion in api-server is the cleaner long-term fix.** A Prisma response transformer at [`artifacts/api-server/src/routes/locations.ts`](artifacts/api-server/src/routes/locations.ts) (or a model middleware in `lib/db`) that maps `Decimal` → `number` on serialization would align the wire format with the OpenAPI contract and eliminate the need for client-side coercion entirely. Tracked for a Round 5 cleanup pass alongside the legacy-page deletions.
+- **`Location` is the only Decimal-bearing model today.** Money is stored as integer minor units per CONTEXT.md. But future schema additions that introduce Decimal columns would have the same silent-string-on-the-wire problem; the client-side helper handles only the lat/lng case, so any new Decimal fields would need their own normalizer or the server-side fix above.
+
+### Anything that surprised me
+- **The bug had been latent since the endpoint shipped.** Prisma Decimal → JSON string is documented behavior, but it's quiet until a consumer treats the value as a strict number type. JavaScript's lenient arithmetic coercion (`"43.62" * Math.PI / 180` works) hid it through Phase A's distance math. The first strict-type consumer in this codebase was `leaflet.markercluster`'s bounds aggregation — a transitive dep added in CP2, three rounds after the wire-format mismatch first appeared. Bugs that survive this many code paths are a reminder to type-check at every boundary, not just where a strict-type consumer lives.
+- **The CP3.5 misdiagnosis was unusually convincing.** The trace literally matched a documented Vite + Leaflet failure mode. The standard fix (dedupe + optimizeDeps.include) was applied. The session's symptoms cleared after a `.vite` cache clear. Three independent signals all pointing at "duplicate-copy issue" — but the cache clear had cleared a *different* stale state (the stale TS build artifact, or a stale pre-bundle that happened to mask the real bug for a few minutes), not the duplicate-copy condition. The lesson: when the standard fix's verification has a step that incidentally clears unrelated state, you can't tell from the symptom-clearing alone whether the fix actually fixed anything. Capture the trace's distinguishing details (version hashes, frame contents) before applying the fix; capture them again after.
+- **Lesson learned for future runtime-tool diagnoses.** Don't trust runtime-environment-tool diagnoses without verifying against actual stack traces. Always inspect the trace before pattern-matching. The Replit agent's pattern-match was reasonable given the symptoms it had; my acceptance of it without re-verifying when the crash recurred was the institutional failure. Step 1 of this hotfix (the diagnostic console.log patch) is the template for future similar bug investigations — capture ground truth before proposing a fix.

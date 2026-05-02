@@ -7,6 +7,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { MapPin, CheckCircle2, ChevronLeft, ArrowRight, Star, AlertTriangle, StickyNote, Send, Check, Calendar } from "lucide-react";
 import { LocationReviews } from "@/components/location-reviews";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { normalizeLocation, normalizeLocationsResponse } from "@/lib/normalize-location";
 import { format, addDays } from "date-fns";
 import { motion } from "framer-motion";
 import { useActiveVehicle } from "@/contexts/activeVehicle";
@@ -139,7 +140,9 @@ export default function LocationDetail() {
       if (r.ok) {
         const d = await r.json();
         if (d?.location) {
-          setLocData(d.location);
+          // Coerce Prisma Decimal-as-string lat/lng → number at the
+          // boundary. See Phase B Hotfix in round-1-phase-b-handoff.md.
+          setLocData(normalizeLocation(d.location));
           setIsSearchLoading(false);
           return;
         }
@@ -153,7 +156,8 @@ export default function LocationDetail() {
         setIsSearchError(true);
         return;
       }
-      const d = await r.json();
+      // Same coercion at the search-fallback boundary.
+      const d = normalizeLocationsResponse(await r.json());
       const match = (d?.locations || []).find((l: any) => l.id === locationId);
       if (!match) {
         setFetchErrorDetails("Location not in search results");

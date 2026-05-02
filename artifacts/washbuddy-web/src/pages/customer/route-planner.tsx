@@ -11,6 +11,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { ActiveVehiclePill } from "@/components/customer/active-vehicle-pill";
 import { useActiveVehicle } from "@/contexts/activeVehicle";
+import { normalizeLocationsResponse } from "@/lib/normalize-location";
 import { deriveSizeClassFromLengthInches } from "@/lib/vehicleBodyType";
 
 interface CityOption {
@@ -545,7 +546,9 @@ export default function RoutePlanner() {
     queryFn: async () => {
       const r = await fetch(locationsUrl, { credentials: "include" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
+      // Coerce Prisma Decimal-as-string lat/lng → number at the
+      // boundary. See Phase B Hotfix in round-1-phase-b-handoff.md.
+      return normalizeLocationsResponse(await r.json());
     },
     staleTime: 60_000,
   });

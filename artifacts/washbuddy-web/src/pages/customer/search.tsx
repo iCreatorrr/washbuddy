@@ -14,6 +14,7 @@ import { ActiveVehiclePill } from "@/components/customer/active-vehicle-pill";
 import { useActiveVehicle } from "@/contexts/activeVehicle";
 import { deriveSizeClassFromLengthInches } from "@/lib/vehicleBodyType";
 import { matchesSearch } from "@/lib/search-helpers";
+import { normalizeLocationsResponse } from "@/lib/normalize-location";
 
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 3959;
@@ -102,7 +103,9 @@ export default function CustomerSearch() {
     queryFn: async () => {
       const r = await fetch(locationsUrl, { credentials: "include" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
+      // Coerce Prisma Decimal-as-string lat/lng → number at the
+      // boundary. See Phase B Hotfix in round-1-phase-b-handoff.md.
+      return normalizeLocationsResponse(await r.json());
     },
     staleTime: 60_000,
   });
