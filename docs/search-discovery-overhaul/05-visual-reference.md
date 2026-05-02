@@ -116,6 +116,8 @@ The pin is the most-seen element in the app. It encodes ranking through color an
 
 **Spec update (Phase B CP1.6):** the inner-glyph specification was changed from 5 per-category variants to a uniform WashBuddy water-drop logomark. Per-category color tokens in §1 still apply to filter chips, card service pills, and detail pages. See EID §3.5 for the rationale (UX research, icon legibility at 32×40px, alignment with category-leading map apps).
 
+**Spec update (Phase B CP3 v3):** default-mode tier classification today is **vehicle-compat-only** — incompatible (gray-dashed) vs mid (light blue). Top-tier and low-tier renderings described in the rest of §4 are reserved for Round 3 when filter UI ships and filter-match-strength scoring becomes the basis for top-tier promotion. Until Round 3, all compatible providers render at mid-tier. The cluster bubble's "highest-tier of members" rule still applies; with no top-tier members, clusters render light blue when any compatible pin is included. See EID §3.5 for the rationale (three failed attempts at viewport-driven tier classification, each rejected by user mental model — bounds context affects list ordering only, never map appearance).
+
 ### 4.1 Pin shape and color tiers
 
 ![Pin shape and color tiers](visuals/04-pin-tiers.svg)
