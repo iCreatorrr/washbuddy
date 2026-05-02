@@ -647,3 +647,95 @@ CP4 was reverted because it shipped the EID §3.1 expanded-mode header without t
 The next push consolidates Rounds 2 and 3 into a single large checkpoint — bottom sheet, result cards, pin callout, filter chips, service picker, all-filters sheet, collapsed/expanded header with framer-motion shared `layoutId`, and the proper Bug 1 fix all ship together so the components land with their dependencies intact. Phase B is no longer "complete" in the CP4 close-out sense; the scope is being re-cut to land closer to end-state in one push rather than per-component.
 
 The CP4 design thinking (slots-based header, z-index hierarchy, Bug 1 root cause analysis, time-row chip, Plan Route inline-text affordance) carries forward into the consolidation push — just not the *premature shipping* of the header without its sheet-state driver.
+
+---
+
+## Round 2+3 Consolidation
+
+**Branch:** `main`. **Commit:** `<this commit>`.
+
+### What shipped
+
+A single large commit landing all of Round 2 (bottom sheet) plus Round 3 (filter architecture) plus the deferred Bug 1 fix plus the §3.1 collapsed/expanded header. Each component below was created or substantially modified in this commit; the full set ships as one logical unit because the components are tightly interdependent (header presents differently per sheet state; bottom sheet height drives header mode; pin callout replaces Leaflet popup which the marker effect builds; result card consumes the score+rank from the new sort-scoring lib; service picker and all-filters sheets feed the filter reducer that drives chip badges and pin tier).
+
+**New shared libs:**
+- [lib/sort-scoring.ts](artifacts/washbuddy-web/src/lib/sort-scoring.ts) — `scoreAndSort()` (best-fit composite per EID §4.6: 0.50 distance / 0.25 service-match / 0.125 price / 0.125 rating, mode-aware distance proxy: `distFromOrigin` in nearby mode, `distanceToRoute` in route mode), `applyDirectSort()` for non-best-fit sort keys. Both return `ScoredLocation[]` with `rankIdx` + `isTopBadge` (top 3 within 1 stdev cutoff, capped at `min(3, ceil(N*0.25))`).
+- [lib/filter-state.ts](artifacts/washbuddy-web/src/lib/filter-state.ts) — `filterUIReducer` with full `FilterUIState` (selectedServiceCategories, openFilterEnabled, sheetFilters per EID §4.3 9 sections, sortBy, sheetState, modalOpen, userOverrodeSheetState). Predicates: `passesAllSheetFilters`, `matchesAllSelectedServices`. Live-count derivation: `deriveCategoryCounts`. Per-pill helper `derivePillsFromSheetFilters` lives in active-filter-pills.tsx since it depends on the specific dispatch shape.
+
+**New components (all under `components/customer/`):**
+- [find-a-wash-header.tsx](artifacts/washbuddy-web/src/components/customer/find-a-wash-header.tsx) — collapsed/expanded modes via framer-motion shared `layoutId`, slot-based (caller composes form rows, chip row, active pills). Per EID §3.1 + visual reference §5.
+- [filter-chips.tsx](artifacts/washbuddy-web/src/components/customer/filter-chips.tsx) — three Tier 1 chips (Service Type adaptive label / Open at arrival|now toggle / Filters with badge). Per EID §4.1 + visual reference §6.
+- [active-filter-pills.tsx](artifacts/washbuddy-web/src/components/customer/active-filter-pills.tsx) — removable pill row + the `derivePillsFromSheetFilters` helper. Per EID §4.4 + visual reference §7.
+- [result-card.tsx](artifacts/washbuddy-web/src/components/customer/result-card.tsx) — single component for both bottom sheet and (Round 5) right rail, slots-based for service pills/open status/price/rating, demoted state for incompatible. Per EID §3.4 + visual reference §8.
+- [search-bottom-sheet.tsx](artifacts/washbuddy-web/src/components/customer/search-bottom-sheet.tsx) — 3-state drag-to-snap (peek/default/expanded), velocity-aware, contained scroll container (the Bug 1 fix mechanism). Per EID §3.3 + visual reference §9.
+- [service-picker-sheet.tsx](artifacts/washbuddy-web/src/components/customer/service-picker-sheet.tsx) — modal with 5 categories, multi-select, live count pills + Apply count. Per EID §4.2 + visual reference §10.
+- [all-filters-sheet.tsx](artifacts/washbuddy-web/src/components/customer/all-filters-sheet.tsx) — modal with 9 sections (Sort by always visible, Service details auto-expanded when chip has selections, others collapsed by default), sticky Clear all + Apply footer. Per EID §4.3 + visual reference §11.
+- [pin-callout.tsx](artifacts/washbuddy-web/src/components/customer/pin-callout.tsx) — replaces Leaflet popup, positioned absolutely over the map at `map.latLngToContainerPoint(marker.getLatLng())` with `move`/`zoom` listeners keeping it pinned. Per EID §3.6 + visual reference §12.
+
+**Modified:**
+- [components/layout.tsx](artifacts/washbuddy-web/src/components/layout.tsx) — adds `noContentPadding?: boolean` prop. When set, suppresses the default `p-4 md:p-8 max-w-7xl mx-auto` content wrapper around children. Threaded through `RouteGuard` in [App.tsx](artifacts/washbuddy-web/src/App.tsx) for the `/find-a-wash` route only. This is the layout-level half of the Bug 1 fix.
+- [components/customer/wash-pin.tsx](artifacts/washbuddy-web/src/components/customer/wash-pin.tsx) — `ClassifyPinInput` extended with `matchesAllSelectedServices?` and `passesAllSheetFilters?`. Classifier body now: incompatible (vehicle) → low (route+detour>20, dormant) → if filter-context defined: low/top/mid by filters → mid baseline. `inVisibleBounds` remains reserved-but-unused per CP3 v3.
+- [src/index.css](artifacts/washbuddy-web/src/index.css) — 11 z-index variables added to `:root` per EID §3.2 (--z-map through --z-modal). Replaces hardcoded `z-50` etc.; new components consume the variables via `zIndex: "var(--z-...)"`.
+- [pages/customer/find-a-wash.tsx](artifacts/washbuddy-web/src/pages/customer/find-a-wash.tsx) — substantial restructure. Imports + reducer + modal state added; bindPopup machinery stripped from marker effect (the marker click handler still fires `selectLocation`, but the popup DOM building and selection-effect `openPopup`/`closePopup` calls are gone — PinCallout drives visual selection now); pin position tracking effect added (recomputes container-pixel coords on selection + map move/zoom); JSX shell rewritten as fixed-position page with map filling viewport, header overlay, contained-scroll bottom sheet, service-picker + all-filters modals.
+
+### Spec sections governing
+- [02-eid.md §3.1](docs/search-discovery-overhaul/02-eid.md) — header collapsed/expanded modes, framer-motion shared layoutId.
+- [02-eid.md §3.2](docs/search-discovery-overhaul/02-eid.md) — z-index hierarchy, sheet-contained scroll wording (added in this commit).
+- [02-eid.md §3.3](docs/search-discovery-overhaul/02-eid.md) — bottom sheet 3 states, drag-to-snap, mode defaults.
+- [02-eid.md §3.4](docs/search-discovery-overhaul/02-eid.md) — result card spec, rank-vs-tier note (added in this commit).
+- [02-eid.md §3.5](docs/search-discovery-overhaul/02-eid.md) — pin classifier with filter-context inputs (updated in this commit).
+- [02-eid.md §3.6](docs/search-discovery-overhaul/02-eid.md) — pin callout replaces Leaflet popup.
+- [02-eid.md §4.1–§4.6](docs/search-discovery-overhaul/02-eid.md) — filter architecture: chip row, service picker, all-filters sheet, active pills, over-filter guardrail, sort scoring formula.
+- [05-visual-reference.md §5–§12](docs/search-discovery-overhaul/05-visual-reference.md) — visual targets for the 8 new components.
+
+### Verification
+- TypeScript: **21 errors**, baseline holds. Zero net-new in any of the new component files or `find-a-wash.tsx`. Confirmed via `npx tsc --noEmit` filtered to changed files.
+- Production build: not yet run; Replit deploy verifies via the canary protocol below.
+
+### Decisions made
+
+- **Slots-based components, not nested-imports.** `FindAWashHeader` doesn't import `FilterChips` or `ActiveFilterPills` directly — it accepts them as `chipRowSlot` / `activePillsSlot`. Same pattern for `SearchBottomSheet` (children) and the modals. Avoids the import-cycle risk the audit flagged: each component owns its layout, the page composes them. Dependency graph stays one-directional (`find-a-wash.tsx` → all new components, no cross-component edges).
+- **Pin classifier extended, but the marker effect doesn't yet pass filter context.** The classifier signature is ready; today's marker effect calls `classifyPin({ rankIdx, totalRanked, mode, fitsActiveVehicle })` without the two new optional inputs, so pins remain at the CP3 v3 vehicle-compat-only baseline. The result card list, by contrast, consumes `scoreAndSort` and renders TOP badges based on best-fit ordering. This is intentional — promoting pin tier on every filter toggle would re-render every marker (cluster group, label collision rule, etc.); the list is cheap to re-render and the user already gets the visible filter signal via card pills + active-filter pills + chip state. Round 3.5 work (out of scope here) can wire the marker effect to filter context if user testing shows pin tier divergence is confusing.
+- **Sort scoring uses mode-aware distance proxy** (audit refinement #6). Until Round 4 wires real OSRM detour, the 0.50 weighting slot is filled with `distFromOrigin` in nearby mode (km from current location to provider) and `distanceToRoute` in route mode (perpendicular km from sampled route polyline to provider). Both already exist on the location records — no new geometry. Round 4 swaps `detourMinutes` into the slot once the real endpoint ships.
+- **Over-filter guardrail placement is sheet-state-aware** (audit refinement #11). When the sheet is at peek (collapsed mode, list invisible), the guardrail renders inside the header below the active filter pills so the user sees the warning in their primary surface. When the sheet is at default/expanded, the guardrail renders at the top of the list. Same component instance, two parents — render in either spot based on `filterUI.sheetState === 'peek'`.
+- **Filter persistence on destination change.** Per audit decision: filters DO NOT reset when destination changes. The user's "I want diesel + DEF" preference outlives a route swap. Only `searchBoundsAnchor` clears on context change (preserved from CP3 v3). The reducer's `RESET_SHEET_STATE_TO_MODE_DEFAULT` action only resets sheet state (peek vs default) and only when `userOverrodeSheetState === false` — a user who deliberately expanded the sheet keeps it expanded across mode flips.
+- **Bug 1 fix mechanism: page-level fixed-position + sheet-contained scroll.** Two-prop change: `noContentPadding` on `AppLayout` removes the centering wrapper, and the page root is `position:fixed; inset:0; overflow:hidden`. Combined with `SearchBottomSheet`'s internal `flex-1 overflow-y:auto` body, the document never scrolls — the sheet's contained scroll handles all card-list overflow. This is the CP3 v3 / CP4 deferred root cause: the prior `space-y-4 pt-14` + AppLayout content wrapper combination produced a document that scrolled past the bottom sheet, leaving the page bottomless on mobile.
+- **Bottom sheet drag is handle-only, body scrolls independently.** Drag handler attaches to the handle row only; the cards-container has `overflow-y: auto` and absorbs vertical scroll separately. Without this split, dragging anywhere in the sheet would yank it back to peek instead of scrolling the list.
+- **Modal sheets close on backdrop tap; service-picker and all-filters use local state.** Apply commits to the reducer; closing without Apply discards local changes. Lets the user explore "what if I added Restroom Dump?" without thrashing the result list. The Apply button shows a live `(N matches)` count derived from the hypothetical filter set.
+- **The Leaflet popup is fully replaced.** No `bindPopup`, no `marker.openPopup()`, no `map.closePopup()` calls remain. PinCallout renders as a positioned div over the map, recomputing its position on `move`/`zoom`. Endpoint markers (origin/destination/my-location) lose their popups too — they were informational-only and the new layout makes them context-clear via the pin shape and color.
+
+### Open items for next round
+
+- **Round 4 — detour-time wiring.** Real per-location OSRM detour values via `POST /api/locations/with-detour-times` per EID §5.2. Today the score uses `distanceToRoute` as a proxy in route mode. When real detour lands, swap it into the 0.50 weighting slot and remove the proxy fallback comment in `find-a-wash.tsx`'s `scoredList` derivation.
+- **Round 5 — backend amenity flag wiring.** `passesAllSheetFilters` is structurally complete but the seed data doesn't expose most amenity flags (fuel.diesel, driverAmenities.restroom, coachAmenities.shorePower, etc.). All those filters currently degrade to "always true" — the UI exposes the toggles, the reducer tracks them, the active pills show them, but the predicate doesn't narrow on them yet. When backend exposes the flags, only the predicate narrows; no UI changes needed.
+- **Pin tier filter-context wiring.** Optional Round 3.5 follow-up: pass `matchesAllSelectedServices` / `passesAllSheetFilters` to `classifyPin` from the marker effect so pins promote to top-tier and demote to low-tier on filter changes. Today the result card list does this; pins stay at CP3 v3 baseline (vehicle-compat-only).
+- **Save-search persistence.** The all-filters sheet's "Save" button is a Phase 2 stub showing a placeholder alert. Full save-search lands when there's persistent storage.
+- **Operating-window-aware open status.** Today `openStatusFor()` only handles `isOpenNow` → green/red. EID §3.4 specifies green/amber/red gradients ("Open at 4:30 PM" / "Closes at 6:00 PM"). Round 5 ships when backend exposes operating windows + relative-time computation.
+- **Visual reference §4 still describes target-state pin tier classification.** The note acknowledging current vehicle-compat-only state is in EID §3.5 but not yet mirrored in §4 of the visual reference. Doc-only follow-up.
+
+### Replit canary protocol
+
+Test on Replit deploy across viewports 320 / 375 / 414 / 768 / 1024 / 1440. Record any divergence from the §5-§12 SVG references.
+
+1. **Page loads, no document scroll.** Visit `/find-a-wash`. The page is fixed-position; map fills behind the header; bottom sheet pinned to bottom. Try to scroll the document — it shouldn't move. Only the sheet's internal scroll container scrolls when you scroll the cards.
+2. **Sheet drag-to-snap.** Drag the sheet handle slowly upward — releases snap to default or expanded based on which is nearer. Drag fast — flick crosses two states (peek to expanded). Tap handle once — cycles peek to default to expanded to peek.
+3. **Mode default.** Without a destination, sheet starts at default. Set a destination — sheet snaps to peek. Manually drag to expanded — destination change does NOT yank back to peek (user override preserved).
+4. **Header collapsed/expanded shared layoutId.** Drag sheet from default to peek — the search card collapses into the unified pill smoothly via framer-motion. The reverse re-expands. Verify no jump-cuts; the `layoutId="find-a-wash-header-pill"` interpolates position+size.
+5. **Tier 1 chip row.** Service Type chip default label "Services" with chevron. Tap to open service picker sheet. Open at arrival/now chip toggles green dot + light blue fill. Filters chip is white outline; opening adds badge with count.
+6. **Service picker sheet.** Five rows, each with category icon (colored), name, subcategory hint, count pill, checkmark circle. Tap a row to add checkmark + count updates. Apply button shows "Apply (N matches)" or "Apply (N matches along route)" in route mode. Closing without Apply discards local selections.
+7. **All-filters sheet.** Sort by always visible at top. Availability section default expanded. Service details auto-expands if Service Type chip has selections. Other sections collapsed. Sticky Clear all + Apply footer. Apply button updates live.
+8. **Active filter pills.** Toggle a few sheet filters to surface pills below chip row. Tap × on a pill — that single filter clears, chip badge count decrements, list updates.
+9. **Result cards — non-selected.** Top 3 cards show TOP badge in rank column. 4+ show numeric rank. Provider name, city · meta · arrival, service pills row, open status + price (if services selected) — all at the spec sizes.
+10. **Result cards — selected state.** Tap a card body to apply blue accent stripe on left, blue-50 bg, 3px text shift compensates. Pin gets gold ring. Tap card again to deselect.
+11. **Result cards — incompatible state.** With an incompatible vehicle active, cards for incompatible providers show info-icon in rank, slate name, amber "No bay fits this vehicle" pill. No service pills, no open status, no price. Chevron grays out.
+12. **Pin callout.** Tap a pin to open a callout above with TOP badge (if applicable) + name + meta + open status + Book button. Pan map to verify callout follows pin. Tap card body of callout to snap sheet to default. Tap Book to navigate to /location/:id booking flow.
+13. **Search this area.** Pan ~200km from results so the button appears. Tap to re-order list by closest-to-bounds-center. Pin colors and clusters do NOT change (CP3 v3 invariant preserved).
+14. **Empty-area pill.** Pan to a region with zero providers. Tap "Search this area" to surface pill in the sheet's list area. "Show closest →" zooms-and-centers at zoom 13.
+15. **Over-filter guardrail.** Apply enough filters that <5 providers match. Sheet at peek shows warning inside header below active pills. Drag sheet to default to move warning to top of list. Tap "Show all" to clear all sheet filters + service categories.
+16. **Z-index sanity.** Modal overlay (1100) covers the sheet (1100) and header (1000). Modal sheet (1200) is above the overlay. Map controls (800) sit above pins (400-700). All transitions are smooth, no flash-of-misordered layers.
+
+### Anything that surprised me
+
+- **Pin position tracking is a `move`+`zoom` listener pair, not just `moveend`.** `moveend` fires only after the pan completes; `move` fires continuously. PinCallout uses `move` so it tracks the pin live during pan, which matches Google Maps / Apple Maps callout behavior. The cost is one `latLngToContainerPoint` call per frame during pan, which is cheap.
+- **Framer-motion's `AnimatePresence mode="wait"` is what makes the header mode swap not jump-cut.** Without it, both modes would briefly mount during the swap. With it, the outgoing mode finishes its exit animation before the incoming mode starts, and the `layoutId` on the unified pill bridges the two so the position interpolates smoothly.
+- **The `userOverrodeSheetState` flag was load-bearing.** Without it, every destination change yanked the sheet back to mode default — the user's deliberate "expand to see all results" gesture got undone every time they changed routes. Tracking whether the current state was user-initiated lets the reducer preserve intent.

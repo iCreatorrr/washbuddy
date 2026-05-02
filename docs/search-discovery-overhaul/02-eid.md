@@ -247,6 +247,10 @@ When the user taps "Search this area" in a region containing zero providers from
 
 Replace any hardcoded `z-50` etc. in route-planner.tsx with these tokens.
 
+**Page layout — fixed-position with sheet-contained scroll (Round 2+3):**
+
+`/find-a-wash` renders inside `<AppLayout noContentPadding>` (the prop suppresses the default `p-4 md:p-8 max-w-7xl mx-auto` content wrapper) and the page root is `position:fixed; inset:0; overflow:hidden`. The map fills the viewport behind a fixed-position header at `--z-header`; the bottom sheet is fixed at `--z-sheet`. The sheet's body wraps its children in a `flex-1 overflow-y:auto` div — that contained scroll is what allows the result list to scroll independently of the document. Without this, the document would scroll under the sheet (the "page-has-no-bottom" Bug 1 from CP3 v3 and earlier). Pages other than `/find-a-wash` do not opt into `noContentPadding`.
+
 ### 3.3 Bottom sheet
 
 Visual reference: `05-visual-reference.md` §9.
@@ -308,6 +312,10 @@ Single component used in both the bottom sheet (mobile) and the right rail (desk
 - Top-tier (top 3 by best-fit score): TOP badge — `#2D6FE3` background, white text, 9px / 500 / 0.4 letter-spacing, 4px corner radius.
 - Numeric rank (4+): muted gray number ("3", "4", ...) in `wb-text-3`.
 - Demoted (incompatible): info circle icon in `wb-text-3`.
+
+**Rank vs. pin tier — distinct concepts:**
+
+The result card's rank column is sort-position-driven: TOP for the top 3 by the active sort score (best-fit with stdev cutoff per §4.6 / direct-sort top 3), numeric for 4+, info-icon for incompatible. This is independent of pin tier classification (§3.5). A card can carry the TOP badge while its pin renders mid-tier (e.g., default mode with no filter context — every compatible pin is mid-tier, but the top-3 cards still show the TOP badge based on best-fit ordering). When filter context activates (Round 3 — service categories or sheet filters applied), pin tier promotes to top for the same top-3 set, so the two visuals re-align. Treat rank as "this card surfaces best for the active sort" and tier as "this pin matches your filter context"; they overlap when filters are present and diverge when they're not.
 
 **Body content:**
 - **Provider name** — 14px / 500 / `wb-text`. From `Location.name`.
@@ -404,24 +412,28 @@ function classifyPin(location: Location, activeVehicle: Vehicle, mode: 'nearby' 
 }
 ```
 
-**Default-mode tier rules (current):**
-- Vehicle compatibility is the only filter signal today. Pins with no compatible bay for the active vehicle render at `incompatible` (gray with dashed outline). All vehicle-compatible providers render at `mid` (light blue).
-- **Top-tier and low-tier are deferred to Round 3** when filter UI ships. Round 3 introduces filter-match-strength scoring as the basis for top-tier promotion (most matches at this location → top); low-tier returns when filter mismatches dominate. Until Round 3, all compatible providers render at the same default tier.
+**Default-mode tier rules (current — Round 2+3 consolidation):**
+- Vehicle compatibility is checked first. Pins with no compatible bay for the active vehicle render at `incompatible` (gray with dashed outline) and the rest of the pipeline short-circuits.
+- When the host passes filter context (`matchesAllSelectedServices` or `passesAllSheetFilters` defined), the classifier evaluates filter match: failing either check demotes to `low`, otherwise the rank-based top-3 cutoff promotes to `top` and the rest fall to `mid`.
+- When the host doesn't pass filter context (both inputs undefined), all vehicle-compatible providers render at `mid` — the CP3 v3 baseline. This holds for any caller that doesn't yet wire filter UI.
+- Round 4 introduces the dormant `detourMinutes > 20` rule for route-mode demotion to `low`.
 
-**Forward-compat signature:**
-
-The runtime signature accepts optional `rankIdx`, `totalRanked`, `detourMinutes`, and `inVisibleBounds` inputs. None of them affect tier in default mode — they're scaffolding for future filter (Round 3) and detour (Round 4) wiring:
+**Runtime signature (Round 2+3):**
 
 ```ts
 interface ClassifyPinInput {
-  rankIdx: number;            // reserved — Round 3 uses for filter-match-rank-based top-tier
-  totalRanked: number;        // reserved — Round 3 uses with rankIdx
+  rankIdx: number;
+  totalRanked: number;
   mode: 'nearby' | 'route';
   fitsActiveVehicle: boolean;
-  detourMinutes?: number;     // reserved — Round 4 wires real detour for route-mode demotion
-  inVisibleBounds?: boolean;  // RESERVED but not consumed; see below
+  matchesAllSelectedServices?: boolean; // when defined → fires filter-context tier rule
+  passesAllSheetFilters?: boolean;      // when defined → fires filter-context tier rule
+  detourMinutes?: number;               // reserved — Round 4 wires real detour
+  inVisibleBounds?: boolean;            // RESERVED but not consumed; see below
 }
 ```
+
+The two filter-context inputs are independently optional. Either one being defined activates the filter-context branch — the host can pass just one if it wires only one of the two filter surfaces. Both undefined keeps the classifier in vehicle-compat-only baseline.
 
 **Why `inVisibleBounds` is reserved-but-unused:**
 

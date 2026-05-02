@@ -40,41 +40,63 @@ export type WashPinTier = "top" | "mid" | "low" | "incompatible";
 
 /**
  * Inputs to `classifyPin`. Per EID §3.5, default-mode tier
- * classification today is **vehicle-compat-only** — incompatible vs
- * mid. Top-tier and low-tier (and the optional inputs that fed
- * them) are scaffolding for future rounds:
+ * classification is **vehicle-compat-only** unless the host
+ * passes filter context. Round 2+3 consolidation reintroduced
+ * filter-driven top/low tiers via two new optional inputs:
  *
- *  - `rankIdx` / `totalRanked` — reserved. Round 3 introduces
- *    filter-match-strength scoring; rankIdx becomes the basis for
- *    top-tier promotion (most filter-matches at this location → top).
+ *  - `matchesAllSelectedServices` — true when the location offers
+ *    every category in the user's service-picker selection. False
+ *    when at least one selected category is missing.
+ *  - `passesAllSheetFilters` — true when the location passes every
+ *    sheet-level filter (availability, fuel, amenities, etc.).
+ *
+ * Either input being defined means "the user has filter context";
+ * the classifier then promotes top-tier (top 3 by sort score) and
+ * demotes low-tier (failing one of the filter checks). When both
+ * inputs are undefined, the rule doesn't fire and tier falls back
+ * to vehicle-compat-only (CP3 v3 baseline).
+ *
+ *  - `rankIdx` / `totalRanked` — drive top-tier cutoff (top 3
+ *    capped at 25%) when filter context is active. Inert in
+ *    default mode.
  *  - `detourMinutes` — reserved. Round 4 wires real per-location
- *    OSRM detour values; the dormant rule body below activates then.
- *  - `inVisibleBounds` — RESERVED but not consumed. CP1 introduced
- *    it as an optional gate; CP3 v1, v2, and v2 Hotfix all attempted
- *    to wire it for "pins outside the anchored area de-prioritize"
- *    behavior; each attempt failed because the user mental model
- *    treats viewport context as a list-ordering hint, not a map-
- *    repainting trigger. CP3 v3 removed the rule entirely. Signature
- *    retained for forward-compat — if a future round identifies a
- *    use case where viewport demotion IS the right behavior, the
- *    input is ready. Today: callers should not pass it.
+ *    OSRM detour values; activates the dormant route-mode demote
+ *    rule when present.
+ *  - `inVisibleBounds` — RESERVED but not consumed. CP3 v3
+ *    history: three implementation attempts failed because
+ *    viewport repainting doesn't match the user mental model.
+ *    Signature retained for forward-compat; today: don't pass.
  */
 export interface ClassifyPinInput {
   rankIdx: number;
   totalRanked: number;
   mode: "nearby" | "route";
   fitsActiveVehicle: boolean;
+  matchesAllSelectedServices?: boolean;
+  passesAllSheetFilters?: boolean;
   detourMinutes?: number;
   inVisibleBounds?: boolean;
 }
 
 export function classifyPin(input: ClassifyPinInput): WashPinTier {
   if (!input.fitsActiveVehicle) return "incompatible";
-  // Round 4 dormant rule — fires only once a caller starts passing
-  // real detour values from POST /api/locations/with-detour-times.
-  // No caller does today; rankIdx-based top-tier removed in CP3 v3
-  // alongside the inVisibleBounds rule.
+  // Round 4 dormant rule — fires when callers start passing real
+  // detour values from POST /api/locations/with-detour-times.
   if (input.mode === "route" && input.detourMinutes != null && input.detourMinutes > 20) return "low";
+
+  // Round 3 filter-driven tier rules. Active when the host passes
+  // either filter-context input. EID §3.5 documents the gating;
+  // CP3 v3 baseline (mid-only) holds when both are undefined.
+  const hasFilterContext = input.matchesAllSelectedServices !== undefined
+    || input.passesAllSheetFilters !== undefined;
+  if (hasFilterContext) {
+    if (input.matchesAllSelectedServices === false || input.passesAllSheetFilters === false) {
+      return "low";
+    }
+    const topCutoff = Math.min(3, Math.ceil(input.totalRanked * 0.25));
+    if (input.rankIdx < topCutoff) return "top";
+    return "mid";
+  }
   return "mid";
 }
 

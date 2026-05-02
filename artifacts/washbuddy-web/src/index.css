@@ -29,6 +29,27 @@
   /* WashBuddy Premium SaaS Palette */
   --background: 210 33% 99%; /* Slate 50 tint */
   --foreground: 222 47% 11%; /* Slate 900 */
+
+  /* z-index hierarchy per EID §3.2 (re-applied in Round 2+3
+     consolidation after the CP4 revert). Every map-surface
+     z-index reference flows through these variables.
+     - Modal overlay (1100) and modal sheet (1200) split the
+       modal layer so the dim background and the sheet content
+       can paint at distinct depths.
+     - Pin callout sits at --z-pin-label (700) — above pins,
+       below map controls/header chrome. */
+  --z-map: 0;
+  --z-route: 100;
+  --z-pin-low: 400;
+  --z-pin-mid: 500;
+  --z-pin-top: 600;
+  --z-pin-label: 700;
+  --z-map-control: 800;
+  --z-map-cta: 900;
+  --z-header: 1000;
+  --z-sheet: 1100;
+  --z-modal-overlay: 1100;
+  --z-modal: 1200;
   
   --card: 0 0% 100%;
   --card-foreground: 222 47% 11%;

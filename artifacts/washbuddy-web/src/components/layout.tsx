@@ -27,7 +27,25 @@ export function useMobileMenu(): MobileMenuController {
   return ctx;
 }
 
-export function AppLayout({ children, hideMobileHeader = false }: { children: React.ReactNode; hideMobileHeader?: boolean }) {
+/**
+ * `noContentPadding` (Round 2+3 consolidation) suppresses the
+ * `p-4 md:p-8 max-w-7xl mx-auto` content wrapper around `children`,
+ * so a page that wants full-bleed fixed-position layout (find-a-wash
+ * with the bottom sheet) can render edge-to-edge inside `<main>`.
+ * Without this, the wrapper's max-width centering and padding fight
+ * the fixed-position page chrome — that's what produced "Bug 1"
+ * (page-has-no-bottom) in CP3 v3 and earlier. Default false; opting
+ * in is per-page.
+ */
+export function AppLayout({
+  children,
+  hideMobileHeader = false,
+  noContentPadding = false,
+}: {
+  children: React.ReactNode;
+  hideMobileHeader?: boolean;
+  noContentPadding?: boolean;
+}) {
   const { user, logout, hasRole } = useAuth();
   const [location] = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
@@ -254,9 +272,13 @@ export function AppLayout({ children, hideMobileHeader = false }: { children: Re
           </>
         )}
 
-        <div className="flex-1 p-4 md:p-8 w-full max-w-7xl mx-auto">
-          {children}
-        </div>
+        {noContentPadding ? (
+          <div className="flex-1">{children}</div>
+        ) : (
+          <div className="flex-1 p-4 md:p-8 w-full max-w-7xl mx-auto">
+            {children}
+          </div>
+        )}
       </main>
     </div>
     </MobileMenuContext.Provider>

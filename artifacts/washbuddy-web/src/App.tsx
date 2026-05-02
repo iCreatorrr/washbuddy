@@ -66,10 +66,12 @@ function RouteGuard({
   children,
   allowedRoles,
   hideMobileHeader = false,
+  noContentPadding = false,
 }: {
   children: React.ReactNode;
   allowedRoles?: string[];
   hideMobileHeader?: boolean;
+  noContentPadding?: boolean;
 }) {
   const { user, isLoading, hasRole } = useAuth();
   const [location, setLocation] = useLocation();
@@ -92,7 +94,7 @@ function RouteGuard({
   if (isLoading || !user) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>;
   if (!hasAccess) return null;
 
-  return <AppLayout hideMobileHeader={hideMobileHeader}>{children}</AppLayout>;
+  return <AppLayout hideMobileHeader={hideMobileHeader} noContentPadding={noContentPadding}>{children}</AppLayout>;
 }
 
 /**
@@ -155,7 +157,7 @@ function Router() {
 
       {/* Customer Routes */}
       <Route path="/find-a-wash">
-        <RouteGuard hideMobileHeader><FindAWash /></RouteGuard>
+        <RouteGuard hideMobileHeader noContentPadding><FindAWash /></RouteGuard>
       </Route>
       <Route path="/saved">
         <RouteGuard><Saved /></RouteGuard>

@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+﻿import React, { useState, useEffect, useRef, useCallback, useMemo, useReducer } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
-import { Card, Input, Button, Badge, ErrorState } from "@/components/ui";
-import { MapPin, Navigation, Route, ArrowRight, X, Loader2, ChevronDown, Crosshair, Star, Maximize2, Minimize2, Pencil, ArrowLeft, Menu, Droplets, Building2, Landmark, Search } from "lucide-react";
-import { Link, useLocation } from "wouter";
+import { Input, Button } from "@/components/ui";
+import { MapPin, Navigation, ArrowRight, X, Loader2, Crosshair, Maximize2, Minimize2, ArrowLeft, Menu, Droplets, Building2, Landmark, Search } from "lucide-react";
+import { useLocation } from "wouter";
 import { formatCurrency } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import L from "leaflet";
@@ -34,6 +34,30 @@ import {
   WASH_PIN_POPUP_ANCHOR,
   type WashPinTier,
 } from "@/components/customer/wash-pin";
+import { FindAWashHeader } from "@/components/customer/find-a-wash-header";
+import { FilterChips } from "@/components/customer/filter-chips";
+import {
+  ActiveFilterPills,
+  derivePillsFromSheetFilters,
+} from "@/components/customer/active-filter-pills";
+import { ServicePickerSheet } from "@/components/customer/service-picker-sheet";
+import { AllFiltersSheet } from "@/components/customer/all-filters-sheet";
+import { SearchBottomSheet } from "@/components/customer/search-bottom-sheet";
+import { ResultCard, type CardServicePill } from "@/components/customer/result-card";
+import { PinCallout } from "@/components/customer/pin-callout";
+import {
+  filterUIReducer,
+  initialFilterState,
+  passesAllSheetFilters,
+  matchesAllSelectedServices,
+  deriveCategoryCounts,
+  countActiveSheetFilters,
+  CATEGORY_DISPLAY_NAMES,
+  type SheetFilters,
+  type SortBy,
+  type ServiceCategory,
+} from "@/lib/filter-state";
+import { scoreAndSort, applyDirectSort } from "@/lib/sort-scoring";
 
 type PlaceKind = "city" | "address" | "poi" | "other";
 
@@ -83,12 +107,12 @@ interface NominatimResult {
 }
 
 /**
- * Soft viewbox bias for Nominatim. ±5° around the user's position
- * is roughly a 500km box at temperate latitudes — enough to bias
+ * Soft viewbox bias for Nominatim. Â±5Â° around the user's position
+ * is roughly a 500km box at temperate latitudes â€” enough to bias
  * toward "this side of the continent" without being so tight that
- * cross-region searches (Toronto user → NYC's Central Park) fail
+ * cross-region searches (Toronto user â†’ NYC's Central Park) fail
  * to surface. We pass it without `bounded=1`, so it's a ranking
- * hint, not a hard filter. Tunable: ±10° if post-launch search
+ * hint, not a hard filter. Tunable: Â±10Â° if post-launch search
  * quality issues surface.
  */
 function bboxAround(lat: number, lng: number, deg = 5): string {
@@ -97,7 +121,7 @@ function bboxAround(lat: number, lng: number, deg = 5): string {
 }
 
 /**
- * Freeform Nominatim search. Bug 2 fix (Checkpoint 4) — drops the
+ * Freeform Nominatim search. Bug 2 fix (Checkpoint 4) â€” drops the
  * `featuretype=city` restriction so this returns the same broad
  * mix Google Maps' search box does: addresses, POIs/venues, and
  * cities. The result types each get a different icon and label
@@ -173,7 +197,7 @@ async function searchPlaces(query: string, userLat?: number, userLng?: number): 
         if (isPoi) {
           const venueName = (r.name || r.display_name.split(",")[0] || "").trim();
           // Bug C / Checkpoint 6: secondary line is the address
-          // when Nominatim returns one alongside the POI — the
+          // when Nominatim returns one alongside the POI â€” the
           // Google Places / Apple Maps "venue / address" pattern.
           // Falls back to city + state when the response has no
           // street components (less common but possible for
@@ -202,10 +226,10 @@ async function searchPlaces(query: string, userLat?: number, userLng?: number): 
             secondary: stateName,
           };
         }
-        // Generic fallback — region/landmark without a clean
+        // Generic fallback â€” region/landmark without a clean
         // address shape. Use Nominatim's display_name truncated to
         // its first three components (full strings can run a
-        // dozen levels deep — country + admin + locality + ...).
+        // dozen levels deep â€” country + admin + locality + ...).
         const truncated = r.display_name.split(",").slice(0, 3).map((s) => s.trim()).filter(Boolean).join(", ");
         return {
           name: truncated,
@@ -310,7 +334,7 @@ function CityAutocomplete({
   placeholder: string;
   exclude?: CityOption | null;
   // When the user's position is known (origin set, geolocation
-  // granted), forwarded to Nominatim as a soft viewbox bias —
+  // granted), forwarded to Nominatim as a soft viewbox bias â€”
   // Bug C / Checkpoint 6.
   userLat?: number;
   userLng?: number;
@@ -321,11 +345,11 @@ function CityAutocomplete({
   const [isSearching, setIsSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  // The dropdown is portaled to <body> (Checkpoint 5, Approach A —
+  // The dropdown is portaled to <body> (Checkpoint 5, Approach A â€”
   // resolves the cascading z-index regressions from Checkpoint 4)
   // so it lives outside the search Card's stacking context entirely
   // and reliably clears Leaflet's panes at every viewport. This ref
-  // is the click-outside companion to containerRef — without it the
+  // is the click-outside companion to containerRef â€” without it the
   // mousedown handler would fire on every click inside the dropdown
   // and close it on selection.
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -334,7 +358,7 @@ function CityAutocomplete({
   // Portaled dropdown's pixel-precise position. Computed from the
   // input's getBoundingClientRect when the dropdown opens, and
   // re-computed on scroll/resize while open. `null` when the
-  // dropdown isn't mounted — guards against rendering at (0,0)
+  // dropdown isn't mounted â€” guards against rendering at (0,0)
   // before the first measurement.
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
@@ -420,14 +444,14 @@ function CityAutocomplete({
           } else {
             // If the user starts typing into a field that has a
             // previously-committed CityOption (e.g. they're editing the
-            // existing destination), the prior `value` is still set —
+            // existing destination), the prior `value` is still set â€”
             // the dropdown gate `!value && query.length >= 2` would
             // suppress suggestions even though the typed text no
             // longer matches the committed label. Clear `value` via
             // the parent's onChange the moment the typed text diverges
             // from the committed label so the suggestions render
             // cleanly. This is what "edit-to-replace" means in any
-            // typeahead — the prior selection isn't valid anymore.
+            // typeahead â€” the prior selection isn't valid anymore.
             if (value && val !== value.label) {
               onChange(null);
             }
@@ -450,17 +474,17 @@ function CityAutocomplete({
           <X className="h-4 w-4" />
         </button>
       )}
-      {/* Portaled dropdown (Checkpoint 5, Approach A) — renders
+      {/* Portaled dropdown (Checkpoint 5, Approach A) â€” renders
           into <body> via createPortal so it lives outside the
           search Card's stacking context and clears Leaflet's
-          panes (200–700) at all viewports without the parent
+          panes (200â€“700) at all viewports without the parent
           Card needing an elevated z-index. AnimatePresence wraps
           the portal call so framer-motion's exit animation still
           runs on close. Position is `position:fixed` at the
           coordinates computed from the input's bounding rect,
           tracked via the scroll/resize listeners above.
           TODO(round-3+): formalize a `--z-search-dropdown` CSS
-          variable per EID §3.2 z-index hierarchy. */}
+          variable per EID Â§3.2 z-index hierarchy. */}
       {createPortal(
         <AnimatePresence>
           {isOpen && !value && (query.length >= 2) && dropdownPos && (
@@ -529,13 +553,13 @@ function CityAutocomplete({
 
 /**
  * Build an `L.divIcon` for a result-location pin via the wash-pin
- * component (Phase B Checkpoint 1, EID §3.5; CP1.6 spec correction
+ * component (Phase B Checkpoint 1, EID Â§3.5; CP1.6 spec correction
  * dropped per-category glyphs). The wash-pin module stays
  * Leaflet-free; this thin host helper bridges the rendered HTML
  * into Leaflet's `divIcon` API.
  *
  * Replaces the previous `locationIcon`, `activeLocationIcon`, and
- * `incompatibleLocationIcon` constants — those collapsed three
+ * `incompatibleLocationIcon` constants â€” those collapsed three
  * static treatments into one tier-aware path.
  */
 function buildWashPinDivIcon(input: {
@@ -682,7 +706,7 @@ function sanitizeMyLocationLabel(rawLabel: string): string {
   }
   // Fallback for any My Location label that still contains a
   // lat/lng-shaped substring (`<digits>.<digits>, <digits>.<digits>`)
-  // — even if our primary regex didn't match. Strip it.
+  // â€” even if our primary regex didn't match. Strip it.
   if (/-?\d+\.\d+\s*,\s*-?\d+\.\d+/.test(rawLabel)) {
     return "My Location (detected)";
   }
@@ -719,7 +743,7 @@ function getCityByLabel(label: string): CityOption | null {
   // Backwards-compat: old My Location label that embedded lat/lng in
   // the parenthetical (no bracket suffix). Bookmarked URLs from
   // before Checkpoint 4 still hydrate cleanly because we sanitize
-  // the label before storing it in state — Bug A / Checkpoint 6.
+  // the label before storing it in state â€” Bug A / Checkpoint 6.
   if (label.startsWith("My Location")) {
     const match = label.match(/My Location \((.*),\s*(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\)/);
     if (match) {
@@ -789,28 +813,28 @@ function restoreCachedRoute(from: CityOption | null, to: CityOption | null): { r
 }
 
 /**
- * /find-a-wash — merged search and discovery page.
+ * /find-a-wash â€” merged search and discovery page.
  *
  * Phase A clone of route-planner.tsx (Round 1 of the search-and-
  * discovery overhaul). Same routing/ETA/pin/popup machinery as the
  * legacy page; the only behavioral differences in this phase are
- * mode-aware bits — distance metric on cards (miles in nearby vs
+ * mode-aware bits â€” distance metric on cards (miles in nearby vs
  * placeholder detour time in route mode) and a centralized `mode`
  * derivation downstream code reads instead of re-checking
  * `destination`.
  *
  * Bottom sheet, new pin component (`wash-pin.tsx`), clustering, and
  * the search-this-area button land in Phase B (Round 2). The
- * full collapsed↔expanded header animation per EID §3.1 is also
+ * full collapsedâ†”expanded header animation per EID Â§3.1 is also
  * Phase B; Phase A keeps the existing route-planner header.
  *
  * Free-text city search (matchesSearch / metro aliases) lives in
- * `lib/search-helpers.ts` for Phase B's unified search pill — not
+ * `lib/search-helpers.ts` for Phase B's unified search pill â€” not
  * yet wired to a UI element on this page.
  *
  * Real per-location OSRM detour times land in Round 4. Until then,
  * route-mode cards show `+~{etaFromOrigin} min detour` with the `~`
- * prefix indicating placeholder per EID §3.7 fallback semantics.
+ * prefix indicating placeholder per EID Â§3.7 fallback semantics.
  */
 export default function FindAWash() {
   const urlParams = new URLSearchParams(window.location.search);
@@ -831,7 +855,7 @@ export default function FindAWash() {
   const geoAttemptedRef = useRef(false);
   // Mounted ref guards async setStates after unmount. Leaflet's own
   // map.remove() is wrapped in try/catch, but the ETA / route fetches
-  // aren't aborted — without the ref they'd setState after unmount and
+  // aren't aborted â€” without the ref they'd setState after unmount and
   // produce a console warning during fast navigations.
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
@@ -840,16 +864,44 @@ export default function FindAWash() {
   // between its inline ~55vh shape and a full-viewport overlay; the
   // overlay uses position:fixed and locks body scroll.
   // selectedLocationId is the SINGLE source of truth for "which
-  // location is the user looking at right now" — pin highlight,
+  // location is the user looking at right now" â€” pin highlight,
   // popup-open state, and card highlight all derive from it. Any
   // tap that selects (pin, card body) writes here; any tap that
   // deselects (same pin, same card, empty map) clears it.
   // formCollapsed defaults to "collapse the From/To form when a
-  // route is already planned" — less duplicate header weight on a
+  // route is already planned" â€” less duplicate header weight on a
   // long scroll. The driver hits Edit to expand it again.
   const [mapExpanded, setMapExpanded] = useState(false);
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
   const [formCollapsed, setFormCollapsed] = useState(!!cached);
+  // Pin callout container-pixel position. Recomputed by an effect
+  // below on selection change AND on map move/zoom â€” without the
+  // moveend hookup, panning would leave the callout floating in the
+  // wrong spot relative to its pin.
+  const [pinCalloutPos, setPinCalloutPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Filter + UI state (Round 2+3 consolidation). The reducer owns
+  // service-category selection, sheet filters, sort, sheet state
+  // (peek/default/expanded), and modal open state. Origin/dest/route
+  // stay in useState above â€” they have async-fetch dependencies
+  // that don't belong in the reducer per the audit decision.
+  // Mode default for sheet: route mode â†’ peek (map primary), nearby
+  // mode â†’ default (~50% â€” list shares prominence with map).
+  const [filterUI, dispatchFilter] = useReducer(
+    filterUIReducer,
+    destination ? "peek" : "default",
+    initialFilterState,
+  );
+
+  // Mode default for sheet state changes when destination changes â€”
+  // unless the user has manually overridden, in which case we
+  // preserve their intent. EID Â§3.3.
+  useEffect(() => {
+    dispatchFilter({
+      type: "RESET_SHEET_STATE_TO_MODE_DEFAULT",
+      modeDefault: destination ? "peek" : "default",
+    });
+  }, [destination?.lat, destination?.lng]);
 
   // Mode is derived from a single source: whether a destination is
   // set. Drives sort default, distance metric on cards, and (in
@@ -859,13 +911,13 @@ export default function FindAWash() {
   const mode: "nearby" | "route" = destination ? "route" : "nearby";
 
   // The AppLayout mobile header is suppressed on this page (per
-  // EID §3.1). The hamburger trigger we render in the floating
+  // EID Â§3.1). The hamburger trigger we render in the floating
   // top-right cluster controls the same shared dropdown via
   // context. Phase B replaces this interim cluster with the
   // unified collapsed/expanded header.
   const mobileMenu = useMobileMenu();
 
-  // Top-level vs deep entry — drives the floating top-left
+  // Top-level vs deep entry â€” drives the floating top-left
   // button's icon (logomark vs back chevron). Approach A from the
   // Checkpoint 2 prompt: `window.history.length` is the same
   // heuristic AppLayout's previous mobile back button used. Known
@@ -878,7 +930,7 @@ export default function FindAWash() {
 
   // Scroll-aware floating chrome (Bug B / Checkpoint 6). The
   // top-left button + top-right cluster hide on scroll-down past
-  // the map and reveal on scroll-up — Pinterest / Material
+  // the map and reveal on scroll-up â€” Pinterest / Material
   // Design pattern. `isAtTop` keeps the chrome pinned while the
   // user is at the top of the page so they don't see a hide-then-
   // reveal flicker on tiny scroll deltas at rest.
@@ -896,10 +948,10 @@ export default function FindAWash() {
     queryFn: async () => {
       const r = await fetch(locationsUrl, { credentials: "include" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      // Coerce Prisma Decimal-as-string lat/lng → number at the
+      // Coerce Prisma Decimal-as-string lat/lng â†’ number at the
       // boundary. Without this, leaflet.markercluster's bounds
       // aggregation recurses into a stack overflow when constructing
-      // LatLngBounds from ["43.62", "-79.51"] entries — see the
+      // LatLngBounds from ["43.62", "-79.51"] entries â€” see the
       // Phase B Hotfix section of round-1-phase-b-handoff.md.
       return normalizeLocationsResponse(await r.json());
     },
@@ -909,7 +961,7 @@ export default function FindAWash() {
   // flag so the route planner can render incompatible ones in a grayed
   // unclickable state instead of hiding them. Strict semantics:
   // a missing or empty washBays array means "we couldn't verify",
-  // which is treated as incompatible — the prior permissive fallback
+  // which is treated as incompatible â€” the prior permissive fallback
   // silently passed every location through as compatible whenever the
   // response shape skipped the field, which is the bug we're closing.
   const allLocations = useMemo(() => {
@@ -978,14 +1030,14 @@ export default function FindAWash() {
   // separately because they don't participate in selection.
   const markersByIdRef = useRef<Map<string, L.Marker>>(new Map());
   const endpointsRef = useRef<L.Marker[]>([]);
-  // Phase B CP2 — single cluster group instance for the result-
+  // Phase B CP2 â€” single cluster group instance for the result-
   // location markers. Endpoint markers (start, destination,
   // my-location) stay direct on the map and are never added here.
   // The group is created once and persisted across marker-effect
   // re-runs; `clearLayers()` runs at the top of each re-run before
   // the new markers are added, so re-renders don't accumulate.
   const clusterGroupRef = useRef<L.MarkerClusterGroup | null>(null);
-  // Phase B CP3 v3 — scroll target for the bottom-sheet list. The
+  // Phase B CP3 v3 â€” scroll target for the bottom-sheet list. The
   // scroll-to-top effect (below) brings this element into view on
   // searchBoundsAnchor change so the user actually sees the list
   // re-order. CP4's bottom-sheet rebuild will replace the
@@ -1001,7 +1053,7 @@ export default function FindAWash() {
   // Same pattern planRouteRef uses below.
   const selectLocationRef = useRef<((id: string) => void) | undefined>(undefined);
   // Memoized "did we already fit-bounds for this route/locations
-  // combo?" — drops the marker effect's habit of re-fitting on every
+  // combo?" â€” drops the marker effect's habit of re-fitting on every
   // re-run (etas, ActiveVehicle pill swaps, etc), which is what made
   // the map yank out from under a user who panned manually.
   const lastFitKeyRef = useRef<string | null>(null);
@@ -1038,14 +1090,14 @@ export default function FindAWash() {
       .sort((a, b) => a.distFromOrigin - b.distFromOrigin);
   }, [route, sampledRoutePoints, allLocations, origin?.lat, origin?.lng]);
 
-  // Phase B CP3 v3 — "Search this area" is **list-reorder-only**.
+  // Phase B CP3 v3 â€” "Search this area" is **list-reorder-only**.
   // Tapping the button sets searchBoundsAnchor to the current map
   // bounds; rankedLocations sorts the bottom-sheet list by
   // distance from the bounds center; the list scrolls to top so
   // the new ordering is visible. **Pin colors and cluster colors
   // do not change.** No map repaint at all.
   //
-  // History: CP3 v1 (a6ee2b9) implemented as a filter — pins
+  // History: CP3 v1 (a6ee2b9) implemented as a filter â€” pins
   // outside bounds disappeared. CP3 v2 (27fd83b) re-implemented
   // as a re-rank that *also* repainted pins (pins outside bounds
   // dimmed gray, top-tier promoted "best of what's left"). CP3 v2
@@ -1064,24 +1116,24 @@ export default function FindAWash() {
   // Track in-bounds fraction of the currently-displayed locations.
   // Updated by the moveend/zoomend listeners below (debounced 200ms)
   // and by displayLocations changes. The button is shown when this
-  // drops below 0.5 — i.e. fewer than half of the result list is
+  // drops below 0.5 â€” i.e. fewer than half of the result list is
   // visible on screen, signalling that the map and the list disagree.
   const [inBoundsRatio, setInBoundsRatio] = useState(1);
 
-  // CP3 v2: displayLocations is the canonical render set — full
+  // CP3 v2: displayLocations is the canonical render set â€” full
   // route/nearby base list, no bounds filter. Re-ranking under
   // search-this-area happens in `rankedLocations` below.
   const displayLocations = useMemo(() => {
     return route ? nearbyLocations : initialLocations;
   }, [route, nearbyLocations, initialLocations]);
 
-  // Phase B CP3 v2 — re-rank when the user has anchored the
+  // Phase B CP3 v2 â€” re-rank when the user has anchored the
   // search to a map area. Sort by haversine distance from the
   // bounds center; stable ordering preserves origin-distance ties.
   // When searchBoundsAnchor is null, this is identity over
   // displayLocations and the existing distFromOrigin order
   // (baked into nearbyLocations / initialLocations) drives
-  // rankIdx in the marker effect. Tap-locked re-ranking — the
+  // rankIdx in the marker effect. Tap-locked re-ranking â€” the
   // marker effect doesn't depend on a moveend/zoomend counter, so
   // panning after tapping doesn't reshuffle tiers; the bounds
   // anchor is the user's "rank from here" gesture.
@@ -1101,10 +1153,10 @@ export default function FindAWash() {
     });
   }, [displayLocations, searchBoundsAnchor]);
 
-  // Phase B CP3 v2 hotfix — empty-area state. When the user has
+  // Phase B CP3 v2 hotfix â€” empty-area state. When the user has
   // anchored to a region with zero providers in bounds, surface a
-  // pill in the result-list area with a "Show closest →" recovery
-  // CTA. Per EID §3.2 empty-area state spec.
+  // pill in the result-list area with a "Show closest â†’" recovery
+  // CTA. Per EID Â§3.2 empty-area state spec.
   //
   // boundsCenter is derived from searchBoundsAnchor (null when no
   // anchor is set; tuple `[lat, lng]` when set). closestProvider
@@ -1146,24 +1198,24 @@ export default function FindAWash() {
 
   // Empty-area pill is visible when the user has anchored AND zero
   // providers fall inside the anchored bounds. Closing the pill
-  // happens via "Show closest →" tap (handleShowClosest below) or
+  // happens via "Show closest â†’" tap (handleShowClosest below) or
   // any context change that clears searchBoundsAnchor.
   const showEmptyAreaPill = searchBoundsAnchor !== null && inBoundsCount === 0 && closestProvider !== null;
 
   // Origin / destination / route changes reset the search-this-area
-  // anchor — switching context means the user is no longer asking
+  // anchor â€” switching context means the user is no longer asking
   // about that specific map region. searchBoundsAnchor is null on
   // the initial render, so this is a no-op until the first toggle.
   useEffect(() => {
     setSearchBoundsAnchor(null);
   }, [origin?.lat, origin?.lng, destination?.lat, destination?.lng, route]);
 
-  // Phase B CP3 v3 — scroll the bottom-sheet list into view on
+  // Phase B CP3 v3 â€” scroll the bottom-sheet list into view on
   // searchBoundsAnchor transitions so the user sees the new
-  // ordering. Fires on null → set ("Search this area" tap),
-  // set → set (re-tap in a different region), and set → null
-  // (anchor cleared by context change or "Show closest →"). The
-  // initial-mount transition (undefined → null on the first
+  // ordering. Fires on null â†’ set ("Search this area" tap),
+  // set â†’ set (re-tap in a different region), and set â†’ null
+  // (anchor cleared by context change or "Show closest â†’"). The
+  // initial-mount transition (undefined â†’ null on the first
   // render) doesn't fire because hasMountedRef gates the effect.
   // CP4's bottom-sheet rebuild will replace window.scrollTo with
   // a contained scroll container.
@@ -1237,7 +1289,7 @@ export default function FindAWash() {
         map.remove();
       } catch {}
       mapInstanceRef.current = null;
-      // Cluster group's lifecycle is bound to the map's — once the
+      // Cluster group's lifecycle is bound to the map's â€” once the
       // map is removed, drop the ref so the next mount creates a
       // fresh group rather than reusing a detached instance.
       clusterGroupRef.current = null;
@@ -1253,16 +1305,16 @@ export default function FindAWash() {
       routeLayerRef.current = null;
     }
     // Result-location markers all live in clusterGroupRef. Clear
-    // its layers (instead of looping markersByIdRef × removeLayer)
+    // its layers (instead of looping markersByIdRef Ã— removeLayer)
     // so the cluster group's internal state stays consistent.
     if (clusterGroupRef.current) {
       clusterGroupRef.current.clearLayers();
     } else {
-      // First mount of the marker effect — create the cluster
-      // group, install its iconCreateFunction (per EID §3.5), and
+      // First mount of the marker effect â€” create the cluster
+      // group, install its iconCreateFunction (per EID Â§3.5), and
       // add it to the map. Persists across effect re-runs.
       clusterGroupRef.current = L.markerClusterGroup({
-        // EID §3.5: cluster at zoom <11; pins within 40px cluster.
+        // EID Â§3.5: cluster at zoom <11; pins within 40px cluster.
         disableClusteringAtZoom: 11,
         maxClusterRadius: 40,
         // Default markercluster animations; explicit so a future
@@ -1271,7 +1323,7 @@ export default function FindAWash() {
         spiderfyOnMaxZoom: true,
         showCoverageOnHover: false,
         iconCreateFunction: (cluster) => {
-          // Read the stashed tier off each child marker — set at
+          // Read the stashed tier off each child marker â€” set at
           // marker creation below via `(opts as any).washPinTier`.
           // pickHighestTier degrades to 'incompatible' if none are
           // set, which is the safe visual no-op.
@@ -1305,39 +1357,10 @@ export default function FindAWash() {
       routeLayerRef.current = polyline;
 
       const startMarker = L.marker([origin.lat, origin.lng], { icon: startIcon }).addTo(map);
-      const startPopup = L.DomUtil.create("div");
-      startPopup.style.cssText = "font-family:system-ui;min-width:120px;";
-      const startLabel = L.DomUtil.create("div", "", startPopup);
-      startLabel.style.cssText = "font-weight:700;font-size:13px;color:#16a34a;margin-bottom:2px;";
-      startLabel.textContent = "START";
-      const startName = L.DomUtil.create("div", "", startPopup);
-      startName.style.cssText = "font-size:14px;font-weight:600;color:#0f172a;";
-      startName.textContent = origin.label;
-      startMarker.bindPopup(startPopup, { closeButton: false });
-
       const endMarker = L.marker([destination.lat, destination.lng], { icon: endIcon }).addTo(map);
-      const endPopup = L.DomUtil.create("div");
-      endPopup.style.cssText = "font-family:system-ui;min-width:120px;";
-      const endLabel = L.DomUtil.create("div", "", endPopup);
-      endLabel.style.cssText = "font-weight:700;font-size:13px;color:#dc2626;margin-bottom:2px;";
-      endLabel.textContent = "DESTINATION";
-      const endName = L.DomUtil.create("div", "", endPopup);
-      endName.style.cssText = "font-size:14px;font-weight:600;color:#0f172a;";
-      endName.textContent = destination.label;
-      endMarker.bindPopup(endPopup, { closeButton: false });
-
       endpointsRef.current = [startMarker, endMarker];
     } else if (origin && !route) {
       const myMarker = L.marker([origin.lat, origin.lng], { icon: startIcon }).addTo(map);
-      const myPopup = L.DomUtil.create("div");
-      myPopup.style.cssText = "font-family:system-ui;min-width:120px;";
-      const myLabel = L.DomUtil.create("div", "", myPopup);
-      myLabel.style.cssText = "font-weight:700;font-size:13px;color:#16a34a;margin-bottom:2px;";
-      myLabel.textContent = "YOUR LOCATION";
-      const myName = L.DomUtil.create("div", "", myPopup);
-      myName.style.cssText = "font-size:14px;font-weight:600;color:#0f172a;";
-      myName.textContent = origin.name === "My Location" ? "Current Position" : origin.label;
-      myMarker.bindPopup(myPopup, { closeButton: false });
       endpointsRef.current = [myMarker];
     }
 
@@ -1345,7 +1368,7 @@ export default function FindAWash() {
     // rankedLocations. Marker tier is filter-relevance-driven
     // (Round 3 territory) and vehicle-compatibility-driven (today),
     // never bounds-context-driven. Using displayLocations stabilizes
-    // marker creation against searchBoundsAnchor changes — the
+    // marker creation against searchBoundsAnchor changes â€” the
     // marker effect doesn't re-fire on tap, only the list renders
     // re-order. rankedLocations is consumed by the list render
     // (line ~2287) where ordering is the meaningful response.
@@ -1353,19 +1376,19 @@ export default function FindAWash() {
 
     locsToShow.forEach((loc, rankIdx) => {
       if (loc.latitude == null || loc.longitude == null) return;
-      // Tier classification + glyph drive the icon — wash-pin handles
-      // the visual treatment per EID §3.5. The selection effect
+      // Tier classification + glyph drive the icon â€” wash-pin handles
+      // the visual treatment per EID Â§3.5. The selection effect
       // rebuilds the icon for the selected pin (gold ring); this
       // effect does NOT depend on selection state, which is the
-      // load-bearing invariant from Phase A — keeps marker creation
-      // out of the selection loop and prevents the "tap → rebuild →
+      // load-bearing invariant from Phase A â€” keeps marker creation
+      // out of the selection loop and prevents the "tap â†’ rebuild â†’
       // popup closes" two-tap bug. Labels deliberately undefined in
       // CP1: nearby-mode labels need the Round 3 service selector to
       // compute price; route-mode labels wait on Round 4's real
       // detour endpoint.
       const incompatible = (loc as any).fitsActiveVehicle === false;
       // CP3 v3: classifier no longer consumes inVisibleBounds; the
-      // rule was removed (see EID §3.5 "Why inVisibleBounds is
+      // rule was removed (see EID Â§3.5 "Why inVisibleBounds is
       // reserved-but-unused"). rankIdx/totalRanked are kept
       // forward-compat in the signature for Round 3's filter-match-
       // strength scoring; today they don't drive tier selection.
@@ -1378,7 +1401,7 @@ export default function FindAWash() {
       const icon = buildWashPinDivIcon({ tier, isSelected: false });
       // Stash the tier on marker options so the cluster group's
       // iconCreateFunction can read it without re-deriving.
-      // Plugin-pattern type cast — Leaflet's MarkerOptions doesn't
+      // Plugin-pattern type cast â€” Leaflet's MarkerOptions doesn't
       // formally allow extension without module augmentation.
       const marker = L.marker([loc.latitude, loc.longitude], {
         icon,
@@ -1390,146 +1413,31 @@ export default function FindAWash() {
       // current zoom + maxClusterRadius.
       clusterGroupRef.current?.addLayer(marker);
 
-      const popup = L.DomUtil.create("div");
-      popup.style.cssText = "font-family:system-ui;min-width:220px;max-width:260px;";
-
-      // Title — same weight as list card
-      const nameEl = L.DomUtil.create("div", "", popup);
-      nameEl.style.cssText = `font-weight:700;font-size:15px;line-height:1.2;color:${incompatible ? "#475569" : "#0f172a"};`;
-      nameEl.textContent = loc.name;
-
-      if (incompatible) {
-        const badge = L.DomUtil.create("div", "", popup);
-        badge.style.cssText = "margin-top:8px;padding:6px 8px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;font-size:11px;font-weight:600;color:#92400e;display:flex;align-items:center;gap:4px;";
-        badge.innerHTML = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> No bay fits your active vehicle`;
-        const helpEl = L.DomUtil.create("div", "", popup);
-        helpEl.style.cssText = "margin-top:6px;font-size:11px;color:#64748b;";
-        helpEl.textContent = "Change your active vehicle to book at this location.";
-        marker.bindPopup(popup, { closeButton: false });
-        markersByIdRef.current.set(loc.id, marker);
-        return;
+      // Round 2+3 consolidation â€” replaced bindPopup with the
+      // PinCallout component (EID Â§3.6). The marker stays clickable
+      // for compatible pins; selection drives the PinCallout overlay
+      // rendered above the map. Incompatible pins don't get a click
+      // handler â€” taps fall through and the global map click clears
+      // selection. (Round 5 may reintroduce an incompatible-pin
+      // explainer modal per EID Â§3.4 demoted-state spec.)
+      if (!incompatible) {
+        marker.on("click", (e) => {
+          L.DomEvent.stopPropagation(e);
+          if (!mountedRef.current) return;
+          selectLocationRef.current?.(loc.id);
+        });
       }
-
-      // Rating · distance · status row — same shape as list card
-      const reviewCountP: number = (loc as any).reviewCount ?? 0;
-      const averageRatingP: number | null = (loc as any).averageRating ?? null;
-      const isOpenP = !!(loc as any).isOpenNow;
-      const etaMins = etas[loc.id];
-      const distLine = route
-        ? `${Math.round((loc as any).distanceToRoute)} km from route`
-        : `${Math.round((loc as any).distFromOrigin)} km`;
-
-      const metaEl = L.DomUtil.create("div", "", popup);
-      metaEl.style.cssText = "margin-top:6px;font-size:13px;color:#475569;line-height:1.3;";
-      const metaParts: string[] = [];
-      if (reviewCountP > 0) {
-        metaParts.push(`<span style="color:#f59e0b;">★</span> <strong style="color:#334155;">${averageRatingP != null ? averageRatingP.toFixed(1) : "—"}</strong> <span style="color:#94a3b8;">(${reviewCountP})</span>`);
-      } else {
-        metaParts.push(`<span style="color:#cbd5e1;">☆</span> <span style="color:#94a3b8;">No reviews yet</span>`);
-      }
-      metaParts.push(`<span style="color:#475569;">${distLine}</span>`);
-      if (etaMins != null) metaParts.push(`<span style="color:#475569;">${formatETA(etaMins)} away</span>`);
-      metaParts.push(isOpenP
-        ? `<span style="color:#059669;font-weight:500;">Open Now</span>`
-        : `<span style="color:#94a3b8;font-weight:500;">Closed</span>`);
-      metaEl.innerHTML = metaParts.join('<span style="color:#cbd5e1;"> · </span>');
-
-      // Address line (provider + city / region)
-      const addrEl = L.DomUtil.create("div", "", popup);
-      addrEl.style.cssText = "margin-top:4px;font-size:12px;color:#94a3b8;line-height:1.3;";
-      const stateP = (loc as any).stateCode || (loc as any).regionCode || "";
-      addrEl.textContent = `${loc.addressLine1 || loc.city}, ${loc.city}${stateP ? `, ${stateP}` : ""}`;
-
-      // From $X — match list card price line
-      const minP = (() => {
-        const svcs: any[] = loc.services || [];
-        if (svcs.length === 0) return null;
-        let m = Infinity;
-        for (const s of svcs) {
-          const p = (s.allInPriceMinor ?? s.basePriceMinor) ?? Infinity;
-          if (p < m) m = p;
-        }
-        return Number.isFinite(m) ? m : null;
-      })();
-      if (minP != null) {
-        const priceEl = L.DomUtil.create("div", "", popup);
-        priceEl.style.cssText = "margin-top:6px;font-size:13px;font-weight:600;color:#334155;";
-        priceEl.textContent = `From ${formatCurrency(minP)}`;
-      }
-
-      // Book a Wash CTA — matches the rebook CTA from 2g-1.5: filled
-      // blue, 44px tall, full-width inside the popup.
-      const btn = L.DomUtil.create("button", "", popup);
-      btn.textContent = "Book a Wash";
-      btn.style.cssText = `
-        margin-top:10px;padding:10px 16px;width:100%;min-height:40px;
-        background:#2563eb;color:white;border:none;border-radius:8px;
-        font-size:13px;font-weight:600;cursor:pointer;
-      `;
-      L.DomEvent.on(btn, "click", (e) => {
-        L.DomEvent.stopPropagation(e);
-        // Inline URL build — buildLocationUrl closure captures stale state in
-        // the Leaflet popup effect, so construct directly with current values.
-        const qs = new URLSearchParams();
-        if (origin && destination) {
-          qs.set("ref", "route");
-          qs.set("from", serializeCityForUrl(origin));
-          qs.set("to", serializeCityForUrl(destination));
-        }
-        if (origin && geoStatus === "granted") {
-          qs.set("ulat", origin.lat.toFixed(4));
-          qs.set("ulng", origin.lng.toFixed(4));
-        }
-        const query = qs.toString();
-        setNavLocation(`/location/${loc.id}${query ? `?${query}` : ""}`);
-      });
-
-      // autoPanPadding tells Leaflet how much room to keep between the
-      // popup's bounding box and the map edges when it auto-pans on
-      // open. Default `[5, 5]` is too small — the popup overlapped
-      // the zoom controls (Leaflet built-in, top-left, ~30×60) and
-      // the custom expand button (top-right, 40×40) on every popup
-      // open. [70, 80] leaves enough margin for both control clusters
-      // plus a comfortable gutter, and Leaflet pans the map down
-      // automatically when the popup would otherwise cross into a
-      // control's space. Picked option (a) per spec — the cleanest
-      // fix that respects Leaflet's intended behaviour, no z-index
-      // shuffling or hide-on-popup logic needed.
-      marker.bindPopup(popup, {
-        closeButton: false,
-        maxWidth: 280,
-        autoPan: true,
-        autoPanPadding: [70, 80],
-      });
-      // Pin click is the selection trigger. selectLocation toggles —
-      // tapping the same pin a second time deselects, atomically
-      // swaps highlight if a different pin is currently selected.
-      // No setView / setZoom / fitBounds runs from here; the
-      // selection effect handles popup-open, icon swap, and the
-      // pan-if-off-screen pan. We attach to `click`, not
-      // `popupopen`, because Leaflet's bindPopup fires popupopen
-      // both on user click AND on programmatic openPopup() — using
-      // popupopen for state writes loops back through the selection
-      // effect which then calls openPopup() again.
-      marker.on("click", (e) => {
-        // L.DomEvent.stopPropagation prevents the map's own click
-        // handler from firing, which would otherwise treat this as
-        // a tap-on-empty-area and immediately deselect.
-        L.DomEvent.stopPropagation(e);
-        if (!mountedRef.current) return;
-        selectLocationRef.current?.(loc.id);
-      });
       markersByIdRef.current.set(loc.id, marker);
     });
 
     // Initial fit ONLY when the route or the no-route locations set
-    // changed since the last fit — gated by a ref so subsequent
+    // changed since the last fit â€” gated by a ref so subsequent
     // re-runs of this effect (driven by etas, ActiveVehicle pill
     // swaps, etc) don't yank the map view out from under a user who
     // panned/zoomed manually. The user-reported "zoom out on pin tap"
     // came from this block running on every activePinId change;
     // selection no longer touches this effect's deps.
-    // Phase B CP3 — search-this-area mode uses its own fitKey so the
+    // Phase B CP3 â€” search-this-area mode uses its own fitKey so the
     // gate skips the fitBounds branch when the user just tapped the
     // button. The handler pre-sets lastFitKeyRef.current to this
     // same value so the marker effect's gate detects "already
@@ -1612,7 +1520,7 @@ export default function FindAWash() {
 
   // Body scroll lock while the map is in fullscreen mode so the page
   // underneath doesn't scroll behind the map. Restored to the prior
-  // overflow value on collapse — preserved (not blindly set to "auto")
+  // overflow value on collapse â€” preserved (not blindly set to "auto")
   // in case some other component sets it for its own reasons.
   useEffect(() => {
     if (!mapExpanded) return;
@@ -1622,7 +1530,7 @@ export default function FindAWash() {
   }, [mapExpanded]);
 
   // Force a Leaflet `invalidateSize` when the map container resizes
-  // between inline and fullscreen — without it the tile layer renders
+  // between inline and fullscreen â€” without it the tile layer renders
   // off-position because Leaflet caches the container's dimensions.
   useEffect(() => {
     const map = mapInstanceRef.current;
@@ -1635,7 +1543,7 @@ export default function FindAWash() {
 
   // Auto-collapse the form when the route resolves so the map gets the
   // primary screen real estate. Re-expanding stays the user's call via
-  // the Edit button — we don't auto-expand on every state change.
+  // the Edit button â€” we don't auto-expand on every state change.
   useEffect(() => {
     if (route) setFormCollapsed(true);
   }, [route]);
@@ -1647,12 +1555,12 @@ export default function FindAWash() {
     setRoute(null);
   };
 
-  // Phase B CP3 — recompute the in-bounds ratio whenever the user
+  // Phase B CP3 â€” recompute the in-bounds ratio whenever the user
   // pans/zooms the map or the result set changes. Debounced 200ms
   // so a held drag doesn't flicker the button. The ratio drives
   // the floating "Search this area" button's visibility (showing
   // when fewer than half of currently-listed locations are in the
-  // visible bounds — i.e. the map and the list disagree).
+  // visible bounds â€” i.e. the map and the list disagree).
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -1677,13 +1585,13 @@ export default function FindAWash() {
     };
   }, [displayLocations]);
 
-  // Phase B CP3 — "Search this area" tap. Shifts the client-side
-  // result anchor from origin/route → current map bounds. The
+  // Phase B CP3 â€” "Search this area" tap. Shifts the client-side
+  // result anchor from origin/route â†’ current map bounds. The
   // marker effect re-runs against the new displayLocations and
   // the cluster group rebuilds; the user's view stays put because
   // we pre-set lastFitKeyRef to the search-this-area key (the
   // marker effect's gate sees "already fitted" and skips its
-  // fitBounds branch). No new server query — backend already
+  // fitBounds branch). No new server query â€” backend already
   // returned the full visible-providers set in the initial query.
   const handleSearchThisArea = () => {
     const map = mapInstanceRef.current;
@@ -1700,7 +1608,7 @@ export default function FindAWash() {
     ]);
   };
 
-  // Phase B CP3 v3 — empty-area "Show closest →" recovery now
+  // Phase B CP3 v3 â€” empty-area "Show closest â†’" recovery now
   // **zooms-and-centers** at zoom 13. Earlier hotfix used
   // panTo-only, which left the closest provider visible but
   // sometimes buried at the edge of a too-zoomed-out viewport.
@@ -1718,7 +1626,7 @@ export default function FindAWash() {
     } catch {}
   };
 
-  // Button visibility — hidden when the result list and map agree,
+  // Button visibility â€” hidden when the result list and map agree,
   // or when there are no results to argue about. Empty-list guard
   // mirrors the helper's empty-input sentinel for clarity at the
   // call site.
@@ -1732,20 +1640,20 @@ export default function FindAWash() {
 
   // selectLocation toggles: tapping the same id clears (deselect),
   // tapping a different id swaps. The selection effect downstream
-  // owns popup-open, icon swap, and pan-if-off-screen — this helper
+  // owns popup-open, icon swap, and pan-if-off-screen â€” this helper
   // is a pure state writer.
   const selectLocation = (id: string | null) => {
     setSelectedLocationId((prev) => (prev === id ? null : id));
   };
   selectLocationRef.current = (id) => selectLocation(id);
 
-  // Selection effect — derives EVERYTHING visual on the map from
+  // Selection effect â€” derives EVERYTHING visual on the map from
   // selectedLocationId:
   //   - opens popup on the selected marker (or closes if null)
   //   - swaps that marker's icon to the amber active glyph
   //   - reverts the previously-selected marker to its default icon
   //   - pans the map (NO zoom change) only if the selected pin is
-  //     currently OFF-screen — already-visible pins produce zero
+  //     currently OFF-screen â€” already-visible pins produce zero
   //     map movement
   // No setView / setZoom / fitBounds is called here. Pan-if-off-
   // screen uses panTo without a zoom argument, preserving the
@@ -1755,13 +1663,13 @@ export default function FindAWash() {
     if (!map) return;
 
     // Rebuild every marker's icon in tier-aware form; the selected
-    // marker gets `isSelected: true` (gold ring per EID §3.5) and
+    // marker gets `isSelected: true` (gold ring per EID Â§3.5) and
     // every other marker reverts. Iterating markersByIdRef keeps us
     // in sync with whatever the marker effect last produced. No
-    // marker layer teardown — only `setIcon` swaps run here, which
+    // marker layer teardown â€” only `setIcon` swaps run here, which
     // is the Phase A invariant Phase B preserves.
     // CP3 v3: selection-effect classification mirrors marker
-    // creation — vehicle-compat-only tier, no bounds context.
+    // creation â€” vehicle-compat-only tier, no bounds context.
     // selLocs uses displayLocations (not rankedLocations) so
     // selection-time rank input is stable across "Search this
     // area" taps. The bottom-sheet list re-orders independently
@@ -1778,7 +1686,7 @@ export default function FindAWash() {
         mode,
         fitsActiveVehicle: fits,
       });
-      // Incompatible pins never get the selected ring — the visual
+      // Incompatible pins never get the selected ring â€” the visual
       // explainer modal handles "you tapped this and it's not
       // bookable" instead.
       marker.setIcon(buildWashPinDivIcon({
@@ -1788,40 +1696,31 @@ export default function FindAWash() {
     });
 
     if (selectedLocationId == null) {
-      if (openPopupIdRef.current != null) {
-        try { map.closePopup(); } catch {}
-        openPopupIdRef.current = null;
-      }
+      openPopupIdRef.current = null;
       return;
     }
 
     const marker = markersByIdRef.current.get(selectedLocationId);
     if (!marker) {
-      // Selected id refers to a location not currently on the map —
+      // Selected id refers to a location not currently on the map â€”
       // could happen during a route swap. Clear silently.
-      if (openPopupIdRef.current != null) {
-        try { map.closePopup(); } catch {}
-        openPopupIdRef.current = null;
-      }
+      openPopupIdRef.current = null;
       return;
     }
 
-    // Phase B CP2 — when the selected pin is currently inside a
+    // Phase B CP2 â€” when the selected pin is currently inside a
     // cluster, the marker exists in markersByIdRef but its DOM
     // element isn't on the visible layer yet. zoomToShowLayer
     // expands the cluster (zooms in if needed) and fires the
-    // callback with the marker now visible. The popup-open and
-    // pan-if-off-screen logic runs from the callback so it
-    // operates on the post-expansion state. If the marker is
-    // already visible (zoom ≥11 or already in a non-clustered
-    // group), zoomToShowLayer's callback fires synchronously.
+    // callback with the marker now visible. The pan-if-off-screen
+    // logic runs from the callback so it operates on the post-
+    // expansion state. PinCallout (Round 2+3) renders separately
+    // off selectedLocationId; this effect drives icon swap +
+    // map pan only.
     const finishSelection = () => {
       if (!mountedRef.current) return;
-      if (openPopupIdRef.current !== selectedLocationId) {
-        try { marker.openPopup(); } catch {}
-        openPopupIdRef.current = selectedLocationId;
-      }
-      // Pan-if-off-screen — the only map-view change tied to selection.
+      openPopupIdRef.current = selectedLocationId;
+      // Pan-if-off-screen â€” the only map-view change tied to selection.
       // panTo without a zoom argument preserves the user's zoom level.
       try {
         const ll = marker.getLatLng();
@@ -1835,13 +1734,13 @@ export default function FindAWash() {
     const cluster = clusterGroupRef.current;
     if (cluster && cluster.hasLayer(marker)) {
       // hasLayer is true whether the marker is rendered individually
-      // or hidden inside a cluster — zoomToShowLayer no-ops in the
+      // or hidden inside a cluster â€” zoomToShowLayer no-ops in the
       // already-visible case (callback fires sync).
       try {
         cluster.zoomToShowLayer(marker, finishSelection);
       } catch {
         // Safety net for the rare race where the cluster group is
-        // mid-rebuild — just run the selection logic directly.
+        // mid-rebuild â€” just run the selection logic directly.
         finishSelection();
       }
     } else {
@@ -1849,7 +1748,44 @@ export default function FindAWash() {
     }
   }, [selectedLocationId, displayLocations, mode]);
 
-  // Tap on empty map area → deselect. Leaflet's 'click' fires only
+  // PinCallout position tracking (Round 2+3). When selectedLocationId
+  // is set, recompute the container-pixel position of the pin tip
+  // each render AND on every map move/zoom so the callout stays
+  // pinned to its pin. When selection clears, hide the callout.
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) {
+      setPinCalloutPos(null);
+      return;
+    }
+    if (!selectedLocationId) {
+      setPinCalloutPos(null);
+      return;
+    }
+    const marker = markersByIdRef.current.get(selectedLocationId);
+    if (!marker) {
+      setPinCalloutPos(null);
+      return;
+    }
+    const recompute = () => {
+      try {
+        const ll = marker.getLatLng();
+        const pt = map.latLngToContainerPoint(ll);
+        setPinCalloutPos({ x: pt.x, y: pt.y });
+      } catch {
+        setPinCalloutPos(null);
+      }
+    };
+    recompute();
+    map.on("move", recompute);
+    map.on("zoom", recompute);
+    return () => {
+      map.off("move", recompute);
+      map.off("zoom", recompute);
+    };
+  }, [selectedLocationId, displayLocations]);
+
+  // Tap on empty map area â†’ deselect. Leaflet's 'click' fires only
   // on tap (not drag), and individual marker clicks call
   // L.DomEvent.stopPropagation so they don't bubble here.
   useEffect(() => {
@@ -1869,11 +1805,9 @@ export default function FindAWash() {
     setSelectedLocationId(null);
   }, [route?.points.length, allLocations.length]);
 
-  // Helpers for the redesigned list card. Mirror Find a Wash so a
-  // driver scanning one page reads the other identically (same row
-  // layout, same star treatment, same "From $X" line, same incompat
-  // badge). Server doesn't expose minimum price; compute from the
-  // services array already in the search response.
+  // Helpers for the redesigned list card. Server doesn't expose
+  // minimum price; compute from the services array already in the
+  // search response.
   const minPriceFor = (loc: any): number | null => {
     const svcs: any[] = loc.services || [];
     if (svcs.length === 0) return null;
@@ -1885,17 +1819,336 @@ export default function FindAWash() {
     return Number.isFinite(m) ? m : null;
   };
 
+  // Sum of base prices for the selected service-categories, used by
+  // the multi-select Est. price label. Best-effort â€” picks the
+  // cheapest matching service per selected category, sums them.
+  const estPriceFor = (loc: any, selected: ServiceCategory[]): number | null => {
+    if (selected.length === 0) return null;
+    const svcs: any[] = loc.services || [];
+    let total = 0;
+    let any = false;
+    for (const cat of selected) {
+      const matching = svcs.filter((s) => s.category === cat);
+      if (matching.length === 0) continue;
+      let m = Infinity;
+      for (const s of matching) {
+        const p = (s.allInPriceMinor ?? s.basePriceMinor) ?? Infinity;
+        if (p < m) m = p;
+      }
+      if (Number.isFinite(m)) {
+        total += m;
+        any = true;
+      }
+    }
+    return any ? total : null;
+  };
+
+  // Apply best-fit scoring + sort. Per the audit decision (item 6):
+  // the distance proxy is mode-aware â€” distFromOrigin in nearby
+  // mode, distanceToRoute in route mode. Until Round 4 ships real
+  // OSRM detour values, this proxy fills the 0.50 weighting slot
+  // in the composite score.
+  const scoredList = useMemo(() => {
+    if (rankedLocations.length === 0) return [];
+    const scoringInputs = rankedLocations.map((loc) => {
+      const distanceProxyKm = route
+        ? ((loc as any).distanceToRoute as number)
+        : ((loc as any).distFromOrigin as number);
+      // Service-match fraction: share of selected categories the
+      // location offers. 1.0 if nothing selected (neutral).
+      const sel = filterUI.selectedServiceCategories;
+      let matchFrac = 1;
+      if (sel.length > 0) {
+        const cats = new Set<string>(
+          ((loc as any).services ?? []).map((s: any) => s?.category).filter(Boolean),
+        );
+        const matched = sel.filter((c) => cats.has(c)).length;
+        matchFrac = matched / sel.length;
+      }
+      return {
+        id: loc.id,
+        distanceProxyKm,
+        serviceMatchFraction: matchFrac,
+        estimatedPrice: filterUI.selectedServiceCategories.length >= 1
+          ? estPriceFor(loc, filterUI.selectedServiceCategories) ?? minPriceFor(loc)
+          : minPriceFor(loc),
+        rating: (loc as any).averageRating ?? null,
+        reviewCount: (loc as any).reviewCount ?? 0,
+      };
+    });
+    return filterUI.sortBy === "best-fit"
+      ? scoreAndSort(scoringInputs)
+      : applyDirectSort(scoringInputs, filterUI.sortBy);
+  }, [rankedLocations, filterUI.sortBy, filterUI.selectedServiceCategories, route]);
+
+  const scoredById = useMemo(() => {
+    const m = new Map<string, { rankIdx: number; isTopBadge: boolean }>();
+    scoredList.forEach((s) => m.set(s.id, { rankIdx: s.rankIdx, isTopBadge: s.isTopBadge }));
+    return m;
+  }, [scoredList]);
+
+  // Locations sorted by score for the bottom sheet's card list.
+  const sortedLocations = useMemo(() => {
+    if (scoredList.length === 0) return rankedLocations;
+    const byId = new Map(rankedLocations.map((l) => [l.id, l]));
+    return scoredList.map((s) => byId.get(s.id)).filter((l): l is any => !!l);
+  }, [scoredList, rankedLocations]);
+
+  // Live category-counts for the service picker.
+  const categoryCounts = useMemo(
+    () => deriveCategoryCounts(displayLocations, filterUI),
+    [displayLocations, filterUI],
+  );
+
+  const computeApplyCountForServices = useCallback(
+    (local: ServiceCategory[]): number => {
+      return displayLocations.filter(
+        (loc) =>
+          matchesAllSelectedServices(loc, local) &&
+          passesAllSheetFilters(loc, filterUI.sheetFilters),
+      ).length;
+    },
+    [displayLocations, filterUI.sheetFilters],
+  );
+
+  const computeApplyCountForFilters = useCallback(
+    (filters: SheetFilters, _sort: SortBy): number => {
+      return displayLocations.filter(
+        (loc) =>
+          matchesAllSelectedServices(loc, filterUI.selectedServiceCategories) &&
+          passesAllSheetFilters(loc, filters),
+      ).length;
+    },
+    [displayLocations, filterUI.selectedServiceCategories],
+  );
+
+  // Sort options conditional on mode + review density (EID Â§4.3).
+  const sortOptions = useMemo<ReadonlyArray<{ value: SortBy; label: string }>>(() => {
+    const opts: { value: SortBy; label: string }[] = [{ value: "best-fit", label: "Best fit" }];
+    if (route) opts.push({ value: "shortest-detour", label: "Shortest detour" });
+    opts.push({ value: "distance", label: "Distance" });
+    opts.push({ value: "price", label: "Price" });
+    opts.push({ value: "rating", label: "Rating" });
+    return opts;
+  }, [route]);
+
+  const sortLabel =
+    sortOptions.find((o) => o.value === filterUI.sortBy)?.label.toLowerCase() ?? "best fit";
+
+  // Pills derivation for ActiveFilterPills.
+  const pillsForActiveFilters = useMemo(
+    () =>
+      derivePillsFromSheetFilters(filterUI.sheetFilters, {
+        clearAvailability: (key) =>
+          dispatchFilter({
+            type: "SET_SHEET_FILTER",
+            key: "availability",
+            value: { ...filterUI.sheetFilters.availability, [key]: false },
+          }),
+        clearServiceDetail: (code) =>
+          dispatchFilter({
+            type: "SET_SHEET_FILTER",
+            key: "serviceDetails",
+            value: filterUI.sheetFilters.serviceDetails.filter((c) => c !== code),
+          }),
+        clearFuel: (key) =>
+          dispatchFilter({
+            type: "SET_SHEET_FILTER",
+            key: "fuel",
+            value: { ...filterUI.sheetFilters.fuel, [key]: false },
+          }),
+        clearDriverAmenity: (key) =>
+          dispatchFilter({
+            type: "SET_SHEET_FILTER",
+            key: "driverAmenities",
+            value: { ...filterUI.sheetFilters.driverAmenities, [key]: false },
+          }),
+        clearCoachAmenity: (key) =>
+          dispatchFilter({
+            type: "SET_SHEET_FILTER",
+            key: "coachAmenities",
+            value: { ...filterUI.sheetFilters.coachAmenities, [key]: false },
+          }),
+        clearRepairFlag: (code) =>
+          dispatchFilter({
+            type: "SET_SHEET_FILTER",
+            key: "repairFlags",
+            value: filterUI.sheetFilters.repairFlags.filter((c) => c !== code),
+          }),
+        clearCompliance: (key) =>
+          dispatchFilter({
+            type: "SET_SHEET_FILTER",
+            key: "compliance",
+            value: { ...filterUI.sheetFilters.compliance, [key]: false },
+          }),
+        clearBayOverride: () =>
+          dispatchFilter({ type: "SET_SHEET_FILTER", key: "bayOverride", value: false }),
+      }),
+    [filterUI.sheetFilters],
+  );
+
+  // Build ResultCard service pills for one location.
+  const buildServicePillsFor = (loc: any): CardServicePill[] => {
+    const sel = filterUI.selectedServiceCategories;
+    const cats = new Set<string>(
+      ((loc as any).services ?? []).map((s: any) => s?.category).filter(Boolean),
+    );
+    const pills: CardServicePill[] = [];
+    if (sel.length > 0) {
+      // Selected categories first â€” show match status.
+      sel.forEach((c) => {
+        pills.push({
+          id: `sel-${c}`,
+          label: CATEGORY_DISPLAY_NAMES[c],
+          state: cats.has(c) ? "available" : "wanted-missing",
+        });
+      });
+      // Up to 1-2 extras the user didn't select but the location offers.
+      const extras = Array.from(cats).filter(
+        (c) => !sel.includes(c as ServiceCategory),
+      ) as ServiceCategory[];
+      if (extras.length > 0) {
+        pills.push({ id: "extras", label: `+${extras.length}`, state: "extra" });
+      }
+    } else {
+      // No selection â†’ show top 3 categories the location offers.
+      const offered = Array.from(cats).slice(0, 3) as ServiceCategory[];
+      offered.forEach((c) =>
+        pills.push({ id: `off-${c}`, label: CATEGORY_DISPLAY_NAMES[c], state: "available" }),
+      );
+      if (cats.size > 3) {
+        pills.push({ id: "extras", label: `+${cats.size - 3}`, state: "extra" });
+      }
+    }
+    return pills;
+  };
+
+  const sheetCountLine = useMemo(() => {
+    const n = sortedLocations.length;
+    if (route) return `${n} match${n === 1 ? "" : "es"} along route`;
+    return `${n} wash spot${n === 1 ? "" : "s"} near you`;
+  }, [sortedLocations.length, route]);
+
+  // Header pill content for collapsed mode.
+  const pillLine1 =
+    activeVehicle?.nickname ||
+    (origin?.label ? origin.label : "WashBuddy");
+  const pillLine2 = destination
+    ? `â†’ ${destination.label}`
+    : origin?.label && origin.label !== pillLine1
+      ? origin.label
+      : "Tap to plan a trip";
+
+  const sheetMode: "collapsed" | "expanded" =
+    filterUI.sheetState === "peek" ? "collapsed" : "expanded";
+
+  // Selected location lookup for PinCallout content.
+  const selectedLocation = useMemo(
+    () => (selectedLocationId ? sortedLocations.find((l) => l.id === selectedLocationId) : null),
+    [selectedLocationId, sortedLocations],
+  );
+
+  // Open-status helper â€” server today exposes only `isOpenNow`; map
+  // it to the EID color triplet. Closes-soon / closed gradients
+  // arrive when backend exposes operating windows + relative-time.
+  const openStatusFor = (loc: any) => {
+    const isOpen = !!(loc as any).isOpenNow;
+    return {
+      label: isOpen ? "Open now" : "Closed",
+      color: (isOpen ? "green" : "red") as "green" | "amber" | "red",
+    };
+  };
+
+  const ratingFor = (loc: any) => {
+    const reviewCount: number = (loc as any).reviewCount ?? 0;
+    const averageRating: number | null = (loc as any).averageRating ?? null;
+    if (reviewCount < 5 || averageRating == null) return null;
+    return { value: averageRating, reviewCount };
+  };
+
+  const RATING_THRESHOLD = 5;
+  void RATING_THRESHOLD; // documented in lib/sort-scoring.ts; gate above mirrors it
+
+  // Over-filter guardrail copy. Per audit refinement #11 â€”
+  // sheet-state-aware: when peek, render under the chip row (in
+  // header); when default/expanded, render at top of result list.
+  // Trigger: <5 active matches AND any filters/services applied.
+  const showOverFilterGuardrail =
+    sortedLocations.length > 0 &&
+    sortedLocations.length < 5 &&
+    (filterUI.selectedServiceCategories.length > 0 ||
+      countActiveSheetFilters(filterUI.sheetFilters) > 0);
+
+  const overFilterPill = showOverFilterGuardrail ? (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 8,
+        background: "#FEF3C7",
+        color: "#92400E",
+        fontSize: 11.5,
+        fontWeight: 500,
+        padding: "8px 10px",
+        borderRadius: 8,
+        border: "1px solid #FDE68A",
+      }}
+    >
+      <span>âš  Only {sortedLocations.length} matches with current filters</span>
+      <button
+        type="button"
+        onClick={() => dispatchFilter({ type: "CLEAR_ALL_FILTERS" })}
+        style={{
+          background: "transparent",
+          color: "#92400E",
+          fontSize: 11.5,
+          fontWeight: 600,
+          border: "none",
+          cursor: "pointer",
+          padding: 0,
+          textDecoration: "underline",
+        }}
+      >
+        Show all
+      </button>
+    </div>
+  ) : null;
+
   return (
-    <div className="space-y-4 pt-14 lg:pt-0">
-      {/* Floating top-left button — logomark on top-level entry,
-          back chevron when navigated in from another page. Mobile
-          only; desktop uses the AppLayout sidebar's branding and
-          notification bell. EID §3.1 / §3.8. The 36px circle has
-          ~44px effective tap target via the surrounding p-1 span;
-          accessibility note about sub-44 visible size is in the
-          checkpoint-2 verification §2. */}
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        overflow: "hidden",
+        background: "#FFFFFF",
+      }}
+    >
+      {/* Map â€” fills the viewport behind the header + sheet.
+          Round 2+3 fixed-position layout: the page is overflow-
+          hidden + fixed-inset-0, the sheet has its own contained
+          scroll container, so the document never scrolls. That
+          fixes Bug 1 (page-has-no-bottom). */}
+      <div
+        ref={mapRef}
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: "var(--z-map)" as unknown as number,
+        }}
+      />
+
+      {/* Floating top-left button â€” logomark on top-level entry,
+          back chevron when navigated in from another page.
+          EID Â§3.1 / Â§3.8. */}
       <motion.div
-        className="lg:hidden fixed top-4 left-4 z-40 pointer-events-none"
+        style={{
+          position: "absolute",
+          top: 16,
+          left: 16,
+          zIndex: "var(--z-map-control)" as unknown as number,
+          pointerEvents: "none",
+        }}
         initial={false}
         animate={{ y: showFloatingChrome ? 0 : -80, opacity: showFloatingChrome ? 1 : 0 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
@@ -1904,8 +2157,6 @@ export default function FindAWash() {
           type="button"
           onClick={() => {
             if (isDeepEntry) window.history.back();
-            // logomark tap is a no-op for now; refresh-to-default
-            // semantics land in Phase B per EID §3.8.
           }}
           aria-label={isDeepEntry ? "Back" : "WashBuddy home"}
           aria-hidden={!showFloatingChrome}
@@ -1920,14 +2171,18 @@ export default function FindAWash() {
         </button>
       </motion.div>
 
-      {/* Floating top-right cluster — interim Phase A placement
-          for the bell + hamburger trigger while the AppLayout
-          mobile header is suppressed. Hides on scroll-down (Bug B
-          / Checkpoint 6) so it doesn't float over result cards
-          when the user is reading the list. Phase B integrates
-          these into the unified collapsed/expanded header. */}
+      {/* Floating top-right cluster â€” bell + hamburger. */}
       <motion.div
-        className="lg:hidden fixed top-4 right-4 z-40 flex items-center gap-1 pointer-events-none"
+        style={{
+          position: "absolute",
+          top: 16,
+          right: 16,
+          zIndex: "var(--z-map-control)" as unknown as number,
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          pointerEvents: "none",
+        }}
         initial={false}
         animate={{ y: showFloatingChrome ? 0 : -80, opacity: showFloatingChrome ? 1 : 0 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
@@ -1951,511 +2206,358 @@ export default function FindAWash() {
         </button>
       </motion.div>
 
-      <div className="flex items-center gap-3 max-w-full">
-        <div className="min-w-0 max-w-full">
-          <ActiveVehiclePill />
-        </div>
-      </div>
+      {/* "Search this area" floating pill (EID Â§3.2, --z-map-cta). */}
+      <AnimatePresence>
+        {showSearchAreaButton && (
+          <motion.div
+            key="search-this-area"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            style={{
+              position: "absolute",
+              top: 78,
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: "var(--z-map-cta)" as unknown as number,
+            }}
+          >
+            <button
+              type="button"
+              onClick={handleSearchThisArea}
+              aria-label="Search this area"
+              className="inline-flex items-center gap-2 h-10 px-4 rounded-full bg-white/95 backdrop-blur-md border border-slate-200/80 shadow-[0_2px_6px_rgba(15,23,42,0.10)] hover:bg-white transition-colors text-sm font-medium text-slate-800"
+            >
+              <Search className="h-4 w-4 text-slate-500" />
+              Search this area
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Slim header — collapsed when a route is planned, full form
-          otherwise. Drops the gradient hero + verbose copy ("Plan
-          your trip and find wash locations…") that ate ~200px above
-          the fold on mobile. */}
-      {/* The autocomplete dropdown portals to <body> at z-[1000]
-          (Checkpoint 5, Approach A), so neither search Card
-          variant needs an elevated stacking context. Reverting
-          the Checkpoint 4 `relative z-[1000]` resolves the
-          cascade where the Card painted over the notifications
-          dropdown, the active vehicle picker, and any other
-          fixed-position dropdown opened from outside the Card. */}
-      {!formCollapsed || !route ? (
-        <Card className="p-4 sm:p-5 space-y-3">
-          <div className="flex items-end gap-2 sm:gap-3 flex-col sm:flex-row">
-            <div className="flex-1 w-full min-w-0">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 block">From</label>
-              {origin?.name === "My Location" ? (
-                <div className="h-12 rounded-xl bg-slate-50 border-2 border-slate-200 flex items-center px-3 gap-2">
-                  <Crosshair className="h-4 w-4 text-emerald-600 shrink-0" />
-                  <span className="text-slate-900 text-sm font-medium truncate min-w-0">My Location</span>
-                  <button
-                    type="button"
-                    onClick={() => { setOrigin(null); setRoute(null); }}
-                    className="ml-auto text-slate-400 hover:text-slate-700 shrink-0"
-                    aria-label="Clear origin"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
+      {/* Pin selection callout (EID Â§3.6) â€” positioned over the map
+          at the selected pin's container-pixel coordinates. */}
+      {pinCalloutPos && selectedLocation && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            pointerEvents: "none",
+            zIndex: "var(--z-pin-label)" as unknown as number,
+          }}
+        >
+          <PinCallout
+            pinX={pinCalloutPos.x}
+            pinY={pinCalloutPos.y}
+            isTopBadge={scoredById.get(selectedLocation.id)?.isTopBadge ?? false}
+            providerName={selectedLocation.name}
+            cityLine={`${selectedLocation.city}${(selectedLocation as any).stateCode ? `, ${(selectedLocation as any).stateCode}` : ""}`}
+            metaText={
+              route
+                ? `+${Math.round((selectedLocation as any).distanceToRoute)} km from route`
+                : `${(((selectedLocation as any).distFromOrigin as number) * 0.621371).toFixed(1)} mi`
+            }
+            metaEmphasis={
+              route
+                ? `+${Math.round((selectedLocation as any).distanceToRoute)} km from route`
+                : undefined
+            }
+            openStatus={openStatusFor(selectedLocation)}
+            onCardTap={() => {
+              dispatchFilter({ type: "SET_SHEET_STATE", sheetState: "default", userInitiated: true });
+              // Scroll the sheet's contained list to bring the
+              // selected card into view â€” left as a future enhancement
+              // since the sheet's scrollIntoView wiring lives inside
+              // SearchBottomSheet's children div.
+            }}
+            onBook={() => setNavLocation(buildLocationUrl(selectedLocation.id))}
+          />
+        </div>
+      )}
+
+      {/* Header â€” collapsed when sheet at peek, expanded otherwise. */}
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          paddingTop: 64, // clear floating top buttons
+          zIndex: "var(--z-header)" as unknown as number,
+          pointerEvents: "none",
+        }}
+      >
+        <div style={{ pointerEvents: "auto" }}>
+          <FindAWashHeader
+            mode={sheetMode}
+            pillLine1={pillLine1}
+            pillLine2={pillLine2}
+            onTapPill={() =>
+              dispatchFilter({
+                type: "SET_SHEET_STATE",
+                sheetState: "default",
+                userInitiated: true,
+              })
+            }
+            onTapEdit={() => setFormCollapsed(false)}
+            expandedFormSlot={
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <ActiveVehiclePill />
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#94A3B8", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.6 }}>
+                    From
+                  </div>
+                  {origin?.name === "My Location" ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderRadius: 12, background: "#F8FAFC", border: "1px solid #E2E8F0" }}>
+                      <Crosshair size={14} color="#15803D" />
+                      <span style={{ fontSize: 13, fontWeight: 500, color: "#0F172A", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        My Location
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => { setOrigin(null); setRoute(null); }}
+                        style={{ background: "transparent", border: "none", cursor: "pointer", color: "#94A3B8", padding: 4 }}
+                        aria-label="Clear origin"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <CityAutocomplete
+                      value={origin}
+                      onChange={(c) => {
+                        setOrigin(c);
+                        setRoute(null);
+                        if (c && destination) {
+                          setTimeout(() => planRouteRef.current?.(c, destination), 0);
+                        }
+                      }}
+                      placeholder="Start city..."
+                      exclude={destination}
+                      userLat={origin?.lat ?? destination?.lat}
+                      userLng={origin?.lng ?? destination?.lng}
+                    />
+                  )}
                 </div>
-              ) : (
-                <div className="relative">
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#94A3B8", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.6 }}>
+                    To
+                  </div>
                   <CityAutocomplete
-                    value={origin}
+                    value={destination}
                     onChange={(c) => {
-                      setOrigin(c);
+                      setDestination(c);
                       setRoute(null);
-                      // Symmetric auto-fire with the To field — when
-                      // the user picks an origin from autocomplete and
-                      // a destination is already set, recompute the
-                      // route immediately. setTimeout(0) lets React
-                      // commit the setOrigin batch first so
-                      // planRouteRef.current reads the freshest closure
-                      // (same pattern as the To field below). Free
-                      // typing without selecting from autocomplete
-                      // does NOT enter this path — onChange only fires
-                      // when CityAutocomplete commits a selection
-                      // (or null on clear).
-                      if (c && destination) {
-                        setTimeout(() => planRouteRef.current?.(c, destination), 0);
+                      if (c && origin) {
+                        setTimeout(() => planRouteRef.current?.(origin, c), 0);
                       }
                     }}
-                    placeholder="Start city..."
-                    exclude={destination}
+                    placeholder="Destination city..."
+                    exclude={origin}
                     userLat={origin?.lat ?? destination?.lat}
                     userLng={origin?.lng ?? destination?.lng}
                   />
-                  {!origin && geoStatus !== "unavailable" && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (geoStatus === "denied") {
-                          setRouteError("Location access was denied. Please enable location in your browser settings.");
-                          return;
-                        }
-                        navigator.geolocation.getCurrentPosition(
-                          async (pos) => {
-                            const { latitude, longitude } = pos.coords;
-                            const areaName = await reverseGeocode(latitude, longitude);
-                            const myLoc = makeMyLocationOption(latitude, longitude, areaName);
-                            setOrigin(myLoc);
-                            setGeoStatus("granted");
-                            setRoute(null);
-                            // Symmetric with From's autocomplete onChange
-                            // (2g-2.1 commit 944fb08): when the user
-                            // commits a new origin via the geolocation
-                            // crosshair AND a destination is already set,
-                            // recompute the route immediately. setTimeout(0)
-                            // lets React commit the setOrigin batch first
-                            // so planRouteRef.current reads the freshest
-                            // closure.
-                            if (destination) {
-                              setTimeout(() => planRouteRef.current?.(myLoc, destination), 0);
-                            }
-                          },
-                          () => {
-                            setGeoStatus("denied");
-                            setRouteError("Could not access your location. Please enter a city manually.");
-                          },
-                          { timeout: 8000 }
-                        );
-                      }}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-primary transition-colors"
-                      title="Use my location"
-                      aria-label="Use my current location"
-                    >
-                      <Crosshair className="h-4 w-4" />
-                    </button>
-                  )}
                 </div>
-              )}
-            </div>
-
-            <button
-              type="button"
-              onClick={handleSwap}
-              className="h-10 w-10 sm:h-10 sm:w-10 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors shrink-0 self-end mb-0 sm:mb-1"
-              title="Swap"
-              aria-label="Swap origin and destination"
-            >
-              <ArrowRight className="h-4 w-4 text-slate-600 rotate-90 sm:rotate-0" />
-            </button>
-
-            <div className="flex-1 w-full min-w-0">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 block">To</label>
-              <CityAutocomplete
-                value={destination}
-                onChange={(c) => {
-                  setDestination(c);
-                  setRoute(null);
-                  if (c && origin) {
-                    setTimeout(() => planRouteRef.current?.(origin, c), 0);
-                  }
-                }}
-                placeholder="Destination city..."
-                exclude={origin}
-                userLat={origin?.lat ?? destination?.lat}
-                userLng={origin?.lng ?? destination?.lng}
+                {isRouting && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#475569" }}>
+                    <Loader2 className="h-3 w-3 animate-spin" /> Planning route...
+                  </div>
+                )}
+                {routeError && (
+                  <div style={{ fontSize: 12, color: "#B91C1C" }}>{routeError}</div>
+                )}
+              </div>
+            }
+            chipRowSlot={
+              <FilterChips
+                selectedServiceCategories={filterUI.selectedServiceCategories}
+                openFilterEnabled={filterUI.openFilterEnabled}
+                openFilterLabel={destination ? "Open at arrival" : "Open now"}
+                activeFilterCount={countActiveSheetFilters(filterUI.sheetFilters)}
+                onOpenServicePicker={() =>
+                  dispatchFilter({ type: "OPEN_MODAL", modal: "service-picker" })
+                }
+                onToggleOpenFilter={() => dispatchFilter({ type: "TOGGLE_OPEN_FILTER" })}
+                onOpenAllFilters={() =>
+                  dispatchFilter({ type: "OPEN_MODAL", modal: "all-filters" })
+                }
               />
-            </div>
-
-            {/* Demoted secondary affordance now that From + To both
-                auto-fire planRoute on autocomplete selection. The
-                button stays visible for keyboard submitters and for
-                users who type free text without picking a suggestion.
-                Outline variant + min-h-11 keeps the tap target above
-                the 44px iOS floor while reading as quieter than the
-                prior filled-primary 48px button. The functional shape
-                is unchanged — onClick still wraps in an arrow so the
-                MouseEvent fix from 2g-2 (commit 50b4211) holds. */}
-            <Button
-              variant="outline"
-              size="md"
-              className="min-h-11 rounded-xl px-5 w-full sm:w-auto shrink-0"
-              onClick={() => handlePlanRoute()}
-              disabled={!origin || !destination || isRouting}
-            >
-              {isRouting ? (
-                <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Planning...</>
-              ) : (
-                <><Navigation className="h-4 w-4 mr-2" /> Plan Route</>
-              )}
-            </Button>
-          </div>
-          {geoStatus === "pending" && !initialOrigin && (
-            <div className="flex items-center gap-1.5 text-slate-500 text-xs">
-              <Loader2 className="h-3 w-3 animate-spin" /> Detecting location...
-            </div>
-          )}
-          {routeError && (
-            <p className="text-red-600 text-sm">{routeError}</p>
-          )}
-        </Card>
-      ) : (
-        // Collapsed summary — shows BOTH from and to (the prior shape
-        // hid From in the collapsed state, which left the user
-        // wondering "did I plan this trip?"). Edit reopens the full
-        // form for changes.
-        <Card className="p-3 sm:p-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="flex-1 min-w-0">
-              {/* truncate sits on the <p> (block-level) so a long
-                  label gets ellipsis. Inner <span>'s `truncate` on
-                  inline elements is a no-op — that was the bug
-                  where long destinations collided with the Edit
-                  button (Checkpoint 5). The outer flex item has
-                  min-w-0; Edit button has shrink-0. */}
-              <p className="text-xs text-slate-500 leading-tight truncate">
-                <span className="font-semibold text-slate-700">From:</span>{" "}
-                {origin?.name === "My Location" ? "My Location" : (origin?.label || "—")}
-              </p>
-              <p className="text-xs text-slate-500 leading-tight mt-0.5 truncate">
-                <span className="font-semibold text-slate-700">To:</span>{" "}
-                {destination?.label || "—"}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setFormCollapsed(false)}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors shrink-0"
-            >
-              <Pencil className="h-3.5 w-3.5" /> Edit
-            </button>
-          </div>
-        </Card>
-      )}
-
-      {/* Compact metrics strip — single inline row replaces the three
-          icon cards. Only shows when a route is planned. */}
-      {route && (
-        <p className="text-xs sm:text-sm text-slate-600 px-1">
-          <span className="font-semibold text-slate-900">{route.distanceKm} km</span>
-          <span className="text-slate-300"> · </span>
-          <span className="font-semibold text-slate-900">{formatDuration(route.durationMins)}</span>
-          <span className="text-slate-300"> · </span>
-          <span className="font-semibold text-slate-900">{nearbyLocations.length} stops</span>
-        </p>
-      )}
-
-      {/* Map — primary surface. Inline ~55vh on mobile so users see
-          the route at a glance + scroll the list below. The expand
-          button overlays in the top-right; tap to enter fullscreen
-          (position:fixed inset-0). Body scroll is locked while
-          expanded so the page underneath doesn't scroll. */}
-      <div
-        className={
-          mapExpanded
-            ? "fixed inset-0 z-50 bg-white p-2"
-            : "relative"
-        }
-      >
-        <div
-          ref={mapRef}
-          className="rounded-2xl overflow-hidden border border-slate-200 shadow-sm w-full"
-          style={{
-            height: mapExpanded ? "calc(100vh - 16px)" : "55vh",
-            minHeight: mapExpanded ? undefined : "320px",
-            maxHeight: mapExpanded ? undefined : "640px",
-            zIndex: 0,
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => setMapExpanded((v) => !v)}
-          className="absolute top-3 right-3 z-[401] h-10 w-10 rounded-xl bg-white shadow-md border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
-          aria-label={mapExpanded ? "Collapse map" : "Expand map"}
-        >
-          {mapExpanded ? <Minimize2 className="h-4 w-4 text-slate-700" /> : <Maximize2 className="h-4 w-4 text-slate-700" />}
-        </button>
-        {/* Phase B CP3 — "Search this area" floating pill (EID §3.2).
-            Centered horizontally, above-map at top-3. Visible only
-            when the in-bounds ratio drops below 0.5. fade + slide-down
-            on appear via framer-motion's AnimatePresence.
-            TODO(round-3+): formalize the EID §3.2 z-index variables
-            and replace `z-30` with `--z-map-cta: 900`. */}
-        <AnimatePresence>
-          {showSearchAreaButton && (
-            <motion.div
-              key="search-this-area"
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.18, ease: "easeOut" }}
-              className="absolute top-3 left-1/2 -translate-x-1/2 z-30"
-            >
-              <button
-                type="button"
-                onClick={handleSearchThisArea}
-                aria-label="Search this area"
-                className="inline-flex items-center gap-2 h-11 px-4 rounded-full bg-white/95 backdrop-blur-md border border-slate-200/80 shadow-[0_2px_6px_rgba(15,23,42,0.10)] hover:bg-white transition-colors text-sm font-medium text-slate-800"
-              >
-                <Search className="h-4 w-4 text-slate-500" />
-                Search this area
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
+            }
+            activePillsSlot={
+              <>
+                <ActiveFilterPills pills={pillsForActiveFilters} />
+                {/* Audit refinement #11 â€” guardrail in header when
+                    sheet is at peek (the user can't see the list
+                    yet so the warning belongs near the chips). */}
+                {filterUI.sheetState === "peek" && overFilterPill}
+              </>
+            }
+          />
+        </div>
       </div>
 
-      {/* List of locations. Hidden while map is fullscreen — the
-          fullscreen overlay covers the entire viewport, so the list
-          would render behind it and waste DOM. */}
-      {!mapExpanded && (
-        <div className="space-y-3">
-          {/* Phase B CP3 v2 hotfix — empty-area pill (EID §3.2).
-              Renders when the user has anchored to a region with
-              zero in-bounds providers. Inline + slate body so it
-              reads as informational (not a caution); the recovery
-              CTA uses the blue token to follow the Linear/Notion
-              quiet-pill pattern. Unit matches the active mode's
-              card meta — mi in nearby, km in route — so the pill
-              reads consistently with the cards on the same screen. */}
+      {/* Bottom sheet with contained scroll â€” Bug 1 fix mechanism. */}
+      <SearchBottomSheet
+        state={filterUI.sheetState}
+        onStateChange={(next, userInitiated) =>
+          dispatchFilter({ type: "SET_SHEET_STATE", sheetState: next, userInitiated })
+        }
+        countLine={sheetCountLine}
+        activeView={filterUI.sheetState === "peek" ? "map" : "list"}
+        sortLabel={sortLabel}
+        onTapSort={() => dispatchFilter({ type: "OPEN_MODAL", modal: "all-filters" })}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* Audit refinement #11 â€” guardrail at top of list when
+              sheet is default/expanded. */}
+          {filterUI.sheetState !== "peek" && overFilterPill}
+
+          {/* Empty-area pill (CP3 v2 hotfix preserved). */}
           {showEmptyAreaPill && closestProvider && (
-            <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 text-sm">
-              <span className="min-w-0 flex-1">
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "8px 12px",
+                borderRadius: 8,
+                background: "#F1F5F9",
+                color: "#475569",
+                border: "1px solid #E2E8F0",
+                fontSize: 13,
+              }}
+            >
+              <span>
                 No providers in this area. Closest is{" "}
-                <strong className="font-semibold text-slate-900">
+                <strong style={{ color: "#0F172A", fontWeight: 600 }}>
                   {mode === "nearby"
                     ? `${Math.max(1, Math.round(closestProvider.distKm * 0.621371))} mi`
                     : `${Math.max(1, Math.round(closestProvider.distKm))} km`}
-                </strong>
-                {" "}away.
+                </strong>{" "}
+                away.
               </span>
               <button
                 type="button"
                 onClick={handleShowClosest}
-                className="shrink-0 text-blue-700 font-medium hover:text-blue-800 transition-colors"
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: "#1F52B0",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
               >
-                Show closest →
+                Show closest â†’
               </button>
             </div>
           )}
 
-          {!route && (
-            <p className="text-xs text-slate-500 px-1">
-              Enter a destination to see locations along your route.
-            </p>
-          )}
-
-          {!route && !isRouting && displayLocations.length === 0 && !origin && (
-            <Card className="text-center py-12 border-dashed">
-              <Route className="h-10 w-10 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-500 text-sm">
-                Allow location access to see nearby wash locations, or enter a starting city above.
-              </p>
-            </Card>
-          )}
-
-          {!route && !isRouting && origin && displayLocations.length === 0 && (
-            <Card className="text-center py-12 border-dashed">
-              <MapPin className="h-10 w-10 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-500 text-sm">
-                No wash locations found within {NEARBY_RADIUS_KM} km. Enter a destination to plan a route.
-              </p>
-            </Card>
-          )}
-
-          {isRouting && (
-            <Card className="text-center py-12">
-              <Loader2 className="h-8 w-8 text-blue-500 animate-spin mx-auto mb-3" />
-              <p className="text-slate-500 text-sm">Calculating route...</p>
-            </Card>
-          )}
-
-          {route && nearbyLocations.length === 0 && !isRouting && (
-            <Card className="text-center py-12 border-dashed">
-              <MapPin className="h-10 w-10 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-500 text-sm">No wash locations found within {ROUTE_CORRIDOR_KM} km of this route.</p>
-            </Card>
-          )}
-
-          {/* CP3 v3: list iterates rankedLocations so closest-to-
-              bounds-center surfaces at the top after a "Search this
-              area" tap. The marker layer (above) iterates
-              displayLocations — same set, default ordering — so
-              pin colors stay stable through anchor changes. The
-              listAnchorRef is the scroll target for the
-              scroll-to-top effect on searchBoundsAnchor change. */}
-          {rankedLocations.length > 0 && !isRouting && (
-            <div ref={listAnchorRef} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
-              {rankedLocations.map((loc, idx) => {
-                const incompatible = (loc as any).fitsActiveVehicle === false;
-                const minPrice = minPriceFor(loc);
-                const reviewCount: number = (loc as any).reviewCount ?? 0;
-                const averageRating: number | null = (loc as any).averageRating ?? null;
-                const isOpen = !!(loc as any).isOpenNow;
-                // Mode-aware metadata. Nearby mode shows miles from
-                // me. Route mode shows "detour pending…" until
-                // Round 4 wires the real per-location OSRM detour
-                // endpoint — the prior numeric placeholder
-                // (ETA-from-origin) was actively misleading
-                // because real detour means round-trip incremental
-                // cost, not time-from-origin. Bug 4 (Checkpoint 4).
-                // TODO(round-4): Replace 'detour pending…' with
-                // real detour value from
-                // POST /api/locations/with-detour-times per EID §5.2.
-                const milesFromMe = ((loc as any).distFromOrigin as number) * 0.621371;
-                const kmFromRoute = Math.round((loc as any).distanceToRoute as number);
-                const isSelected = selectedLocationId === loc.id;
-
-                const card = (
-                  <Card
-                    className={`flex flex-col border-2 ${
-                      incompatible
-                        ? "bg-slate-50 border-slate-200 cursor-default"
-                        : isSelected
-                          ? "border-amber-400 bg-amber-50/40 cursor-pointer"
-                          : "group cursor-pointer hover:border-primary/30 hover:shadow-sm transition-all"
-                    }`}
-                    title={incompatible ? "Change your active vehicle to book at this location" : undefined}
-                  >
-                    <div className="p-4 sm:p-5 space-y-1.5">
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className={`text-base sm:text-lg font-bold leading-tight truncate ${incompatible ? "text-slate-500" : "text-slate-900"}`}>{loc.name}</h3>
-                        {/* Chevron is the booking-navigation affordance now.
-                            Card body tap selects on map; chevron tap
-                            navigates to /location/:id. p-3 makes the tap
-                            target 44px square (h-5 icon + 12px padding
-                            each side) — clears the iOS minimum. -mr-2
-                            -mt-2 visually pulls the bigger tap area
-                            back into the card padding box so it doesn't
-                            push the title. */}
-                        {!incompatible && (
-                          <button
-                            type="button"
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setNavLocation(buildLocationUrl(loc.id)); }}
-                            className="shrink-0 -mr-2 -mt-2 p-3 rounded-lg text-slate-400 hover:text-primary hover:bg-slate-100 transition-colors"
-                            aria-label={`Book at ${loc.name}`}
-                            title="Book at this location"
-                          >
-                            <ArrowRight className="h-5 w-5" />
-                          </button>
-                        )}
-                      </div>
-
-                      {incompatible ? (
-                        <div className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-100 text-amber-800 border border-amber-300 text-xs font-medium">
-                          No bay fits your active vehicle
-                        </div>
-                      ) : (
-                        <>
-                          {/* Rating · distance · status — same line
-                              shape as Find a Wash. flex-wrap so a long
-                              translated string breaks cleanly at
-                              narrow widths. */}
-                          <p className="text-sm text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0">
-                            {reviewCount > 0 ? (
-                              <span className="inline-flex items-center gap-1 shrink-0">
-                                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                                <span className="font-semibold text-slate-700">{averageRating != null ? averageRating.toFixed(1) : "—"}</span>
-                                <span className="text-slate-400">({reviewCount})</span>
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 shrink-0 text-slate-400">
-                                <Star className="h-3.5 w-3.5 text-slate-300" />
-                                No reviews yet
-                              </span>
-                            )}
-                            <span className="text-slate-300">·</span>
-                            {mode === "route" ? (
-                              <>
-                                <span className="shrink-0 text-slate-400">detour pending…</span>
-                                <span className="text-slate-300">·</span>
-                                <span className="shrink-0">{kmFromRoute} km from route</span>
-                              </>
-                            ) : (
-                              <span className="shrink-0">{milesFromMe.toFixed(1)} mi</span>
-                            )}
-                            <span className="text-slate-300">·</span>
-                            {isOpen ? (
-                              <span className="inline-flex items-center gap-1 text-emerald-600 font-medium shrink-0">
-                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Open Now
-                              </span>
-                            ) : (
-                              <span className="text-slate-400 font-medium shrink-0">Closed</span>
-                            )}
-                          </p>
-
-                          <p className="text-sm text-slate-500 flex items-center gap-1.5 min-w-0">
-                            <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                            <span className="truncate">{loc.addressLine1 ? `${loc.addressLine1}, ` : ""}{loc.city}, {(loc as any).stateCode || (loc as any).regionCode}{loc.postalCode ? ` ${loc.postalCode}` : ""}</span>
-                          </p>
-
-                          {minPrice != null && (
-                            <p className="text-sm font-semibold text-slate-700">From {formatCurrency(minPrice)}</p>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </Card>
-                );
-
-                return (
-                  <motion.div
-                    key={loc.id}
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.02 }}
-                  >
-                    {incompatible ? (
-                      <div className="block">{card}</div>
-                    ) : (
-                      // Card body tap = select on map (popup, highlight,
-                      // pan-if-off-screen). The chevron inside the card
-                      // is the booking affordance and stops propagation
-                      // so it doesn't reach this onClick. role="button" +
-                      // a keyboard handler so keyboard users can still
-                      // select with Enter or Space — no longer a Link.
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        className="block text-left w-full"
-                        onClick={() => selectLocation(loc.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            selectLocation(loc.id);
-                          }
-                        }}
-                      >
-                        {card}
-                      </div>
-                    )}
-                  </motion.div>
-                );
-              })}
+          {isRouting && sortedLocations.length === 0 && (
+            <div style={{ textAlign: "center", padding: 32, color: "#475569", fontSize: 13 }}>
+              <Loader2 className="h-6 w-6 animate-spin mx-auto mb-3 text-blue-500" />
+              Calculating route...
             </div>
           )}
+
+          {!isRouting && sortedLocations.length === 0 && (
+            <div style={{ textAlign: "center", padding: 32, color: "#475569", fontSize: 13 }}>
+              <MapPin className="h-8 w-8 mx-auto mb-3 text-slate-300" />
+              {origin
+                ? `No wash locations found within ${route ? ROUTE_CORRIDOR_KM : NEARBY_RADIUS_KM} km${route ? " of this route" : ""}.`
+                : "Allow location access or enter a starting city to see nearby washes."}
+            </div>
+          )}
+
+          {sortedLocations.map((loc) => {
+            const incompatible = (loc as any).fitsActiveVehicle === false;
+            const tier: WashPinTier = incompatible
+              ? "incompatible"
+              : (scoredById.get(loc.id)?.isTopBadge ? "top" : "mid");
+            const scored = scoredById.get(loc.id);
+            const distFromOriginMi = ((loc as any).distFromOrigin as number) * 0.621371;
+            const kmFromRoute = Math.round((loc as any).distanceToRoute as number);
+            const cityLine = `${loc.city}${(loc as any).stateCode ? `, ${(loc as any).stateCode}` : (loc as any).regionCode ? `, ${(loc as any).regionCode}` : ""}`;
+            const metaText = route
+              ? `+${kmFromRoute} km from route`
+              : `${distFromOriginMi.toFixed(1)} mi`;
+            const metaEmphasis = route ? `+${kmFromRoute} km from route` : undefined;
+
+            // Price line â€” gated on selection state per EID Â§3.4.2.
+            const sel = filterUI.selectedServiceCategories;
+            let price: { prefix: "From" | "Est."; amount: string } | null = null;
+            if (sel.length === 1) {
+              const m = minPriceFor(loc);
+              if (m != null) price = { prefix: "From", amount: formatCurrency(m) };
+            } else if (sel.length >= 2) {
+              const e = estPriceFor(loc, sel);
+              if (e != null) price = { prefix: "Est.", amount: formatCurrency(e) };
+            }
+
+            return (
+              <ResultCard
+                key={loc.id}
+                id={loc.id}
+                providerName={loc.name}
+                cityLine={cityLine}
+                metaText={metaText}
+                metaEmphasis={metaEmphasis}
+                rankIdx={scored?.rankIdx ?? 0}
+                isTopBadge={!incompatible && (scored?.isTopBadge ?? false)}
+                tier={tier}
+                serviceCategoriesSelected={sel}
+                servicePills={incompatible ? [] : buildServicePillsFor(loc)}
+                openStatus={incompatible ? null : openStatusFor(loc)}
+                rating={incompatible ? null : ratingFor(loc)}
+                price={incompatible ? null : price}
+                isSelected={selectedLocationId === loc.id}
+                onSelect={() => selectLocation(loc.id)}
+                onChevron={() => setNavLocation(buildLocationUrl(loc.id))}
+              />
+            );
+          })}
         </div>
-      )}
+      </SearchBottomSheet>
+
+      {/* Service picker modal (EID Â§4.2). */}
+      <ServicePickerSheet
+        isOpen={filterUI.modalOpen === "service-picker"}
+        onClose={() => dispatchFilter({ type: "CLOSE_MODAL" })}
+        initialSelection={filterUI.selectedServiceCategories}
+        categoryCounts={categoryCounts}
+        computeApplyCount={computeApplyCountForServices}
+        modeRouteSuffix={destination ? " along route" : ""}
+        onApply={(next) => {
+          dispatchFilter({ type: "SET_SERVICE_CATEGORIES", categories: next });
+          dispatchFilter({ type: "CLOSE_MODAL" });
+        }}
+      />
+
+      {/* All-filters modal (EID Â§4.3). */}
+      <AllFiltersSheet
+        isOpen={filterUI.modalOpen === "all-filters"}
+        onClose={() => dispatchFilter({ type: "CLOSE_MODAL" })}
+        initialFilters={filterUI.sheetFilters}
+        initialSort={filterUI.sortBy}
+        hasSelectedServices={filterUI.selectedServiceCategories.length > 0}
+        sortOptions={sortOptions}
+        computeApplyCount={computeApplyCountForFilters}
+        onApply={(filters, sort) => {
+          dispatchFilter({ type: "SET_SHEET_FILTER", key: "availability", value: filters.availability });
+          dispatchFilter({ type: "SET_SHEET_FILTER", key: "serviceDetails", value: filters.serviceDetails });
+          dispatchFilter({ type: "SET_SHEET_FILTER", key: "fuel", value: filters.fuel });
+          dispatchFilter({ type: "SET_SHEET_FILTER", key: "driverAmenities", value: filters.driverAmenities });
+          dispatchFilter({ type: "SET_SHEET_FILTER", key: "coachAmenities", value: filters.coachAmenities });
+          dispatchFilter({ type: "SET_SHEET_FILTER", key: "repairFlags", value: filters.repairFlags });
+          dispatchFilter({ type: "SET_SHEET_FILTER", key: "compliance", value: filters.compliance });
+          dispatchFilter({ type: "SET_SHEET_FILTER", key: "bayOverride", value: filters.bayOverride });
+          dispatchFilter({ type: "SET_SORT_BY", sortBy: sort });
+          dispatchFilter({ type: "CLOSE_MODAL" });
+        }}
+        onClearAll={() => dispatchFilter({ type: "CLEAR_ALL_FILTERS" })}
+      />
     </div>
   );
 }
