@@ -213,7 +213,7 @@ Existing Leaflet map; this work doesn't change the underlying map library or til
 **"Search this area" button:**
 - Floating pill in upper-middle of map.
 - Visible only when user has panned/zoomed such that <50% of currently-listed locations are in visible bounds, AND there is at least one provider in the list.
-- Tap behavior: the bottom-sheet list re-orders so providers closest to the visible bounds center surface at the top. The button hides. **Pin colors and cluster colors do not change.** No map repaint at all — the map's only visual response is the button hiding. The page does not auto-scroll on tap; the visible signal (button hidden, list re-ordered in place) is sufficient.
+- Tap behavior: the bottom-sheet list re-orders so providers closest to the visible bounds center surface at the top. The list scrolls to top so the new ordering is visible. The button hides. **Pin colors and cluster colors do not change.** No map repaint at all — the map's only visual response is the button hiding.
 - Translucent white with backdrop-blur, soft drop shadow, ~40px tall.
 - Should NOT be visible by default — it earns its place by user interaction.
 - **Mental model:** "tell me about this area" (re-order the list) — not "show me only this area" (filter), not "highlight this area" (repaint). The user's pan + tap is a navigational hint about which providers they want to see first; the system uses it for list ordering only. Pin tier color is reserved for filter-relevance signals (Round 3) and vehicle compatibility (today).

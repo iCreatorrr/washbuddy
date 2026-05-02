@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 import { Card, Input, Button, Badge, ErrorState } from "@/components/ui";
-import { MapPin, Navigation, Route, ArrowRight, X, Loader2, ChevronDown, Crosshair, Star, Maximize2, Minimize2, Building2, Landmark, Search, Clock, Lock } from "lucide-react";
+import { MapPin, Navigation, Route, ArrowRight, X, Loader2, ChevronDown, Crosshair, Star, Maximize2, Minimize2, Pencil, ArrowLeft, Menu, Droplets, Building2, Landmark, Search } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { formatCurrency } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -19,9 +19,11 @@ import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import { ActiveVehiclePill } from "@/components/customer/active-vehicle-pill";
 import { useActiveVehicle } from "@/contexts/activeVehicle";
 import { deriveSizeClassFromLengthInches } from "@/lib/vehicleBodyType";
+import { useMobileMenu } from "@/components/layout";
+import { NotificationBell } from "@/components/notification-bell";
+import { useScrollDirection } from "@/hooks/use-scroll-direction";
 import { getInBoundsRatio } from "@/lib/map-bounds";
 import { normalizeLocationsResponse } from "@/lib/normalize-location";
-import { FindAWashHeader } from "@/components/customer/find-a-wash-header";
 import {
   classifyPin,
   pickHighestTier,
@@ -472,9 +474,8 @@ function CityAutocomplete({
                 top: dropdownPos.top,
                 left: dropdownPos.left,
                 width: dropdownPos.width,
-                zIndex: "var(--z-modal)",
-              } as React.CSSProperties}
-              className="bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden max-h-60 overflow-y-auto"
+              }}
+              className="z-[1000] bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden max-h-60 overflow-y-auto"
             >
               {isSearching ? (
                 <div className="px-4 py-3 text-sm text-slate-400 flex items-center gap-2">
@@ -843,8 +844,12 @@ export default function FindAWash() {
   // popup-open state, and card highlight all derive from it. Any
   // tap that selects (pin, card body) writes here; any tap that
   // deselects (same pin, same card, empty map) clears it.
+  // formCollapsed defaults to "collapse the From/To form when a
+  // route is already planned" — less duplicate header weight on a
+  // long scroll. The driver hits Edit to expand it again.
   const [mapExpanded, setMapExpanded] = useState(false);
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
+  const [formCollapsed, setFormCollapsed] = useState(!!cached);
 
   // Mode is derived from a single source: whether a destination is
   // set. Drives sort default, distance metric on cards, and (in
@@ -852,6 +857,33 @@ export default function FindAWash() {
   // Centralized so downstream JSX and effects read `mode` rather
   // than re-checking `destination` themselves.
   const mode: "nearby" | "route" = destination ? "route" : "nearby";
+
+  // The AppLayout mobile header is suppressed on this page (per
+  // EID §3.1). The hamburger trigger we render in the floating
+  // top-right cluster controls the same shared dropdown via
+  // context. Phase B replaces this interim cluster with the
+  // unified collapsed/expanded header.
+  const mobileMenu = useMobileMenu();
+
+  // Top-level vs deep entry — drives the floating top-left
+  // button's icon (logomark vs back chevron). Approach A from the
+  // Checkpoint 2 prompt: `window.history.length` is the same
+  // heuristic AppLayout's previous mobile back button used. Known
+  // limitation: history grows during in-app navigation, so a user
+  // who lands on /find-a-wash, taps a location, then returns,
+  // sees a back chevron even though /find-a-wash was their entry
+  // point. Approach B (a Wouter-aware visit-history hook) replaces
+  // this if the heuristic causes confusion in testing.
+  const isDeepEntry = typeof window !== "undefined" && window.history.length > 1;
+
+  // Scroll-aware floating chrome (Bug B / Checkpoint 6). The
+  // top-left button + top-right cluster hide on scroll-down past
+  // the map and reveal on scroll-up — Pinterest / Material
+  // Design pattern. `isAtTop` keeps the chrome pinned while the
+  // user is at the top of the page so they don't see a hide-then-
+  // reveal flicker on tiny scroll deltas at rest.
+  const { direction: scrollDirection, isAtTop } = useScrollDirection();
+  const showFloatingChrome = isAtTop || scrollDirection === "up";
 
   const { activeVehicle } = useActiveVehicle();
   const activeVehicleClass = activeVehicle ? deriveSizeClassFromLengthInches(activeVehicle.lengthInches) : null;
@@ -953,15 +985,12 @@ export default function FindAWash() {
   // re-runs; `clearLayers()` runs at the top of each re-run before
   // the new markers are added, so re-renders don't accumulate.
   const clusterGroupRef = useRef<L.MarkerClusterGroup | null>(null);
-  // Phase B CP3 v3 → CP4 — list scroll-target ref kept as
-  // forward-compat scaffolding. The CP3 v3 window.scrollTo effect
-  // was removed in CP4 (the user's confirmed mental model is
-  // silent re-order; the visible signal of the button hiding is
-  // sufficient). Round 2's bottom-sheet rebuild may want this
-  // ref to scroll its contained container to top — the
-  // declaration is free (one ref, no listener) and avoids a
-  // delete-then-re-add when Round 2 lands. EID §3.2 spec was
-  // updated in CP4 to drop the "list scrolls to top" line.
+  // Phase B CP3 v3 — scroll target for the bottom-sheet list. The
+  // scroll-to-top effect (below) brings this element into view on
+  // searchBoundsAnchor change so the user actually sees the list
+  // re-order. CP4's bottom-sheet rebuild will replace the
+  // mechanism (a contained scroll container with its own ref)
+  // while preserving the user-visible behavior.
   const listAnchorRef = useRef<HTMLDivElement | null>(null);
   // Tracks which location id is currently shown on the map so the
   // selection effect doesn't double-open a popup that's already open.
@@ -1128,6 +1157,30 @@ export default function FindAWash() {
   useEffect(() => {
     setSearchBoundsAnchor(null);
   }, [origin?.lat, origin?.lng, destination?.lat, destination?.lng, route]);
+
+  // Phase B CP3 v3 — scroll the bottom-sheet list into view on
+  // searchBoundsAnchor transitions so the user sees the new
+  // ordering. Fires on null → set ("Search this area" tap),
+  // set → set (re-tap in a different region), and set → null
+  // (anchor cleared by context change or "Show closest →"). The
+  // initial-mount transition (undefined → null on the first
+  // render) doesn't fire because hasMountedRef gates the effect.
+  // CP4's bottom-sheet rebuild will replace window.scrollTo with
+  // a contained scroll container.
+  const hasScrollMountedRef = useRef(false);
+  useEffect(() => {
+    if (!hasScrollMountedRef.current) {
+      hasScrollMountedRef.current = true;
+      return;
+    }
+    const target = listAnchorRef.current;
+    if (!target) return;
+    try {
+      const rect = target.getBoundingClientRect();
+      const top = rect.top + window.scrollY - 16;
+      window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    } catch {}
+  }, [searchBoundsAnchor]);
 
   const etasFetchedForRef = useRef<string>("");
   useEffect(() => {
@@ -1580,6 +1633,13 @@ export default function FindAWash() {
     return () => window.clearTimeout(id);
   }, [mapExpanded]);
 
+  // Auto-collapse the form when the route resolves so the map gets the
+  // primary screen real estate. Re-expanding stays the user's call via
+  // the Edit button — we don't auto-expand on every state change.
+  useEffect(() => {
+    if (route) setFormCollapsed(true);
+  }, [route]);
+
   const handleSwap = () => {
     const temp = origin;
     setOrigin(destination);
@@ -1825,195 +1885,276 @@ export default function FindAWash() {
     return Number.isFinite(m) ? m : null;
   };
 
-  // Phase B CP4 — From row content. Origin can be either a
-  // `My Location`-typed CityOption (rendered as a special read-only
-  // pill with a clear button) or any other CityOption (rendered via
-  // the portaled-autocomplete `CityAutocomplete`). Built here in
-  // the host page so the header component stays slot-driven.
-  const fromRow = (
-    <div>
-      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 block">From</label>
-      {origin?.name === "My Location" ? (
-        <div className="h-12 rounded-xl bg-slate-50 border-2 border-slate-200 flex items-center px-3 gap-2">
-          <Crosshair className="h-4 w-4 text-emerald-600 shrink-0" />
-          <span className="text-slate-900 text-sm font-medium truncate min-w-0">My Location</span>
-          <button
-            type="button"
-            onClick={() => { setOrigin(null); setRoute(null); }}
-            className="ml-auto text-slate-400 hover:text-slate-700 shrink-0"
-            aria-label="Clear origin"
-          >
-            <X className="h-4 w-4" />
-          </button>
+  return (
+    <div className="space-y-4 pt-14 lg:pt-0">
+      {/* Floating top-left button — logomark on top-level entry,
+          back chevron when navigated in from another page. Mobile
+          only; desktop uses the AppLayout sidebar's branding and
+          notification bell. EID §3.1 / §3.8. The 36px circle has
+          ~44px effective tap target via the surrounding p-1 span;
+          accessibility note about sub-44 visible size is in the
+          checkpoint-2 verification §2. */}
+      <motion.div
+        className="lg:hidden fixed top-4 left-4 z-40 pointer-events-none"
+        initial={false}
+        animate={{ y: showFloatingChrome ? 0 : -80, opacity: showFloatingChrome ? 1 : 0 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            if (isDeepEntry) window.history.back();
+            // logomark tap is a no-op for now; refresh-to-default
+            // semantics land in Phase B per EID §3.8.
+          }}
+          aria-label={isDeepEntry ? "Back" : "WashBuddy home"}
+          aria-hidden={!showFloatingChrome}
+          tabIndex={showFloatingChrome ? 0 : -1}
+          className="pointer-events-auto h-9 w-9 rounded-full bg-white/95 backdrop-blur-md flex items-center justify-center shadow-[0_2px_6px_rgba(15,23,42,0.10)] border border-slate-200/80 hover:bg-white transition-colors"
+        >
+          {isDeepEntry ? (
+            <ArrowLeft className="h-5 w-5 text-slate-700" />
+          ) : (
+            <Droplets className="h-5 w-5 text-blue-600" />
+          )}
+        </button>
+      </motion.div>
+
+      {/* Floating top-right cluster — interim Phase A placement
+          for the bell + hamburger trigger while the AppLayout
+          mobile header is suppressed. Hides on scroll-down (Bug B
+          / Checkpoint 6) so it doesn't float over result cards
+          when the user is reading the list. Phase B integrates
+          these into the unified collapsed/expanded header. */}
+      <motion.div
+        className="lg:hidden fixed top-4 right-4 z-40 flex items-center gap-1 pointer-events-none"
+        initial={false}
+        animate={{ y: showFloatingChrome ? 0 : -80, opacity: showFloatingChrome ? 1 : 0 }}
+        transition={{ duration: 0.2, ease: "easeOut" }}
+        aria-hidden={!showFloatingChrome}
+      >
+        <div className="pointer-events-auto bg-white/95 backdrop-blur-md rounded-full shadow-[0_2px_6px_rgba(15,23,42,0.10)] border border-slate-200/80 p-1">
+          <NotificationBell />
         </div>
-      ) : (
-        <div className="relative">
-          <CityAutocomplete
-            value={origin}
-            onChange={(c) => {
-              setOrigin(c);
-              setRoute(null);
-              // Symmetric auto-fire with the To row: when the
-              // user commits a city from autocomplete and a
-              // destination is already set, recompute the route
-              // immediately. setTimeout(0) lets React commit the
-              // setOrigin batch first so planRouteRef reads the
-              // freshest closure.
-              if (c && destination) {
-                setTimeout(() => planRouteRef.current?.(c, destination), 0);
-              }
-            }}
-            placeholder="Start city..."
-            exclude={destination}
-            userLat={origin?.lat ?? destination?.lat}
-            userLng={origin?.lng ?? destination?.lng}
-          />
-          {!origin && geoStatus !== "unavailable" && (
+        <button
+          type="button"
+          onClick={mobileMenu.toggle}
+          aria-label={mobileMenu.isOpen ? "Close menu" : "Open menu"}
+          tabIndex={showFloatingChrome ? 0 : -1}
+          className="pointer-events-auto h-9 w-9 rounded-full bg-white/95 backdrop-blur-md flex items-center justify-center shadow-[0_2px_6px_rgba(15,23,42,0.10)] border border-slate-200/80 hover:bg-white transition-colors"
+        >
+          {mobileMenu.isOpen ? (
+            <X className="h-5 w-5 text-slate-700" />
+          ) : (
+            <Menu className="h-5 w-5 text-slate-700" />
+          )}
+        </button>
+      </motion.div>
+
+      <div className="flex items-center gap-3 max-w-full">
+        <div className="min-w-0 max-w-full">
+          <ActiveVehiclePill />
+        </div>
+      </div>
+
+      {/* Slim header — collapsed when a route is planned, full form
+          otherwise. Drops the gradient hero + verbose copy ("Plan
+          your trip and find wash locations…") that ate ~200px above
+          the fold on mobile. */}
+      {/* The autocomplete dropdown portals to <body> at z-[1000]
+          (Checkpoint 5, Approach A), so neither search Card
+          variant needs an elevated stacking context. Reverting
+          the Checkpoint 4 `relative z-[1000]` resolves the
+          cascade where the Card painted over the notifications
+          dropdown, the active vehicle picker, and any other
+          fixed-position dropdown opened from outside the Card. */}
+      {!formCollapsed || !route ? (
+        <Card className="p-4 sm:p-5 space-y-3">
+          <div className="flex items-end gap-2 sm:gap-3 flex-col sm:flex-row">
+            <div className="flex-1 w-full min-w-0">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 block">From</label>
+              {origin?.name === "My Location" ? (
+                <div className="h-12 rounded-xl bg-slate-50 border-2 border-slate-200 flex items-center px-3 gap-2">
+                  <Crosshair className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span className="text-slate-900 text-sm font-medium truncate min-w-0">My Location</span>
+                  <button
+                    type="button"
+                    onClick={() => { setOrigin(null); setRoute(null); }}
+                    className="ml-auto text-slate-400 hover:text-slate-700 shrink-0"
+                    aria-label="Clear origin"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <CityAutocomplete
+                    value={origin}
+                    onChange={(c) => {
+                      setOrigin(c);
+                      setRoute(null);
+                      // Symmetric auto-fire with the To field — when
+                      // the user picks an origin from autocomplete and
+                      // a destination is already set, recompute the
+                      // route immediately. setTimeout(0) lets React
+                      // commit the setOrigin batch first so
+                      // planRouteRef.current reads the freshest closure
+                      // (same pattern as the To field below). Free
+                      // typing without selecting from autocomplete
+                      // does NOT enter this path — onChange only fires
+                      // when CityAutocomplete commits a selection
+                      // (or null on clear).
+                      if (c && destination) {
+                        setTimeout(() => planRouteRef.current?.(c, destination), 0);
+                      }
+                    }}
+                    placeholder="Start city..."
+                    exclude={destination}
+                    userLat={origin?.lat ?? destination?.lat}
+                    userLng={origin?.lng ?? destination?.lng}
+                  />
+                  {!origin && geoStatus !== "unavailable" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (geoStatus === "denied") {
+                          setRouteError("Location access was denied. Please enable location in your browser settings.");
+                          return;
+                        }
+                        navigator.geolocation.getCurrentPosition(
+                          async (pos) => {
+                            const { latitude, longitude } = pos.coords;
+                            const areaName = await reverseGeocode(latitude, longitude);
+                            const myLoc = makeMyLocationOption(latitude, longitude, areaName);
+                            setOrigin(myLoc);
+                            setGeoStatus("granted");
+                            setRoute(null);
+                            // Symmetric with From's autocomplete onChange
+                            // (2g-2.1 commit 944fb08): when the user
+                            // commits a new origin via the geolocation
+                            // crosshair AND a destination is already set,
+                            // recompute the route immediately. setTimeout(0)
+                            // lets React commit the setOrigin batch first
+                            // so planRouteRef.current reads the freshest
+                            // closure.
+                            if (destination) {
+                              setTimeout(() => planRouteRef.current?.(myLoc, destination), 0);
+                            }
+                          },
+                          () => {
+                            setGeoStatus("denied");
+                            setRouteError("Could not access your location. Please enter a city manually.");
+                          },
+                          { timeout: 8000 }
+                        );
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-primary transition-colors"
+                      title="Use my location"
+                      aria-label="Use my current location"
+                    >
+                      <Crosshair className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
             <button
               type="button"
-              onClick={() => {
-                if (geoStatus === "denied") {
-                  setRouteError("Location access was denied. Please enable location in your browser settings.");
-                  return;
-                }
-                navigator.geolocation.getCurrentPosition(
-                  async (pos) => {
-                    const { latitude, longitude } = pos.coords;
-                    const areaName = await reverseGeocode(latitude, longitude);
-                    const myLoc = makeMyLocationOption(latitude, longitude, areaName);
-                    setOrigin(myLoc);
-                    setGeoStatus("granted");
-                    setRoute(null);
-                    if (destination) {
-                      setTimeout(() => planRouteRef.current?.(myLoc, destination), 0);
-                    }
-                  },
-                  () => {
-                    setGeoStatus("denied");
-                    setRouteError("Could not access your location. Please enter a city manually.");
-                  },
-                  { timeout: 8000 }
-                );
-              }}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-primary transition-colors"
-              title="Use my location"
-              aria-label="Use my current location"
+              onClick={handleSwap}
+              className="h-10 w-10 sm:h-10 sm:w-10 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors shrink-0 self-end mb-0 sm:mb-1"
+              title="Swap"
+              aria-label="Swap origin and destination"
             >
-              <Crosshair className="h-4 w-4" />
+              <ArrowRight className="h-4 w-4 text-slate-600 rotate-90 sm:rotate-0" />
             </button>
+
+            <div className="flex-1 w-full min-w-0">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 block">To</label>
+              <CityAutocomplete
+                value={destination}
+                onChange={(c) => {
+                  setDestination(c);
+                  setRoute(null);
+                  if (c && origin) {
+                    setTimeout(() => planRouteRef.current?.(origin, c), 0);
+                  }
+                }}
+                placeholder="Destination city..."
+                exclude={origin}
+                userLat={origin?.lat ?? destination?.lat}
+                userLng={origin?.lng ?? destination?.lng}
+              />
+            </div>
+
+            {/* Demoted secondary affordance now that From + To both
+                auto-fire planRoute on autocomplete selection. The
+                button stays visible for keyboard submitters and for
+                users who type free text without picking a suggestion.
+                Outline variant + min-h-11 keeps the tap target above
+                the 44px iOS floor while reading as quieter than the
+                prior filled-primary 48px button. The functional shape
+                is unchanged — onClick still wraps in an arrow so the
+                MouseEvent fix from 2g-2 (commit 50b4211) holds. */}
+            <Button
+              variant="outline"
+              size="md"
+              className="min-h-11 rounded-xl px-5 w-full sm:w-auto shrink-0"
+              onClick={() => handlePlanRoute()}
+              disabled={!origin || !destination || isRouting}
+            >
+              {isRouting ? (
+                <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Planning...</>
+              ) : (
+                <><Navigation className="h-4 w-4 mr-2" /> Plan Route</>
+              )}
+            </Button>
+          </div>
+          {geoStatus === "pending" && !initialOrigin && (
+            <div className="flex items-center gap-1.5 text-slate-500 text-xs">
+              <Loader2 className="h-3 w-3 animate-spin" /> Detecting location...
+            </div>
           )}
-        </div>
-      )}
-    </div>
-  );
-
-  const swapButton = (
-    <button
-      type="button"
-      onClick={handleSwap}
-      className="h-9 w-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition-colors shrink-0"
-      title="Swap"
-      aria-label="Swap origin and destination"
-    >
-      <ArrowRight className="h-4 w-4 text-slate-600 rotate-90" />
-    </button>
-  );
-
-  const toRow = (
-    <div>
-      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 block">To</label>
-      <CityAutocomplete
-        value={destination}
-        onChange={(c) => {
-          setDestination(c);
-          setRoute(null);
-          if (c && origin) {
-            setTimeout(() => planRouteRef.current?.(origin, c), 0);
-          }
-        }}
-        placeholder="Destination city..."
-        exclude={origin}
-        userLat={origin?.lat ?? destination?.lat}
-        userLng={origin?.lng ?? destination?.lng}
-      />
-    </div>
-  );
-
-  // Phase B CP4 — read-only time-row chip. Round 4 wires the real
-  // arrival-time picker; until then a muted chip with a Lock icon
-  // makes the disabled-affordance shape obvious so users don't tap
-  // expecting interactivity. Copy reflects active mode: "Time:
-  // now" in nearby (no destination set), "Arrive: now" in route
-  // (destination set).
-  const timeRow = (
-    <div>
-      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1 block">When</label>
-      <div
-        aria-disabled="true"
-        title="Arrival-time picker coming in Round 4"
-        className="h-12 rounded-xl bg-slate-50 border-2 border-slate-200 flex items-center px-3 gap-2 cursor-not-allowed"
-      >
-        <Clock className="h-4 w-4 text-slate-400 shrink-0" />
-        <span className="text-slate-500 text-sm truncate min-w-0">
-          {mode === "route" ? "Arrive: now" : "Time: now"}
-        </span>
-        <Lock className="h-3 w-3 text-slate-400 shrink-0 ml-auto" aria-hidden="true" />
-      </div>
-    </div>
-  );
-
-  // Inline-text Plan Route affordance for manual-text submitters
-  // who didn't pick from autocomplete (the auto-fire path covers
-  // autocomplete-commit submitters). Quieter than Phase A's primary-
-  // CTA Plan Route Button — visual reference §5.2 doesn't show a
-  // prominent CTA, but removing it entirely would break the manual-
-  // text flow. Visible only when both origin and destination are
-  // set but no route is currently computed (i.e., the user typed
-  // free text without committing autocomplete suggestions).
-  const planRouteAffordance = origin && destination && !route ? (
-    <button
-      type="button"
-      onClick={() => handlePlanRoute()}
-      disabled={isRouting}
-      className="inline-flex items-center gap-1.5 text-sm text-blue-700 font-medium hover:text-blue-800 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors"
-    >
-      {isRouting ? (
-        <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Planning…</>
+          {routeError && (
+            <p className="text-red-600 text-sm">{routeError}</p>
+          )}
+        </Card>
       ) : (
-        <><Navigation className="h-3.5 w-3.5" /> Plan route</>
+        // Collapsed summary — shows BOTH from and to (the prior shape
+        // hid From in the collapsed state, which left the user
+        // wondering "did I plan this trip?"). Edit reopens the full
+        // form for changes.
+        <Card className="p-3 sm:p-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex-1 min-w-0">
+              {/* truncate sits on the <p> (block-level) so a long
+                  label gets ellipsis. Inner <span>'s `truncate` on
+                  inline elements is a no-op — that was the bug
+                  where long destinations collided with the Edit
+                  button (Checkpoint 5). The outer flex item has
+                  min-w-0; Edit button has shrink-0. */}
+              <p className="text-xs text-slate-500 leading-tight truncate">
+                <span className="font-semibold text-slate-700">From:</span>{" "}
+                {origin?.name === "My Location" ? "My Location" : (origin?.label || "—")}
+              </p>
+              <p className="text-xs text-slate-500 leading-tight mt-0.5 truncate">
+                <span className="font-semibold text-slate-700">To:</span>{" "}
+                {destination?.label || "—"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setFormCollapsed(false)}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors shrink-0"
+            >
+              <Pencil className="h-3.5 w-3.5" /> Edit
+            </button>
+          </div>
+        </Card>
       )}
-    </button>
-  ) : null;
 
-  const headerStatusMessage = (
-    <>
-      {geoStatus === "pending" && !initialOrigin && (
-        <div className="flex items-center gap-1.5 text-slate-500 text-xs">
-          <Loader2 className="h-3 w-3 animate-spin" /> Detecting location...
-        </div>
-      )}
-      {routeError && (
-        <p className="text-red-600 text-sm">{routeError}</p>
-      )}
-    </>
-  );
-
-  return (
-    <div className="space-y-4">
-      <FindAWashHeader
-        vehiclePill={<ActiveVehiclePill />}
-        fromRow={fromRow}
-        swapButton={swapButton}
-        toRow={toRow}
-        timeRow={timeRow}
-        planRouteAffordance={planRouteAffordance}
-        statusMessage={headerStatusMessage}
-      />
-
-      {/* Trip-metrics strip — page-level decoration below the
-          header. Visible only when a route is planned. Round 2 may
-          relocate this into the bottom sheet's peek-state header
-          without touching the header component. */}
+      {/* Compact metrics strip — single inline row replaces the three
+          icon cards. Only shows when a route is planned. */}
       {route && (
         <p className="text-xs sm:text-sm text-slate-600 px-1">
           <span className="font-semibold text-slate-900">{route.distanceKm} km</span>
@@ -2032,10 +2173,9 @@ export default function FindAWash() {
       <div
         className={
           mapExpanded
-            ? "fixed inset-0 bg-white p-2"
+            ? "fixed inset-0 z-50 bg-white p-2"
             : "relative"
         }
-        style={mapExpanded ? { zIndex: "var(--z-modal)" } as React.CSSProperties : undefined}
       >
         <div
           ref={mapRef}
@@ -2044,23 +2184,23 @@ export default function FindAWash() {
             height: mapExpanded ? "calc(100vh - 16px)" : "55vh",
             minHeight: mapExpanded ? undefined : "320px",
             maxHeight: mapExpanded ? undefined : "640px",
-            zIndex: "var(--z-map)",
-          } as React.CSSProperties}
+            zIndex: 0,
+          }}
         />
         <button
           type="button"
           onClick={() => setMapExpanded((v) => !v)}
-          className="absolute top-3 right-3 h-10 w-10 rounded-xl bg-white shadow-md border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
-          style={{ zIndex: "var(--z-map-control)" } as React.CSSProperties}
+          className="absolute top-3 right-3 z-[401] h-10 w-10 rounded-xl bg-white shadow-md border border-slate-200 hover:bg-slate-50 flex items-center justify-center"
           aria-label={mapExpanded ? "Collapse map" : "Expand map"}
         >
           {mapExpanded ? <Minimize2 className="h-4 w-4 text-slate-700" /> : <Maximize2 className="h-4 w-4 text-slate-700" />}
         </button>
-        {/* "Search this area" floating pill (EID §3.2). Centered
-            horizontally, above-map at top-3. Visible only when
-            the in-bounds ratio drops below 0.5. Phase B CP4
-            formalized the z-index per EID §3.2's `--z-map-cta`
-            (900) tier. */}
+        {/* Phase B CP3 — "Search this area" floating pill (EID §3.2).
+            Centered horizontally, above-map at top-3. Visible only
+            when the in-bounds ratio drops below 0.5. fade + slide-down
+            on appear via framer-motion's AnimatePresence.
+            TODO(round-3+): formalize the EID §3.2 z-index variables
+            and replace `z-30` with `--z-map-cta: 900`. */}
         <AnimatePresence>
           {showSearchAreaButton && (
             <motion.div
@@ -2069,8 +2209,7 @@ export default function FindAWash() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.18, ease: "easeOut" }}
-              style={{ zIndex: "var(--z-map-cta)" } as React.CSSProperties}
-              className="absolute top-3 left-1/2 -translate-x-1/2"
+              className="absolute top-3 left-1/2 -translate-x-1/2 z-30"
             >
               <button
                 type="button"
