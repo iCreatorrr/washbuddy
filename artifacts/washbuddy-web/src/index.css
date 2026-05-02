@@ -29,6 +29,33 @@
   /* WashBuddy Premium SaaS Palette */
   --background: 210 33% 99%; /* Slate 50 tint */
   --foreground: 222 47% 11%; /* Slate 900 */
+
+  /* z-index hierarchy per EID §3.2 (formalized in Phase B CP4).
+     Every z-index reference in find-a-wash.tsx and any future
+     map-surface page should flow through these variables instead
+     of magic numbers. The layering is intentional: pins paint
+     above the route line; map controls above pins; "Search this
+     area" CTA above controls; the page header above the map
+     entirely; sheet + modal layers stack on top.
+
+     Modal overlay matches modal sheet at 1100/1200 — overlay
+     dims the page beneath the modal, modal sits atop the dim.
+     Portaled autocomplete dropdown lands at --z-modal (1200)
+     because it's a full-attention overlay rendered into <body>.
+     A future --z-popover tier can fit between --z-header and
+     --z-sheet if non-modal popovers are introduced. */
+  --z-map: 0;
+  --z-route: 100;
+  --z-pin-low: 400;
+  --z-pin-mid: 500;
+  --z-pin-top: 600;
+  --z-pin-label: 700;
+  --z-map-control: 800;
+  --z-map-cta: 900;
+  --z-header: 1000;
+  --z-sheet: 1100;
+  --z-modal-overlay: 1100;
+  --z-modal: 1200;
   
   --card: 0 0% 100%;
   --card-foreground: 222 47% 11%;
