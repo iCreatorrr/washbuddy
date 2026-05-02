@@ -1031,14 +1031,25 @@ export default function FindAWash() {
       .sort((a, b) => a.distFromOrigin - b.distFromOrigin);
   }, [route, sampledRoutePoints, allLocations, origin?.lat, origin?.lng]);
 
-  // Phase B CP3 — when the user taps "Search this area", the
-  // displayed result set shifts from origin-anchored / route-
-  // anchored filtering to a bounds-anchored filter. The button
-  // doesn't issue a new server query — the backend already
-  // returns the full visible-providers set; CP3 just shifts which
-  // client-side filter runs. searchBoundsAnchor is null when the
-  // user is in the default origin/route mode and a literal bounds
-  // tuple `[[s, w], [n, e]]` once they've committed a map area.
+  // Phase B CP3 v2 — when the user taps "Search this area", the
+  // result list does NOT filter; it re-ranks. searchBoundsAnchor
+  // null means rank by distance from origin / route (existing
+  // behavior, baked into nearbyLocations / initialLocations sort
+  // upstream). searchBoundsAnchor set to a bounds tuple
+  // `[[s, w], [n, e]]` shifts the ranking criterion to distance
+  // from the bounds center; the displayLocations set itself stays
+  // the full visible-providers set so nothing disappears. The
+  // visual signal that "this area is more relevant" comes from
+  // classifyPin's inVisibleBounds rule (pins outside bounds render
+  // gray low-tier) — see the marker creation effect below.
+  //
+  // CP3 v1 (commit a6ee2b9) implemented this as a filter, which
+  // produced three user-visible failures: empty-result with no
+  // message, tier-signal collapse to "best of what's left", and
+  // out-of-bounds providers disappearing entirely. EID §3.2's
+  // "re-queries relative to visible bounds" wording was the spec
+  // defect that misled the implementation. Both spec and code
+  // corrected in CP3 v2.
   const [searchBoundsAnchor, setSearchBoundsAnchor] = useState<L.LatLngBoundsLiteral | null>(null);
 
   // Track in-bounds fraction of the currently-displayed locations.
@@ -1048,15 +1059,38 @@ export default function FindAWash() {
   // visible on screen, signalling that the map and the list disagree.
   const [inBoundsRatio, setInBoundsRatio] = useState(1);
 
+  // CP3 v2: displayLocations is the canonical render set — full
+  // route/nearby base list, no bounds filter. Re-ranking under
+  // search-this-area happens in `rankedLocations` below.
   const displayLocations = useMemo(() => {
-    const baseList = route ? nearbyLocations : initialLocations;
-    if (!searchBoundsAnchor) return baseList;
+    return route ? nearbyLocations : initialLocations;
+  }, [route, nearbyLocations, initialLocations]);
+
+  // Phase B CP3 v2 — re-rank when the user has anchored the
+  // search to a map area. Sort by haversine distance from the
+  // bounds center; stable ordering preserves origin-distance ties.
+  // When searchBoundsAnchor is null, this is identity over
+  // displayLocations and the existing distFromOrigin order
+  // (baked into nearbyLocations / initialLocations) drives
+  // rankIdx in the marker effect. Tap-locked re-ranking — the
+  // marker effect doesn't depend on a moveend/zoomend counter, so
+  // panning after tapping doesn't reshuffle tiers; the bounds
+  // anchor is the user's "rank from here" gesture.
+  const rankedLocations = useMemo(() => {
+    if (!searchBoundsAnchor) return displayLocations;
     const [[south, west], [north, east]] = searchBoundsAnchor;
-    return baseList.filter((l) => {
-      if (l.latitude == null || l.longitude == null) return false;
-      return l.latitude >= south && l.latitude <= north && l.longitude >= west && l.longitude <= east;
+    const centerLat = (south + north) / 2;
+    const centerLng = (west + east) / 2;
+    return [...displayLocations].sort((a, b) => {
+      const aDist = a.latitude != null && a.longitude != null
+        ? haversineKm(centerLat, centerLng, a.latitude, a.longitude)
+        : Infinity;
+      const bDist = b.latitude != null && b.longitude != null
+        ? haversineKm(centerLat, centerLng, b.latitude, b.longitude)
+        : Infinity;
+      return aDist - bDist;
     });
-  }, [route, nearbyLocations, initialLocations, searchBoundsAnchor]);
+  }, [displayLocations, searchBoundsAnchor]);
 
   // Origin / destination / route changes reset the search-this-area
   // anchor — switching context means the user is no longer asking
@@ -1225,11 +1259,19 @@ export default function FindAWash() {
       endpointsRef.current = [myMarker];
     }
 
-    // displayLocations applies the bounds filter when
-    // searchBoundsAnchor is set; otherwise it's the route/nearby
-    // base list. Same set the result cards render — keeps marker
-    // layer and list in lockstep.
-    const locsToShow = displayLocations;
+    // CP3 v2: rankedLocations is the rank-ordered set used for
+    // tier classification. Identity over displayLocations when no
+    // search-this-area is active; sorted by distance from bounds
+    // center when the user has tapped "Search this area." Same
+    // physical set as displayLocations either way — nothing
+    // disappears.
+    const locsToShow = rankedLocations;
+    // Snapshot of the visible bounds at marker-creation time. Used
+    // to flag pins outside the viewport for the inVisibleBounds
+    // tier-demotion rule (EID §3.5). Tap-locked: this snapshot is
+    // taken once per marker effect run, not continuously, so
+    // panning after re-ranking doesn't reclassify pins.
+    const visibleBounds = map.getBounds();
 
     locsToShow.forEach((loc, rankIdx) => {
       if (loc.latitude == null || loc.longitude == null) return;
@@ -1244,11 +1286,13 @@ export default function FindAWash() {
       // compute price; route-mode labels wait on Round 4's real
       // detour endpoint.
       const incompatible = (loc as any).fitsActiveVehicle === false;
+      const inVisibleBounds = visibleBounds.contains([loc.latitude, loc.longitude]);
       const tier = classifyPin({
         rankIdx,
         totalRanked: locsToShow.length,
         mode,
         fitsActiveVehicle: !incompatible,
+        inVisibleBounds,
       });
       const icon = buildWashPinDivIcon({ tier, isSelected: false });
       // Stash the tier on marker options so the cluster group's
@@ -1438,7 +1482,7 @@ export default function FindAWash() {
         map.setView([origin.lat, origin.lng], 10, { animate: true });
       }
     }
-  }, [route, origin, destination, nearbyLocations, initialLocations, displayLocations, searchBoundsAnchor, setNavLocation, etas]);
+  }, [route, origin, destination, nearbyLocations, initialLocations, displayLocations, rankedLocations, searchBoundsAnchor, setNavLocation, etas]);
 
   // Build a location detail URL with optional return-to-route + user coords.
   // Uses URLSearchParams so separators (? vs &) are always correct, even when
@@ -1617,17 +1661,33 @@ export default function FindAWash() {
     // in sync with whatever the marker effect last produced. No
     // marker layer teardown — only `setIcon` swaps run here, which
     // is the Phase A invariant Phase B preserves.
-    const selLocs = displayLocations;
+    // CP3 v2: selection-effect tier reclassification mirrors the
+    // marker effect's rank ordering. When search-this-area is
+    // active, rankedLocations sorts by distance from bounds
+    // center, so tier swaps on selection use the same rank context
+    // as the original render. Without this, tapping a pin would
+    // re-classify it via the origin-distance rank from
+    // displayLocations and inconsistently swap between top/mid.
+    const selLocs = rankedLocations;
+    // CP3 v2: visibleBounds snapshot for the inVisibleBounds tier
+    // input. Read once per selection-effect run so all markers
+    // reclassify against the same bounds — same pattern as the
+    // marker creation effect's tap-locked snapshot.
+    const visibleBounds = map.getBounds();
     markersByIdRef.current.forEach((marker, id) => {
       const rankIdx = selLocs.findIndex((l) => l.id === id);
       const loc = rankIdx >= 0 ? selLocs[rankIdx] : null;
       if (!loc) return;
       const fits = (loc as any).fitsActiveVehicle !== false;
+      const inVisibleBounds = loc.latitude != null && loc.longitude != null
+        ? visibleBounds.contains([loc.latitude, loc.longitude])
+        : undefined;
       const tier = classifyPin({
         rankIdx,
         totalRanked: selLocs.length,
         mode,
         fitsActiveVehicle: fits,
+        inVisibleBounds,
       });
       // Incompatible pins never get the selected ring — the visual
       // explainer modal handles "you tapped this and it's not
@@ -1698,7 +1758,7 @@ export default function FindAWash() {
     } else {
       finishSelection();
     }
-  }, [selectedLocationId, displayLocations, mode]);
+  }, [selectedLocationId, rankedLocations, mode]);
 
   // Tap on empty map area → deselect. Leaflet's 'click' fires only
   // on tap (not drag), and individual marker clicks call

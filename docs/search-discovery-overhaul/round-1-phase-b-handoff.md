@@ -385,3 +385,79 @@ Diagnostic `[diag-hotfix]` console.logs from step 1 removed in this same commit.
 - **The bug had been latent since the endpoint shipped.** Prisma Decimal → JSON string is documented behavior, but it's quiet until a consumer treats the value as a strict number type. JavaScript's lenient arithmetic coercion (`"43.62" * Math.PI / 180` works) hid it through Phase A's distance math. The first strict-type consumer in this codebase was `leaflet.markercluster`'s bounds aggregation — a transitive dep added in CP2, three rounds after the wire-format mismatch first appeared. Bugs that survive this many code paths are a reminder to type-check at every boundary, not just where a strict-type consumer lives.
 - **The CP3.5 misdiagnosis was unusually convincing.** The trace literally matched a documented Vite + Leaflet failure mode. The standard fix (dedupe + optimizeDeps.include) was applied. The session's symptoms cleared after a `.vite` cache clear. Three independent signals all pointing at "duplicate-copy issue" — but the cache clear had cleared a *different* stale state (the stale TS build artifact, or a stale pre-bundle that happened to mask the real bug for a few minutes), not the duplicate-copy condition. The lesson: when the standard fix's verification has a step that incidentally clears unrelated state, you can't tell from the symptom-clearing alone whether the fix actually fixed anything. Capture the trace's distinguishing details (version hashes, frame contents) before applying the fix; capture them again after.
 - **Lesson learned for future runtime-tool diagnoses.** Don't trust runtime-environment-tool diagnoses without verifying against actual stack traces. Always inspect the trace before pattern-matching. The Replit agent's pattern-match was reasonable given the symptoms it had; my acceptance of it without re-verifying when the crash recurred was the institutional failure. Step 1 of this hotfix (the diagnostic console.log patch) is the template for future similar bug investigations — capture ground truth before proposing a fix.
+
+---
+
+## Checkpoint 3 v2 — "Search this area" re-rank (not filter)
+
+**Commit:** `<this commit>`. Single commit per the prompt — EID §3.2 spec phrasing fix and the code change ship together as one logical unit ("fix the spec that misled the implementation, fix the implementation").
+
+### What was actually wrong (CP3 v1 retro)
+
+CP3 v1 (`a6ee2b9`) implemented "Search this area" as a **filter** on `displayLocations` — when `searchBoundsAnchor` was set, the memo narrowed the result list to providers inside the visible bounds. Three user-visible failures from Replit testing:
+
+1. **Empty result with no message.** Tapping the button in a region with no providers silently dropped `displayLocations.length` to 0; pin layer disappeared, list cleared, no empty state. Looked broken.
+2. **Tier signal collapsed to "best of what's left."** With only ~5–10 providers surviving the filter, `classifyPin`'s top-tier cutoff (`Math.min(3, Math.ceil(totalRanked * 0.25))`) promoted mid-tier pins to top-tier purely because they were now the only candidates. The TOP signal stopped meaning "best fit for the driver" and started meaning "best of what's left after filtering."
+3. **Locations along the rest of the route disappeared.** Tap "Search this area" in one region of a long Toronto → Buffalo route, then zoom out — providers along the rest of the corridor were gone. The user became blind to options they could still consider.
+
+Root cause traced to EID §3.2's wording: "re-queries locations relative to visible bounds (not original origin/route); button disappears." The phrase "re-queries" reasonably reads as "narrow to this region." But the user mental model — verified across category-leading apps (Google Maps, Yelp, Tripadvisor, Airbnb, PlugShare) — is "re-rank for this area," not "filter to this area."
+
+### What shipped (CP3 v2)
+
+**[02-eid.md §3.2](docs/search-discovery-overhaul/02-eid.md)** — the "Search this area" subsection rewritten. Before:
+
+> Tap re-queries locations relative to visible bounds (not original origin/route); button disappears.
+
+After (key bullets):
+
+> Tap **re-ranks** existing results relative to the visible map area — it does not filter or re-query. All providers stay visible on the map and in the list both before and after tapping. The ranking criterion shifts from distance-from-origin (or distance-along-route) to distance-from-bounds-center, which feeds `rankIdx` into `classifyPin`.
+>
+> Pins that fall outside the current visible bounds render at low-tier (gray) via `classifyPin`'s `inVisibleBounds` rule, so the visual answers "what's most relevant for this area" without hiding anything. The user can still see and select gray pins; they just don't compete for top-tier.
+>
+> Button hides on tap. The in-bounds ratio recomputes against the same set (now re-ordered) on the next moveend/zoomend; the button reappears only if the user pans/zooms enough to disagree with the new ranking again.
+>
+> **Mental model:** "tell me about this area" (re-rank) — the standard map-discovery pattern across category-leading apps. Not "show only this area" (filter).
+
+**[find-a-wash.tsx](artifacts/washbuddy-web/src/pages/customer/find-a-wash.tsx)** — three structural changes:
+
+1. **`displayLocations` memo no longer filters.** Returns the full `route ? nearbyLocations : initialLocations` set unchanged. `searchBoundsAnchor` no longer in the memo's deps. The bounds-clear-on-context-change effect still fires (origin/destination/route changes still reset `searchBoundsAnchor` to null) — that part is unchanged.
+
+2. **New `rankedLocations` memo.** Sorts `displayLocations` by haversine distance from the bounds center when `searchBoundsAnchor` is set; identity over `displayLocations` otherwise. Stable sort preserves the existing distFromOrigin order on ties. Tap-locked: only re-derives when `searchBoundsAnchor` changes or `displayLocations` itself changes — panning after tapping doesn't reshuffle tiers.
+
+3. **`classifyPin`'s `inVisibleBounds` input lights up.** The marker creation effect snapshots `map.getBounds()` once per run and passes `inVisibleBounds: bounds.contains([loc.latitude, loc.longitude])` per pin. The selection effect does the same per pin during icon-rebuild on selection change. CP1's audit deferred this input pending CP3; CP3 v2 closes the deferred audit point.
+
+The marker effect's `locsToShow` and the selection effect's `selLocs` both switched from `displayLocations` → `rankedLocations` so tier classification (rank-based) and selection-time tier reclassification (rank-based) reflect the active anchor.
+
+The `searchBoundsAnchor` declaration comment block updated to describe re-rank semantics; the old "shifts which client-side filter runs" wording removed.
+
+### Spec sections governing
+- [02-eid.md §3.2](docs/search-discovery-overhaul/02-eid.md) — corrected in this commit.
+- [02-eid.md §3.5](docs/search-discovery-overhaul/02-eid.md) — `classifyPin`'s `inVisibleBounds` rule (low-tier when false). Already specified; CP3 v2 lights it up at the host call site.
+- CP1 handoff section above — the "future-compatible classifier signature" decision. The deferred `inVisibleBounds` audit point closes here.
+
+### Verification
+- TypeScript: **21 errors**, baseline holds. Zero new in either touched file.
+- Production build: see hotfix verification — local Windows env still environmentally broken from CP2's pnpm/Windows native-deps quirk; Replit's Linux env is unaffected.
+- Hotfix stays fixed: `normalizeLocationsResponse` is upstream of `displayLocations` / `rankedLocations`; CP3 v2 touches neither the fetch path nor the response normalizer.
+
+### Decisions made
+- **Tap-locked re-ranking (Option A in the prompt), not continuous (Option B).** The marker effect doesn't depend on a `boundsVersion` counter that increments on moveend/zoomend; tier recomputes only when `searchBoundsAnchor` changes (i.e., on tap). User mental model: "Search this area" is the *anchor here* gesture; subsequent panning is exploration, not re-ranking.
+- **Haversine over Euclidean for the rank sort.** Sort precision doesn't matter — we're ordering, not measuring. But the existing `haversineKm` helper at the top of find-a-wash.tsx is already in use; reusing it costs nothing and is more honest about what we're computing.
+- **`rankedLocations` is a sibling derivation, not a replacement for `displayLocations`.** Per the prompt's "don't shadow it with a 'filtered display set'" rule. `displayLocations` stays the canonical render set; the result-card list and the in-bounds-ratio calculation continue to use it.
+- **`inVisibleBounds` snapshot once per effect run, not per pin re-classification.** Marker creation reads `map.getBounds()` once at the top of the locsToShow loop; selection effect reads it once at the top of the markersByIdRef loop. Tap-locked semantics — bounds at marker-creation time anchor the visual classification until the next user-driven re-render.
+
+### Open items for next round (Phase B CP4)
+- **Header replacement** per EID §3.1 — last and most structural CP of Phase B. Unchanged scope from the CP3 v1 handoff. Full audit gate.
+
+### Anything that surprised me
+- **The spec phrasing was the load-bearing defect.** "re-queries locations relative to visible bounds" is technically accurate (the implementation could read it as "re-rank by distance to the new center") but the natural-language reading is "narrow to this region." Specs that depend on a precise distinction between "re-rank" and "filter" should call out the distinction explicitly, not leave it implicit in a verb choice. This is an institutional reminder to validate spec phrasing against the implementer's first-pass reading.
+- **CP1's future-compatible classifier signature paid off.** `inVisibleBounds?: boolean` was added optionally during CP1's audit, with the deferral note "CP3 wires this." Two checkpoints later, lighting it up was a one-line change at the call site — no signature break, no module restructure. Worth doing more of: when adding a new classifier or pure-function helper, accept the optional inputs the spec calls out, even if the immediate consumer doesn't supply them.
+- **Lessons learned for spec validation.** Implementation should validate user mental model against a handful of category-leading apps before locking spec phrasing. The "category-leading apps re-rank, don't filter" insight should have been in PRD/EID research, not surfaced during implementation. For Phase C and beyond: when a spec describes a user-facing affordance, the audit step should explicitly ask "does this match what the user expects from comparable apps?" — and answer with at least 3 specific examples — before locking the implementation approach.
+
+### Replit canary protocol
+1. Set destination — no crash (hotfix still holds).
+2. Pan map ~200km from results — "Search this area" appears.
+3. Tap the button — button hides, **all locations stay visible on the map and in the list**, pins outside the bounds dim to gray low-tier, pins inside re-rank by distance from bounds center.
+4. Zoom out — previously-out-of-bounds providers stay visible (gray low-tier from where they were). Critical regression check: nothing disappears.
+5. Tap an out-of-bounds (gray) pin — selection works, popup opens, gold ring on the gray pin (the selected ring is independent of tier).
+6. Set a different destination — `searchBoundsAnchor` clears via the bounds-clear-on-context-change effect, re-ranking resets to origin distance.

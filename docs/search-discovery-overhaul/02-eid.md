@@ -213,9 +213,12 @@ Existing Leaflet map; this work doesn't change the underlying map library or til
 **"Search this area" button:**
 - Floating pill in upper-middle of map.
 - Visible only when user has panned/zoomed such that <50% of currently-listed locations are in visible bounds.
-- Tap re-queries locations relative to visible bounds (not original origin/route); button disappears.
+- Tap **re-ranks** existing results relative to the visible map area — it does not filter or re-query. All providers stay visible on the map and in the list both before and after tapping. The ranking criterion shifts from distance-from-origin (or distance-along-route) to distance-from-bounds-center, which feeds `rankIdx` into `classifyPin`.
+- Pins that fall outside the current visible bounds render at low-tier (gray) via `classifyPin`'s `inVisibleBounds` rule, so the visual answers "what's most relevant for this area" without hiding anything. The user can still see and select gray pins; they just don't compete for top-tier.
+- Button hides on tap. The in-bounds ratio recomputes against the same set (now re-ordered) on the next moveend/zoomend; the button reappears only if the user pans/zooms enough to disagree with the new ranking again.
 - Translucent white with backdrop-blur, soft drop shadow, ~40px tall.
 - Should NOT be visible by default — it earns its place by user interaction.
+- **Mental model:** "tell me about this area" (re-rank) — the standard map-discovery pattern across category-leading apps. Not "show only this area" (filter).
 
 **Z-index hierarchy** (use CSS variables, not hardcoded values):
 
