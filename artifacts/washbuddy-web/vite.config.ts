@@ -51,7 +51,21 @@ export default defineConfig({
       "@": path.resolve(import.meta.dirname, "src"),
       "@assets": path.resolve(import.meta.dirname, "..", "..", "attached_assets"),
     },
-    dedupe: ["react", "react-dom"],
+    // Phase B CP3.5 — `leaflet` joins react/react-dom in dedupe to
+    // prevent the dual-copy load that crashed CP3 testing on Replit
+    // (LatLngBounds.extend recursed because `obj instanceof LatLng`
+    // returned false for a real LatLng instance from the *other*
+    // Leaflet copy, dropping into the toLatLngBounds fallback which
+    // then re-entered extend → infinite recursion → stack overflow).
+    // Adding leaflet.markercluster in CP2 created the second slot.
+    // Only `leaflet` core needs deduping; the plugin doesn't have
+    // an instanceof recursion path. optimizeDeps.include below
+    // ensures both pre-bundle together so they share a single
+    // dep-cache entry.
+    dedupe: ["react", "react-dom", "leaflet"],
+  },
+  optimizeDeps: {
+    include: ["leaflet", "leaflet.markercluster"],
   },
   root: path.resolve(import.meta.dirname),
   build: {

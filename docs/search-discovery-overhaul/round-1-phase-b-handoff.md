@@ -280,3 +280,41 @@ The api-server `Service.category` selection-set fix from CP1 commit `05a29bc` is
 - **The backend's `radiusMiles` query param is dead.** Destructured at [locations.ts:121](artifacts/api-server/src/routes/locations.ts:121) but never used in the `where` clause. The full provider set has been flowing through every search since the endpoint shipped — the filter is entirely client-side. Made CP3 cleaner (no API change), but worth knowing as a "things look wired but aren't" anomaly. Not in CP3's scope to fix; flag for any future query-param cleanup pass.
 - **`lastFitKeyRef` was already designed for exactly this kind of extension.** Phase A's authors keyed it as a string so additional anchoring modes could be added without restructuring the gate's logic. The CP3 add (one new branch in the fitKey computation, one pre-set in the handler) was a 6-line change because the existing scaffolding handled the rest.
 - **`displayLocations` deduplication paid off twice.** Unifying `locsToShow` (marker effect) and `selLocs` (selection effect) into `displayLocations` was structurally needed for CP3. It also incidentally cleaned up two places where the same expression was inlined and would have drifted independently. The kind of refactor that's worth making explicit in spec (rather than letting it stay invisible until a future round needs to fix it).
+
+---
+
+## Checkpoint 3.5 — Vite Leaflet dedupe (preventive)
+
+**Commit:** `<this commit>`. Single-line config edit. Runtime behavior on Replit didn't change in CP3 — but the underlying conditions for a stack-overflow regression did change in CP2, and Replit testing surfaced the crash. CP3.5 makes the cache-clear fix permanent.
+
+### What shipped
+
+[`artifacts/washbuddy-web/vite.config.ts`](artifacts/washbuddy-web/vite.config.ts) — two edits inside `defineConfig({...})`:
+- `resolve.dedupe` extended from `["react", "react-dom"]` to `["react", "react-dom", "leaflet"]`. Tells Vite to enforce a single resolution of `leaflet` across the dependency graph.
+- New `optimizeDeps.include: ["leaflet", "leaflet.markercluster"]` block. Tells Vite to pre-bundle both packages together at startup so they share a single dep-cache entry.
+
+Either alone reduces the risk; both together close it. Inline comment in the config explains the failure mode for any future engineer reading the file cold.
+
+### Spec sections governing
+- N/A — config-only change. The runtime behavior is per the existing CP2 / CP3 specs; this commit just stops the dev environment from violating them under HMR.
+
+### Verification
+- TypeScript: **21 errors**, baseline holds. (Vite config isn't compiled into the app bundle; tsc passes unchanged.)
+- Local production build: still environmentally broken on Windows from CP2's pnpm/Windows native-deps quirk. CP3.5 doesn't add or change deps. Replit's Linux env is unaffected.
+- Replit smoke test (post-deploy):
+  - Clear `.vite` cache one final time: `rm -rf artifacts/washbuddy-web/node_modules/.vite`.
+  - Restart the web workflow.
+  - `/find-a-wash` should load and accept a destination without the `Maximum call stack size exceeded` error.
+  - Subsequent fresh installs / HMR cycles should not require manual cache clears for the Leaflet stack-overflow specifically.
+
+### Decisions made
+- **`leaflet` added to `dedupe`; `leaflet.markercluster` not.** The crash was Leaflet core's `instanceof LatLng` check returning false across duplicate copies. The plugin doesn't have its own `instanceof`-recursion path — its dedupe value is shared package-cache locality (handled by `optimizeDeps.include`), not single-resolution.
+- **Both `dedupe` and `optimizeDeps.include`, not just one.** `dedupe` enforces single resolution at the module-graph level; `optimizeDeps.include` pre-bundles at dev-server startup. Different layers; both matter. With only `dedupe`, a Vite cache that already pre-bundled two copies before the dedupe rule could keep them around through HMR. With only `optimizeDeps.include`, an `npm install` that introduces a transitive `leaflet` could still nest a second copy. Belt-and-suspenders.
+- **Inline comment, not just a doc reference.** A future engineer hitting an unrelated dedupe-or-optimizeDeps issue will read the surrounding code to understand the existing entries. The comment explains the specific failure mode (LatLngBounds.extend recursion via instanceof crossing copy boundaries) so the entries don't read as cargo-culted.
+
+### Open items for next round (Phase B CP4)
+- Unchanged from CP3 handoff. CP4 dispatches after the user re-runs CP3's full test protocol (cleared cache, restarted workflow, "Search this area" verified end-to-end on Replit) so any latent CP3 issue surfaces *before* CP4's structural header rewrite layers on top of it.
+
+### Anything that surprised me
+- **The crash mode is a known Vite + Leaflet pattern.** Searching the dual-copy-Leaflet failure mode online turns up the same `LatLngBounds.extend → toLatLng → recurse` trace from other Vite + Leaflet projects. The standard fix is exactly the `dedupe` + `optimizeDeps.include` pattern in this commit. Nothing custom; if a future contributor hits a similar `instanceof X returns false for an X` symptom in a different Leaflet primitive (`LatLng`, `Bounds`, `Layer`), the same fix shape applies.
+- **Adding a plugin (`leaflet.markercluster`) was enough to flip the failure mode from latent to active.** Pre-CP2, Leaflet was used by exactly one place (`L` import in find-a-wash.tsx); Vite's dep-cache had one slot, no `instanceof` mismatch possible. CP2's plugin import (`import "leaflet.markercluster"`) reaches into Leaflet's exports as a side effect, which can ask Vite to resolve `leaflet` separately for the plugin's bundling needs. That's the "second slot" the dedupe is closing.
