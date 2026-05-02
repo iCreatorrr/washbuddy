@@ -220,6 +220,16 @@ Existing Leaflet map; this work doesn't change the underlying map library or til
 - Should NOT be visible by default — it earns its place by user interaction.
 - **Mental model:** "tell me about this area" (re-rank) — the standard map-discovery pattern across category-leading apps. Not "show only this area" (filter).
 
+**Empty-area state:**
+When the user taps "Search this area" in a region containing zero providers from the current result set, an inline pill appears in the result list area of the bottom sheet:
+
+- **Trigger:** `searchBoundsAnchor !== null` AND zero pins from the full `displayLocations` set fall inside the anchored bounds. (Not against `rankedLocations` — same set, just re-ordered.)
+- **Copy:** "No providers in this area. Closest is **{N} {unit}** away." Distance is haversine from bounds center to the closest provider's lat/lng, rounded to whole units. Unit matches the active mode's card meta convention — `mi` in nearby mode, `km` in route mode — so the pill reads consistently with what the user is already seeing on cards.
+- **CTA:** "Show closest →" — tapping clears `searchBoundsAnchor` and pans the map to the closest provider's lat/lng (no zoom change). Selection state is unchanged.
+- **Placement:** inline in the bottom sheet's result-list area, above the cards. Not a floating toast.
+- **Dismissal:** the pill dismisses naturally when the user pans/zooms such that providers reappear in bounds, OR when they tap "Show closest →", OR when `searchBoundsAnchor` clears for any other reason (origin/destination/route change).
+- **No auto-pan on the original tap.** The user's panning is intentional; their tap is "tell me about this area," not "take me elsewhere." Auto-pan happens only when they explicitly tap "Show closest →" — recovery, not default.
+
 **Z-index hierarchy** (use CSS variables, not hardcoded values):
 
 | Element | z-index var | Suggested value |
@@ -398,6 +408,12 @@ function classifyPin(location: Location, rankIdx: number, totalRanked: number, m
   return 'mid';
 }
 ```
+
+**When `inVisibleBounds` fires:** only when the user has **explicitly anchored** the result list to a map area (Phase B CP3 v2's "Search this area" tap, which sets a `searchBoundsAnchor`). In default mode (no anchor), pin tier reflects `rankIdx` against the full result set, regardless of viewport — clusters across the full set still classify by their best member. Implementations should pass `inVisibleBounds: undefined` (or omit it) when no anchor is set; only pass a boolean computed from `bounds.contains([lat, lng])` when the user has tapped "Search this area."
+
+This gating is load-bearing: passing `inVisibleBounds` unconditionally on every viewport change produces two visible failures:
+1. Default-mode clusters render gray when most pins are off-screen, even if the cluster contains a top-tier provider.
+2. Selection re-runs the classifier against the current viewport (which has shifted since marker creation, e.g., the user zoomed in to find the pin); other pins' tier flickers between gray and blue on every selection change.
 
 **Pin sizes by tier:**
 - Top: 32×40px, drop shadow `0 3px 6px rgba(15,23,42,0.20)`.

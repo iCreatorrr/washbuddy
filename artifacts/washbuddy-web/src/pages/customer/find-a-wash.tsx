@@ -1092,6 +1092,55 @@ export default function FindAWash() {
     });
   }, [displayLocations, searchBoundsAnchor]);
 
+  // Phase B CP3 v2 hotfix — empty-area state. When the user has
+  // anchored to a region with zero providers in bounds, surface a
+  // pill in the result-list area with a "Show closest →" recovery
+  // CTA. Per EID §3.2 empty-area state spec.
+  //
+  // boundsCenter is derived from searchBoundsAnchor (null when no
+  // anchor is set; tuple `[lat, lng]` when set). closestProvider
+  // walks displayLocations once to find the min-haversine
+  // candidate. inBoundsCount counts how many providers actually
+  // fall inside the anchored bounds. Only the trio matters when
+  // searchBoundsAnchor is set; in default mode each derivation
+  // short-circuits to null/0 and the pill doesn't render.
+  const boundsCenter = useMemo<[number, number] | null>(() => {
+    if (!searchBoundsAnchor) return null;
+    const [[south, west], [north, east]] = searchBoundsAnchor;
+    return [(south + north) / 2, (west + east) / 2];
+  }, [searchBoundsAnchor]);
+
+  const inBoundsCount = useMemo(() => {
+    if (!searchBoundsAnchor) return 0;
+    const [[south, west], [north, east]] = searchBoundsAnchor;
+    let count = 0;
+    for (const l of displayLocations) {
+      if (l.latitude == null || l.longitude == null) continue;
+      if (l.latitude >= south && l.latitude <= north && l.longitude >= west && l.longitude <= east) count++;
+    }
+    return count;
+  }, [displayLocations, searchBoundsAnchor]);
+
+  const closestProvider = useMemo(() => {
+    if (!boundsCenter) return null;
+    const [centerLat, centerLng] = boundsCenter;
+    let best: { loc: any; distKm: number } | null = null;
+    for (const loc of displayLocations) {
+      if (loc.latitude == null || loc.longitude == null) continue;
+      const distKm = haversineKm(centerLat, centerLng, loc.latitude, loc.longitude);
+      if (best === null || distKm < best.distKm) {
+        best = { loc, distKm };
+      }
+    }
+    return best;
+  }, [displayLocations, boundsCenter]);
+
+  // Empty-area pill is visible when the user has anchored AND zero
+  // providers fall inside the anchored bounds. Closing the pill
+  // happens via "Show closest →" tap (handleShowClosest below) or
+  // any context change that clears searchBoundsAnchor.
+  const showEmptyAreaPill = searchBoundsAnchor !== null && inBoundsCount === 0 && closestProvider !== null;
+
   // Origin / destination / route changes reset the search-this-area
   // anchor — switching context means the user is no longer asking
   // about that specific map region. searchBoundsAnchor is null on
@@ -1266,12 +1315,14 @@ export default function FindAWash() {
     // physical set as displayLocations either way — nothing
     // disappears.
     const locsToShow = rankedLocations;
-    // Snapshot of the visible bounds at marker-creation time. Used
-    // to flag pins outside the viewport for the inVisibleBounds
-    // tier-demotion rule (EID §3.5). Tap-locked: this snapshot is
-    // taken once per marker effect run, not continuously, so
-    // panning after re-ranking doesn't reclassify pins.
-    const visibleBounds = map.getBounds();
+    // CP3 v2 hotfix: `inVisibleBounds` only fires when the user
+    // has explicitly anchored to a map area (searchBoundsAnchor
+    // !== null). In default mode the snapshot isn't read; pins
+    // classify purely from rankIdx against the full result set.
+    // EID §3.5 documents this gating as load-bearing — passing
+    // inVisibleBounds unconditionally produced gray clusters in
+    // default mode and selection-time tier flicker on neighbors.
+    const visibleBounds = searchBoundsAnchor !== null ? map.getBounds() : null;
 
     locsToShow.forEach((loc, rankIdx) => {
       if (loc.latitude == null || loc.longitude == null) return;
@@ -1286,7 +1337,9 @@ export default function FindAWash() {
       // compute price; route-mode labels wait on Round 4's real
       // detour endpoint.
       const incompatible = (loc as any).fitsActiveVehicle === false;
-      const inVisibleBounds = visibleBounds.contains([loc.latitude, loc.longitude]);
+      const inVisibleBounds = visibleBounds
+        ? visibleBounds.contains([loc.latitude, loc.longitude])
+        : undefined;
       const tier = classifyPin({
         rankIdx,
         totalRanked: locsToShow.length,
@@ -1619,6 +1672,25 @@ export default function FindAWash() {
     ]);
   };
 
+  // Phase B CP3 v2 hotfix — empty-area "Show closest →" recovery.
+  // Clears the search-this-area anchor and pans the map to the
+  // closest provider's lat/lng. No zoom change (per EID §3.2);
+  // selection state is unchanged. The lastFitKeyRef is NOT
+  // pre-set here — clearing the anchor naturally allows the
+  // marker effect's fit-bounds gate to refire to the route /
+  // nearby key, but since we're explicitly panning before that
+  // re-render happens, the pan is what the user sees first.
+  const handleShowClosest = () => {
+    const map = mapInstanceRef.current;
+    if (!map || !closestProvider) return;
+    const { loc } = closestProvider;
+    if (loc.latitude == null || loc.longitude == null) return;
+    setSearchBoundsAnchor(null);
+    try {
+      map.panTo([loc.latitude, loc.longitude], { animate: true });
+    } catch {}
+  };
+
   // Button visibility — hidden when the result list and map agree,
   // or when there are no results to argue about. Empty-list guard
   // mirrors the helper's empty-input sentinel for clarity at the
@@ -1669,17 +1741,19 @@ export default function FindAWash() {
     // re-classify it via the origin-distance rank from
     // displayLocations and inconsistently swap between top/mid.
     const selLocs = rankedLocations;
-    // CP3 v2: visibleBounds snapshot for the inVisibleBounds tier
-    // input. Read once per selection-effect run so all markers
-    // reclassify against the same bounds — same pattern as the
-    // marker creation effect's tap-locked snapshot.
-    const visibleBounds = map.getBounds();
+    // CP3 v2 hotfix: visibleBounds snapshot is only read when an
+    // explicit area anchor is set. In default mode, passing
+    // inVisibleBounds unconditionally caused selection to re-tier
+    // neighboring pins gray-to-blue as the user zoomed to find a
+    // tapped pin (the bounds snapshot at selection time differed
+    // from marker creation). EID §3.5 documents the gating.
+    const visibleBounds = searchBoundsAnchor !== null ? map.getBounds() : null;
     markersByIdRef.current.forEach((marker, id) => {
       const rankIdx = selLocs.findIndex((l) => l.id === id);
       const loc = rankIdx >= 0 ? selLocs[rankIdx] : null;
       if (!loc) return;
       const fits = (loc as any).fitsActiveVehicle !== false;
-      const inVisibleBounds = loc.latitude != null && loc.longitude != null
+      const inVisibleBounds = visibleBounds && loc.latitude != null && loc.longitude != null
         ? visibleBounds.contains([loc.latitude, loc.longitude])
         : undefined;
       const tier = classifyPin({
@@ -1758,7 +1832,7 @@ export default function FindAWash() {
     } else {
       finishSelection();
     }
-  }, [selectedLocationId, rankedLocations, mode]);
+  }, [selectedLocationId, rankedLocations, mode, searchBoundsAnchor]);
 
   // Tap on empty map area → deselect. Leaflet's 'click' fires only
   // on tap (not drag), and individual marker clicks call
@@ -2141,6 +2215,35 @@ export default function FindAWash() {
           would render behind it and waste DOM. */}
       {!mapExpanded && (
         <div className="space-y-3">
+          {/* Phase B CP3 v2 hotfix — empty-area pill (EID §3.2).
+              Renders when the user has anchored to a region with
+              zero in-bounds providers. Inline + slate body so it
+              reads as informational (not a caution); the recovery
+              CTA uses the blue token to follow the Linear/Notion
+              quiet-pill pattern. Unit matches the active mode's
+              card meta — mi in nearby, km in route — so the pill
+              reads consistently with the cards on the same screen. */}
+          {showEmptyAreaPill && closestProvider && (
+            <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 text-sm">
+              <span className="min-w-0 flex-1">
+                No providers in this area. Closest is{" "}
+                <strong className="font-semibold text-slate-900">
+                  {mode === "nearby"
+                    ? `${Math.max(1, Math.round(closestProvider.distKm * 0.621371))} mi`
+                    : `${Math.max(1, Math.round(closestProvider.distKm))} km`}
+                </strong>
+                {" "}away.
+              </span>
+              <button
+                type="button"
+                onClick={handleShowClosest}
+                className="shrink-0 text-blue-700 font-medium hover:text-blue-800 transition-colors"
+              >
+                Show closest →
+              </button>
+            </div>
+          )}
+
           {!route && (
             <p className="text-xs text-slate-500 px-1">
               Enter a destination to see locations along your route.

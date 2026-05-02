@@ -461,3 +461,80 @@ The `searchBoundsAnchor` declaration comment block updated to describe re-rank s
 4. Zoom out — previously-out-of-bounds providers stay visible (gray low-tier from where they were). Critical regression check: nothing disappears.
 5. Tap an out-of-bounds (gray) pin — selection works, popup opens, gold ring on the gray pin (the selected ring is independent of tier).
 6. Set a different destination — `searchBoundsAnchor` clears via the bounds-clear-on-context-change effect, re-ranking resets to origin distance.
+
+---
+
+## CP3 v2 Hotfix — gate `inVisibleBounds` + empty-area pill
+
+**Commit:** `<this commit>`. Single commit per CONTEXT.md — EID §3.2 + §3.5 spec changes and the code change ship as one logical unit ("rules with optional inputs need explicit trigger conditions; document the gating where it lives").
+
+### What was actually wrong (CP3 v2 retro)
+
+CP3 v2 wired `inVisibleBounds` into both `classifyPin` call sites unconditionally — every viewport change fed `bounds.contains([lat, lng])` per pin into the classifier, regardless of whether the user had anchored to an area. Two visible failures and one missing UX state surfaced on Replit:
+
+1. **Default-mode clusters render gray when most pins are off-screen.** A cluster containing a top-tier provider should render dark blue regardless of viewport. Instead, panning away from the result region produced all-gray clusters because every member's `inVisibleBounds` was false. `pickHighestTier` then returned `low` even though the cluster contained a true top-tier pin.
+
+2. **Selection re-tiers other pins gray-to-blue.** When the user tapped a clustered pin, the cluster expanded (zooming in to find the pin), and the selection effect's `inVisibleBounds` snapshot — taken at selection time, not at marker-creation time — saw the now-zoomed-in viewport with surrounding pins inside it. Other pins' tier flipped from gray (creation-time, when they were outside bounds) to blue (selection-time, now inside bounds). Tier flicker on selection is bizarre UX.
+
+3. **Empty-area tap had no visible feedback.** Tapping "Search this area" in a region with no providers re-ranked correctly (the closest provider became the new top-tier), but the closest provider was far off-screen, so the viewport showed no change. User thinks the button is broken.
+
+Root cause: `inVisibleBounds` was treated as "modify tier when caller has the input available" rather than "fire only when the user has explicitly anchored to a region." CP1's optional-signature pattern leaked into CP3 v2's call sites. The spec rule was correct; the host wiring overreached.
+
+### What shipped
+
+**[02-eid.md §3.2](docs/search-discovery-overhaul/02-eid.md)** — empty-area state subsection appended to the "Search this area" button block. Specifies trigger (`searchBoundsAnchor !== null` AND zero pins from `displayLocations` in bounds), copy ("No providers in this area. Closest is **{N} {unit}** away."), CTA behavior ("Show closest →" clears anchor + pans without zoom), placement (inline in result-list area, not a toast), dismissal conditions, and the no-auto-pan principle on the original tap.
+
+**[02-eid.md §3.5](docs/search-discovery-overhaul/02-eid.md)** — `inVisibleBounds` rule clarified after the existing `classifyPin` reference implementation. Adds a "When `inVisibleBounds` fires" subsection that explicitly names the gating: only when the user has **explicitly anchored** to a map area. Default mode classifies tier purely from `rankIdx`. Two named failure modes (gray-cluster-default-mode and selection-tier-flicker) documented as the load-bearing reasons for the gating.
+
+**[find-a-wash.tsx](artifacts/washbuddy-web/src/pages/customer/find-a-wash.tsx)**:
+
+- **Marker creation effect**: `visibleBounds = searchBoundsAnchor !== null ? map.getBounds() : null;` — bounds snapshot only read when the user has anchored. Per-pin `inVisibleBounds` is `undefined` in default mode, falling through `classifyPin`'s optional handling cleanly.
+
+- **Selection effect**: same gating. Plus the effect's deps gain `searchBoundsAnchor` so a clear/set transition correctly re-runs the icon swap.
+
+- **`boundsCenter`** memo — derived from `searchBoundsAnchor`; null in default mode.
+
+- **`inBoundsCount`** memo — counts how many `displayLocations` fall inside the anchored bounds; 0 in default mode.
+
+- **`closestProvider`** memo — haversine reduce over `displayLocations` to find the min-distance candidate from `boundsCenter`; null in default mode.
+
+- **`showEmptyAreaPill`** derived constant — `searchBoundsAnchor !== null && inBoundsCount === 0 && closestProvider !== null`.
+
+- **`handleShowClosest`** handler — clears `searchBoundsAnchor`, pans the map to the closest provider's lat/lng (no zoom change, animate true). Selection state untouched.
+
+- **Empty-area pill JSX** — inline div in the result-list area, slate body (`bg-slate-100 text-slate-700 border border-slate-200`), blue-token CTA (`text-blue-700 font-medium`). Mode-aware unit: `mi` (haversine km × 0.621371) in nearby mode, `km` in route mode — matches the card-meta convention on the same screen. `Math.max(1, ...)` floor so a sub-1-unit closest provider doesn't read as "0 km."
+
+### Spec sections governing
+- [02-eid.md §3.2](docs/search-discovery-overhaul/02-eid.md) — corrected in this commit (empty-area state subsection added).
+- [02-eid.md §3.5](docs/search-discovery-overhaul/02-eid.md) — clarified in this commit (`inVisibleBounds` gating subsection added).
+- CP3 v2 handoff section above — re-rank-not-filter behavior; CP3 v2 Hotfix preserves the re-rank logic intact.
+
+### Verification
+- TypeScript: **21 errors**, baseline holds. Zero new in either touched file.
+- Hotfix (Decimal lat/lng) stays fixed — CP3 v2 Hotfix touches neither the fetch path nor the response normalizer.
+- CP3 v2 re-rank-on-tap intact — `rankedLocations` and the marker effect's switch from `displayLocations` → `rankedLocations` are unchanged.
+
+### Decisions made
+- **Mode-aware unit in the pill (mi/km), not a fixed unit.** Per the user's refinement during audit. Reasoning: the pill reads alongside the card meta on the same screen; matching the card unit avoids cognitive friction. The trade-off is that route-mode pills show km even though the user might have a primarily-mi mental model, but route-mode card meta also shows km, so internal consistency wins.
+- **Slate pill body + blue-token CTA, not amber/warning styling.** The empty-area state is informational + recovery, not a caution. The user hasn't done anything wrong; the area just has no providers. Linear/Notion-style quiet pill with a quietly-blue recovery link.
+- **`Math.max(1, Math.round(...))` floor on the distance.** A sub-1-unit closest provider would round to 0, reading as "0 km away" which is misleading. Floor at 1 unit so "Closest is 1 km away" reads as "very close, but not in this exact area."
+- **Bounds snapshot only read when anchor is set, not lazily-cached.** `map.getBounds()` is cheap; the gating is for *correctness* (don't pass `inVisibleBounds: true/false` when no anchor exists) not performance.
+- **Selection effect deps gained `searchBoundsAnchor`.** When the anchor flips from null to set (user taps "Search this area") or set to null (user taps "Show closest →" or context changes), the selection effect re-runs and rebuilds icons with the correct gating. Without this, the existing icons would persist from before the anchor change.
+
+### Open items for next round (Phase B CP4)
+- **Header replacement** per EID §3.1 — last and most structural CP of Phase B.
+- **Bug 1 (page has no bottom)** — mobile viewport scrolls indefinitely with no end. Phase A interim chrome artifact. Defer to CP4 since the layout restructure during header replacement naturally addresses page-bottom semantics. Flagged here for CP4 audit step to track.
+
+### Anything that surprised me
+- **The `inVisibleBounds` rule wasn't "wrong" — its application was.** CP1's spec rule (`if (!isInVisibleBounds(...)) return 'low';`) is correct. CP1's signature decision (optional input, fall through when absent) is correct. CP3 v2's failure was at the *host call site*: passing the input unconditionally rather than gating on the explicit-anchor condition the rule was designed for. The spec implicit-trigger convention (caller decides when to pass the input) is fine for some rules but not for ones where "having the input available" doesn't mean "the user wants the rule applied."
+- **Selection-time bounds drift.** The bug surfaced specifically when the user zoomed in to find a clustered pin: the selection-effect bounds snapshot was newer than the marker-creation snapshot. Tier-affecting state captured at one timestamp and re-read at a later one, with different intermediate user actions, is a recipe for inconsistency. Worth a general invariant check across the codebase: any classifier or render rule that depends on a captured-at-snapshot input should either (a) snapshot once and propagate, or (b) gate the snapshot read on user-driven anchoring (the CP3 v2 Hotfix path).
+- **Lessons learned for spec-with-optional-inputs.** When a `classifyPin`-style rule has an optional input, the spec should explicitly document **when the rule fires**, not just **what the rule does when fed the input**. CP1's `inVisibleBounds?: boolean` was added with deferral comments ("CP3 wires this") but no explicit firing condition; CP3 v2 implementers (myself) read it as "wire when you have the data" rather than "wire when the user has anchored." The §3.5 clarification in this commit closes that ambiguity for future contributors.
+
+### Replit canary protocol
+1. **Default-mode cluster tier (Bug 2 fix):** load page, pan map, zoom out so a cluster contains a known top-tier provider (one of the top 3 by rank). Cluster stays dark blue regardless of viewport position. Pan around — cluster color doesn't drift to gray.
+2. **Selection stability (Bug 3 fix):** zoom in to a region with a small cluster, tap the cluster to expand, tap one of the now-individual pins. Other pins' tier doesn't change — they stay whatever color they rendered as before the tap. Selected pin gets the gold ring.
+3. **Empty-area pill (Test 2 fix):** pan to a region with no providers (e.g., over open ocean if cross-border, or a far-rural area), tap "Search this area." Pill appears in the result-list area showing closest distance with a "Show closest →" CTA. Map doesn't move.
+4. **Show-closest CTA:** tap "Show closest →." Map pans smoothly to the closest provider's lat/lng. Zoom level doesn't change. Anchor clears (the floating "Search this area" button reappears only if the user pans far again). Pill dismisses.
+5. **Anchored re-rank still works (CP3 v2 retained):** pan to a region with multiple providers, tap "Search this area." Pins inside bounds re-rank with the closest-to-center promoted to top-tier dark blue; pins outside dim to gray low-tier (the gating fires correctly when the anchor IS set). Cluster tier reflects the highest member, including the in-bounds top-tier pin if there is one.
+6. **Hotfix still holds:** set destination — no LatLngBounds-recursion crash.
+7. **Bug 1 acknowledgment** (deferred to CP4): scroll the page on mobile. The "no bottom" symptom from CP3 v2 testing is unchanged in this hotfix and is expected. CP4 addresses via layout restructure.
