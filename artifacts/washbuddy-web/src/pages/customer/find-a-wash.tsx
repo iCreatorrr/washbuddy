@@ -895,7 +895,27 @@ export default function FindAWash() {
     queryFn: async () => {
       const r = await fetch(locationsUrl, { credentials: "include" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
+      const json = await r.json();
+      // [diag-hotfix] One-shot inspection of the API response shape
+      // for the LatLngBounds-recursion crash. Logs typeof and value
+      // of latitude/longitude on the first location so we can tell
+      // whether Prisma Decimal is serializing as a number, a string,
+      // or an object. Remove this block once the hotfix lands.
+      try {
+        const sample = json?.locations?.[0];
+        // eslint-disable-next-line no-console
+        console.log("[diag-hotfix] location sample:", {
+          latType: typeof sample?.latitude,
+          lngType: typeof sample?.longitude,
+          latValue: sample?.latitude,
+          lngValue: sample?.longitude,
+          full: JSON.stringify(sample)?.slice(0, 400),
+        });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.log("[diag-hotfix] location sample log failed:", e);
+      }
+      return json;
     },
     staleTime: 60_000,
   });
@@ -1418,7 +1438,33 @@ export default function FindAWash() {
             .map((l) => [l.latitude!, l.longitude!] as L.LatLngExpression),
         ];
         if (allPoints.length > 0) {
-          map.fitBounds(L.latLngBounds(allPoints).pad(0.1), { animate: false });
+          // [diag-hotfix] Capture the actual input that's blowing
+          // the stack on destination set. Logs the array shape,
+          // typeof of the first few items, and (if construction
+          // throws) the input that triggered it. Remove block once
+          // the hotfix lands.
+          try {
+            // eslint-disable-next-line no-console
+            console.log("[diag-hotfix] allPoints (route fitBounds):", {
+              length: allPoints.length,
+              routePointsLen: route.points.length,
+              nearbyCount: nearbyLocations.length,
+              first3: allPoints.slice(0, 3),
+              first3Typeof: allPoints.slice(0, 3).map((p) => {
+                if (Array.isArray(p)) {
+                  return { isArray: true, len: p.length, t0: typeof p[0], t1: typeof p[1], v: p };
+                }
+                return { isArray: false, t: typeof p, v: p };
+              }),
+            });
+            map.fitBounds(L.latLngBounds(allPoints).pad(0.1), { animate: false });
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.log("[diag-hotfix] route fitBounds threw:", e instanceof Error ? e.message : e);
+            // eslint-disable-next-line no-console
+            console.log("[diag-hotfix] failing allPoints (first 5):", allPoints.slice(0, 5));
+            throw e;
+          }
         }
       } else if (origin && locsToShow.length > 0) {
         const allPoints: L.LatLngExpression[] = [
