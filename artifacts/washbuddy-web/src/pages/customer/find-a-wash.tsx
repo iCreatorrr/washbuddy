@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 import { Card, Input, Button, Badge, ErrorState } from "@/components/ui";
-import { MapPin, Navigation, Route, ArrowRight, X, Loader2, ChevronDown, Crosshair, Star, Maximize2, Minimize2, Pencil, ArrowLeft, Menu, Droplets, Building2, Landmark } from "lucide-react";
+import { MapPin, Navigation, Route, ArrowRight, X, Loader2, ChevronDown, Crosshair, Star, Maximize2, Minimize2, Pencil, ArrowLeft, Menu, Droplets, Building2, Landmark, Search } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { formatCurrency } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
@@ -22,6 +22,7 @@ import { deriveSizeClassFromLengthInches } from "@/lib/vehicleBodyType";
 import { useMobileMenu } from "@/components/layout";
 import { NotificationBell } from "@/components/notification-bell";
 import { useScrollDirection } from "@/hooks/use-scroll-direction";
+import { getInBoundsRatio } from "@/lib/map-bounds";
 import {
   classifyPin,
   pickHighestTier,
@@ -1024,7 +1025,40 @@ export default function FindAWash() {
       .sort((a, b) => a.distFromOrigin - b.distFromOrigin);
   }, [route, sampledRoutePoints, allLocations, origin?.lat, origin?.lng]);
 
-  const displayLocations = route ? nearbyLocations : initialLocations;
+  // Phase B CP3 — when the user taps "Search this area", the
+  // displayed result set shifts from origin-anchored / route-
+  // anchored filtering to a bounds-anchored filter. The button
+  // doesn't issue a new server query — the backend already
+  // returns the full visible-providers set; CP3 just shifts which
+  // client-side filter runs. searchBoundsAnchor is null when the
+  // user is in the default origin/route mode and a literal bounds
+  // tuple `[[s, w], [n, e]]` once they've committed a map area.
+  const [searchBoundsAnchor, setSearchBoundsAnchor] = useState<L.LatLngBoundsLiteral | null>(null);
+
+  // Track in-bounds fraction of the currently-displayed locations.
+  // Updated by the moveend/zoomend listeners below (debounced 200ms)
+  // and by displayLocations changes. The button is shown when this
+  // drops below 0.5 — i.e. fewer than half of the result list is
+  // visible on screen, signalling that the map and the list disagree.
+  const [inBoundsRatio, setInBoundsRatio] = useState(1);
+
+  const displayLocations = useMemo(() => {
+    const baseList = route ? nearbyLocations : initialLocations;
+    if (!searchBoundsAnchor) return baseList;
+    const [[south, west], [north, east]] = searchBoundsAnchor;
+    return baseList.filter((l) => {
+      if (l.latitude == null || l.longitude == null) return false;
+      return l.latitude >= south && l.latitude <= north && l.longitude >= west && l.longitude <= east;
+    });
+  }, [route, nearbyLocations, initialLocations, searchBoundsAnchor]);
+
+  // Origin / destination / route changes reset the search-this-area
+  // anchor — switching context means the user is no longer asking
+  // about that specific map region. searchBoundsAnchor is null on
+  // the initial render, so this is a no-op until the first toggle.
+  useEffect(() => {
+    setSearchBoundsAnchor(null);
+  }, [origin?.lat, origin?.lng, destination?.lat, destination?.lng, route]);
 
   const etasFetchedForRef = useRef<string>("");
   useEffect(() => {
@@ -1185,7 +1219,11 @@ export default function FindAWash() {
       endpointsRef.current = [myMarker];
     }
 
-    const locsToShow = route ? nearbyLocations : initialLocations;
+    // displayLocations applies the bounds filter when
+    // searchBoundsAnchor is set; otherwise it's the route/nearby
+    // base list. Same set the result cards render — keeps marker
+    // layer and list in lockstep.
+    const locsToShow = displayLocations;
 
     locsToShow.forEach((loc, rankIdx) => {
       if (loc.latitude == null || loc.longitude == null) return;
@@ -1360,9 +1398,16 @@ export default function FindAWash() {
     // panned/zoomed manually. The user-reported "zoom out on pin tap"
     // came from this block running on every activePinId change;
     // selection no longer touches this effect's deps.
-    const fitKey = route
-      ? `route:${origin?.lat},${origin?.lng}->${destination?.lat},${destination?.lng}:n=${nearbyLocations.length}`
-      : `nearby:${origin?.lat},${origin?.lng}:n=${initialLocations.length}`;
+    // Phase B CP3 — search-this-area mode uses its own fitKey so the
+    // gate skips the fitBounds branch when the user just tapped the
+    // button. The handler pre-sets lastFitKeyRef.current to this
+    // same value so the marker effect's gate detects "already
+    // fitted" and leaves the user's current view alone.
+    const fitKey = searchBoundsAnchor
+      ? `search-this-area:${searchBoundsAnchor[0][0]},${searchBoundsAnchor[0][1]},${searchBoundsAnchor[1][0]},${searchBoundsAnchor[1][1]}`
+      : route
+        ? `route:${origin?.lat},${origin?.lng}->${destination?.lat},${destination?.lng}:n=${nearbyLocations.length}`
+        : `nearby:${origin?.lat},${origin?.lng}:n=${initialLocations.length}`;
     if (lastFitKeyRef.current !== fitKey) {
       lastFitKeyRef.current = fitKey;
       if (route) {
@@ -1387,7 +1432,7 @@ export default function FindAWash() {
         map.setView([origin.lat, origin.lng], 10, { animate: true });
       }
     }
-  }, [route, origin, destination, nearbyLocations, initialLocations, setNavLocation, etas]);
+  }, [route, origin, destination, nearbyLocations, initialLocations, displayLocations, searchBoundsAnchor, setNavLocation, etas]);
 
   // Build a location detail URL with optional return-to-route + user coords.
   // Uses URLSearchParams so separators (? vs &) are always correct, even when
@@ -1471,6 +1516,65 @@ export default function FindAWash() {
     setRoute(null);
   };
 
+  // Phase B CP3 — recompute the in-bounds ratio whenever the user
+  // pans/zooms the map or the result set changes. Debounced 200ms
+  // so a held drag doesn't flicker the button. The ratio drives
+  // the floating "Search this area" button's visibility (showing
+  // when fewer than half of currently-listed locations are in the
+  // visible bounds — i.e. the map and the list disagree).
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const recompute = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        if (!mountedRef.current) return;
+        const points = displayLocations
+          .filter((l) => l.latitude != null && l.longitude != null)
+          .map((l) => ({ lat: l.latitude as number, lng: l.longitude as number }));
+        setInBoundsRatio(getInBoundsRatio(points, map.getBounds()));
+      }, 200);
+    };
+    recompute();
+    map.on("moveend", recompute);
+    map.on("zoomend", recompute);
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      map.off("moveend", recompute);
+      map.off("zoomend", recompute);
+    };
+  }, [displayLocations]);
+
+  // Phase B CP3 — "Search this area" tap. Shifts the client-side
+  // result anchor from origin/route → current map bounds. The
+  // marker effect re-runs against the new displayLocations and
+  // the cluster group rebuilds; the user's view stays put because
+  // we pre-set lastFitKeyRef to the search-this-area key (the
+  // marker effect's gate sees "already fitted" and skips its
+  // fitBounds branch). No new server query — backend already
+  // returned the full visible-providers set in the initial query.
+  const handleSearchThisArea = () => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    const bounds = map.getBounds();
+    const south = bounds.getSouth();
+    const west = bounds.getWest();
+    const north = bounds.getNorth();
+    const east = bounds.getEast();
+    lastFitKeyRef.current = `search-this-area:${south},${west},${north},${east}`;
+    setSearchBoundsAnchor([
+      [south, west],
+      [north, east],
+    ]);
+  };
+
+  // Button visibility — hidden when the result list and map agree,
+  // or when there are no results to argue about. Empty-list guard
+  // mirrors the helper's empty-input sentinel for clarity at the
+  // call site.
+  const showSearchAreaButton = displayLocations.length > 0 && inBoundsRatio < 0.5;
+
   const formatDuration = (mins: number) => {
     const h = Math.floor(mins / 60);
     const m = mins % 60;
@@ -1507,7 +1611,7 @@ export default function FindAWash() {
     // in sync with whatever the marker effect last produced. No
     // marker layer teardown — only `setIcon` swaps run here, which
     // is the Phase A invariant Phase B preserves.
-    const selLocs = route ? nearbyLocations : initialLocations;
+    const selLocs = displayLocations;
     markersByIdRef.current.forEach((marker, id) => {
       const rankIdx = selLocs.findIndex((l) => l.id === id);
       const loc = rankIdx >= 0 ? selLocs[rankIdx] : null;
@@ -1588,7 +1692,7 @@ export default function FindAWash() {
     } else {
       finishSelection();
     }
-  }, [selectedLocationId, route, nearbyLocations, initialLocations, mode]);
+  }, [selectedLocationId, displayLocations, mode]);
 
   // Tap on empty map area → deselect. Leaflet's 'click' fires only
   // on tap (not drag), and individual marker clicks call
@@ -1936,6 +2040,34 @@ export default function FindAWash() {
         >
           {mapExpanded ? <Minimize2 className="h-4 w-4 text-slate-700" /> : <Maximize2 className="h-4 w-4 text-slate-700" />}
         </button>
+        {/* Phase B CP3 — "Search this area" floating pill (EID §3.2).
+            Centered horizontally, above-map at top-3. Visible only
+            when the in-bounds ratio drops below 0.5. fade + slide-down
+            on appear via framer-motion's AnimatePresence.
+            TODO(round-3+): formalize the EID §3.2 z-index variables
+            and replace `z-30` with `--z-map-cta: 900`. */}
+        <AnimatePresence>
+          {showSearchAreaButton && (
+            <motion.div
+              key="search-this-area"
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18, ease: "easeOut" }}
+              className="absolute top-3 left-1/2 -translate-x-1/2 z-30"
+            >
+              <button
+                type="button"
+                onClick={handleSearchThisArea}
+                aria-label="Search this area"
+                className="inline-flex items-center gap-2 h-11 px-4 rounded-full bg-white/95 backdrop-blur-md border border-slate-200/80 shadow-[0_2px_6px_rgba(15,23,42,0.10)] hover:bg-white transition-colors text-sm font-medium text-slate-800"
+              >
+                <Search className="h-4 w-4 text-slate-500" />
+                Search this area
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* List of locations. Hidden while map is fullscreen — the

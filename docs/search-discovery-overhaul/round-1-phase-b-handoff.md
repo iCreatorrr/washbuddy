@@ -230,3 +230,53 @@ The api-server `Service.category` selection-set fix from CP1 commit `05a29bc` is
 - **Type augmentation friction with marker-options stash.** The `L.MarkerOptions` interface in `@types/leaflet` is closed (no index signature for plugin extensions). The plugin pattern of stashing custom keys via cast (`{ washPinTier: tier } as Partial<L.MarkerOptions>`) works but isn't pretty. Module augmentation would clean it up at the cost of a `.d.ts` file in the project — punted; one cast site is acceptable.
 - **`leaflet.markercluster`'s default `Default.css` styles are visually loud** (yellow / orange / blue gradients with letter-spacing 0). Custom `iconCreateFunction` overrides the visuals entirely, but the CSS still imports for positioning + spiderfy classes. Worth knowing if a future change touches cluster styling — overriding the colors via CSS instead of `iconCreateFunction` would still leave the default classes wrapping the bubble.
 - **Local Windows pnpm + native deps interaction.** The first install reported Windows-native binaries as `+`-added; subsequent installs for new packages list them with `-` (removed). Pre-existing pnpm/Windows quirk unrelated to CP2 — flag for any future contributor running local builds on Windows. Replit's Linux env doesn't trigger this.
+
+---
+
+## Checkpoint 3 — "Search this area" button
+
+**Commit:** `<this commit>`. Single commit per the audit's "no backend change needed" finding — the locations search endpoint already returns the full visible-providers set; CP3 just shifts which client-side filter runs.
+
+### What shipped
+
+**New file** [`lib/map-bounds.ts`](artifacts/washbuddy-web/src/lib/map-bounds.ts) — pure helper `getInBoundsRatio(locations, bounds)`. Returns the fraction (0–1) of locations whose lat/lng falls inside the supplied Leaflet `LatLngBounds`. Empty input returns 1 (the "no out-of-bounds locations" sentinel) so consumers don't trip on `0/0` NaN. Future map-bounds-aware UI (e.g., a card-level "this provider isn't in your visible map" indicator in Round 2+) shares the same primitive.
+
+**[find-a-wash.tsx](artifacts/washbuddy-web/src/pages/customer/find-a-wash.tsx)** changes:
+- New state: `searchBoundsAnchor: L.LatLngBoundsLiteral | null` (the bounds the user committed via the button) and `inBoundsRatio: number` (driven by map events).
+- `displayLocations` converted from a ternary to a memoized filter — base list is `route ? nearbyLocations : initialLocations`, then applies a lat/lng-in-bounds pass when `searchBoundsAnchor` is set. Marker effect's `locsToShow` and selection effect's `selLocs` both unified to `displayLocations` so the marker layer, the cluster group, and the result cards stay in lockstep.
+- Marker effect's fitKey extended with a `search-this-area:<bounds>` branch. `handleSearchThisArea` pre-sets `lastFitKeyRef.current` to that key so the fit-bounds gate skips its branch when the marker effect re-runs — the user's view stays put (they're already looking at the area they wanted).
+- New effect listens to `map.on("moveend", recompute)` and `map.on("zoomend", recompute)`. Debounced 200ms via `setTimeout` so a held drag doesn't flicker the button. Cleanup tears down listeners and clears any pending timeout.
+- Bounds-clear effect: `searchBoundsAnchor` resets to `null` whenever `origin`, `destination`, or `route` changes — switching context means the user is no longer asking about that specific map region.
+- Floating button JSX inside the map container: `motion.div` wrapped in `<AnimatePresence>`, `top-3 left-1/2 -translate-x-1/2 z-30`, fade + slide-down on appear. Translucent white pill (`bg-white/95 backdrop-blur-md`), 44px tall, `Search` icon prefix from lucide. Visible only when `displayLocations.length > 0 && inBoundsRatio < 0.5`.
+
+### Spec sections governing
+- [02-eid.md §3.2](docs/search-discovery-overhaul/02-eid.md) — "Search this area" button spec (floating pill, upper-middle, visible when <50% of currently-listed locations are in visible bounds, tap re-queries relative to visible bounds, translucent white + backdrop-blur).
+- The CP3 implementation reads "tap re-queries relative to visible bounds" as a client-side anchoring shift, not a new server call — the existing endpoint returns the full visible-providers set already. Consistent with the spec's intent (the result list should match the visible bounds).
+
+### Verification
+- TypeScript: **21 errors**, baseline holds. Zero new in either file.
+- Production build: **environmentally broken on local Windows** — same pnpm/Windows native-deps resolver quirk that affected CP2 (`pnpm install` for `leaflet.markercluster` scrubbed `@rollup/rollup-win32-x64-msvc` etc. from `.pnpm/`). Not caused by CP3; CP3 added no new deps. Replit's Linux env installs fresh and is unaffected.
+- Code-level threshold check: empty `displayLocations` short-circuits in the visibility gate (`displayLocations.length > 0 && inBoundsRatio < 0.5`); no NaN-trip path even without the helper's sentinel.
+
+### Decisions made
+- **No backend change.** The audit confirmed the locations search endpoint at [locations.ts:119](artifacts/api-server/src/routes/locations.ts:119) returns the full `isVisible: true` provider set without filtering by `lat`/`lng`/`radiusMiles` — those query params are destructured but not applied to the Prisma `where`. The frontend already filters by `distFromOrigin` (nearby) or `distanceToRoute` (route) client-side. CP3 introduces a third client-side filter (bounds) without touching the server. Single commit; no openapi/codegen.
+- **`displayLocations` unified across marker effect, selection effect, and JSX.** Pre-CP3, the marker effect computed its own `locsToShow = route ? nearbyLocations : initialLocations` inline — equivalent to `displayLocations` until CP3. After CP3, the bounds filter would be applied at one site and not the others, creating a marker-vs-card mismatch. Unifying through `displayLocations` keeps every consumer in lockstep.
+- **`lastFitKeyRef` extension over a separate suppression flag.** The fit-bounds gate's existing keying scheme handles "don't yank the view" via ref equality. Adding a `search-this-area:<bounds>` key value is a smaller change than introducing a new `suppressFitBounds` boolean. Fewer state variables, less drift risk.
+- **200ms debounce.** Standard pattern. Avoids button flicker during a held drag (each `moveend` fires once when the drag releases, but rapid sequences — e.g., scroll-zoom — fire multiple `zoomend` events in quick succession).
+- **Empty-list guard at the call site, not just in the helper.** Both layers handle the empty case explicitly. The helper returns 1 (sentinel); the JSX condition checks `displayLocations.length > 0` first. Defense-in-depth so a future helper change doesn't accidentally show the button.
+
+### Open items for next round (Phase B CP4)
+- **Header replacement** per EID §3.1 — the last and most structural CP of Phase B. Replaces:
+  - The floating top-left logomark/back button (Phase A interim).
+  - The floating top-right cluster (NotificationBell + hamburger) (Phase A interim).
+  - The `pt-14 lg:pt-0` content compensation (Phase A interim).
+  - The route-planner-era inline form Card and collapsed summary Card.
+  Adds: `find-a-wash-header.tsx` per EID §3.1. Phase B CP4 builds expanded mode only — collapsed mode + the `layoutId` shared-element animation lands in Round 2 alongside the bottom sheet (since EID §3.1 parameterizes the header by sheet state).
+  CP4 audit will be the **full audit gate**, not the lighter version — header replacement is the most user-visible structural change of Phase B.
+- **Route-mode-with-long-route caveat (flagged for future tuning).** In route mode with a long corridor (e.g., Toronto → Montreal), the user's natural map view at any zoom that fits the route only contains ~30% of the corridor's pins. CP3's threshold of `< 0.5` causes the button to appear immediately even though the user is looking at one part of a planned route, not panning to a different region. **This is by design per the spec** — the button is honest about "the visible map and the result list don't agree." If post-Phase-B testing surfaces this as intrusive in route mode, the threshold becomes a tunable: either a higher threshold in route mode (e.g., `< 0.3`), or a route-mode opt-out (button only appears in nearby mode). Worth piloting; not committed.
+- **Z-index variable formalization.** The button uses `z-30` per EID §3.2's reservation for `--z-map-cta: 900`. CP4 is a natural place to formalize the CSS variables since the new header is the first consumer at the `--z-header: 1000` tier — the variables can land alongside.
+
+### Anything that surprised me
+- **The backend's `radiusMiles` query param is dead.** Destructured at [locations.ts:121](artifacts/api-server/src/routes/locations.ts:121) but never used in the `where` clause. The full provider set has been flowing through every search since the endpoint shipped — the filter is entirely client-side. Made CP3 cleaner (no API change), but worth knowing as a "things look wired but aren't" anomaly. Not in CP3's scope to fix; flag for any future query-param cleanup pass.
+- **`lastFitKeyRef` was already designed for exactly this kind of extension.** Phase A's authors keyed it as a string so additional anchoring modes could be added without restructuring the gate's logic. The CP3 add (one new branch in the fitKey computation, one pre-set in the handler) was a 6-line change because the existing scaffolding handled the rest.
+- **`displayLocations` deduplication paid off twice.** Unifying `locsToShow` (marker effect) and `selLocs` (selection effect) into `displayLocations` was structurally needed for CP3. It also incidentally cleaned up two places where the same expression was inlined and would have drifted independently. The kind of refactor that's worth making explicit in spec (rather than letting it stay invisible until a future round needs to fix it).
