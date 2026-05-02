@@ -985,6 +985,13 @@ export default function FindAWash() {
   // re-runs; `clearLayers()` runs at the top of each re-run before
   // the new markers are added, so re-renders don't accumulate.
   const clusterGroupRef = useRef<L.MarkerClusterGroup | null>(null);
+  // Phase B CP3 v3 — scroll target for the bottom-sheet list. The
+  // scroll-to-top effect (below) brings this element into view on
+  // searchBoundsAnchor change so the user actually sees the list
+  // re-order. CP4's bottom-sheet rebuild will replace the
+  // mechanism (a contained scroll container with its own ref)
+  // while preserving the user-visible behavior.
+  const listAnchorRef = useRef<HTMLDivElement | null>(null);
   // Tracks which location id is currently shown on the map so the
   // selection effect doesn't double-open a popup that's already open.
   const openPopupIdRef = useRef<string | null>(null);
@@ -1031,25 +1038,27 @@ export default function FindAWash() {
       .sort((a, b) => a.distFromOrigin - b.distFromOrigin);
   }, [route, sampledRoutePoints, allLocations, origin?.lat, origin?.lng]);
 
-  // Phase B CP3 v2 — when the user taps "Search this area", the
-  // result list does NOT filter; it re-ranks. searchBoundsAnchor
-  // null means rank by distance from origin / route (existing
-  // behavior, baked into nearbyLocations / initialLocations sort
-  // upstream). searchBoundsAnchor set to a bounds tuple
-  // `[[s, w], [n, e]]` shifts the ranking criterion to distance
-  // from the bounds center; the displayLocations set itself stays
-  // the full visible-providers set so nothing disappears. The
-  // visual signal that "this area is more relevant" comes from
-  // classifyPin's inVisibleBounds rule (pins outside bounds render
-  // gray low-tier) — see the marker creation effect below.
+  // Phase B CP3 v3 — "Search this area" is **list-reorder-only**.
+  // Tapping the button sets searchBoundsAnchor to the current map
+  // bounds; rankedLocations sorts the bottom-sheet list by
+  // distance from the bounds center; the list scrolls to top so
+  // the new ordering is visible. **Pin colors and cluster colors
+  // do not change.** No map repaint at all.
   //
-  // CP3 v1 (commit a6ee2b9) implemented this as a filter, which
-  // produced three user-visible failures: empty-result with no
-  // message, tier-signal collapse to "best of what's left", and
-  // out-of-bounds providers disappearing entirely. EID §3.2's
-  // "re-queries relative to visible bounds" wording was the spec
-  // defect that misled the implementation. Both spec and code
-  // corrected in CP3 v2.
+  // History: CP3 v1 (a6ee2b9) implemented as a filter — pins
+  // outside bounds disappeared. CP3 v2 (27fd83b) re-implemented
+  // as a re-rank that *also* repainted pins (pins outside bounds
+  // dimmed gray, top-tier promoted "best of what's left"). CP3 v2
+  // Hotfix (9514e6a) gated the repaint behind explicit anchor.
+  // Each attempt failed because the user mental model treats
+  // viewport context as a list-ordering hint, not a map-repainting
+  // trigger. CP3 v3 removes all bounds-context tier classification:
+  // pin tier is filter-relevance-driven (Round 3 territory) and
+  // vehicle-compatibility-driven (today). Bounds context affects
+  // list ordering only.
+  //
+  // searchBoundsAnchor: null when no anchor is set (default mode);
+  // tuple `[[s, w], [n, e]]` once the user has tapped the button.
   const [searchBoundsAnchor, setSearchBoundsAnchor] = useState<L.LatLngBoundsLiteral | null>(null);
 
   // Track in-bounds fraction of the currently-displayed locations.
@@ -1148,6 +1157,30 @@ export default function FindAWash() {
   useEffect(() => {
     setSearchBoundsAnchor(null);
   }, [origin?.lat, origin?.lng, destination?.lat, destination?.lng, route]);
+
+  // Phase B CP3 v3 — scroll the bottom-sheet list into view on
+  // searchBoundsAnchor transitions so the user sees the new
+  // ordering. Fires on null → set ("Search this area" tap),
+  // set → set (re-tap in a different region), and set → null
+  // (anchor cleared by context change or "Show closest →"). The
+  // initial-mount transition (undefined → null on the first
+  // render) doesn't fire because hasMountedRef gates the effect.
+  // CP4's bottom-sheet rebuild will replace window.scrollTo with
+  // a contained scroll container.
+  const hasScrollMountedRef = useRef(false);
+  useEffect(() => {
+    if (!hasScrollMountedRef.current) {
+      hasScrollMountedRef.current = true;
+      return;
+    }
+    const target = listAnchorRef.current;
+    if (!target) return;
+    try {
+      const rect = target.getBoundingClientRect();
+      const top = rect.top + window.scrollY - 16;
+      window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    } catch {}
+  }, [searchBoundsAnchor]);
 
   const etasFetchedForRef = useRef<string>("");
   useEffect(() => {
@@ -1308,21 +1341,15 @@ export default function FindAWash() {
       endpointsRef.current = [myMarker];
     }
 
-    // CP3 v2: rankedLocations is the rank-ordered set used for
-    // tier classification. Identity over displayLocations when no
-    // search-this-area is active; sorted by distance from bounds
-    // center when the user has tapped "Search this area." Same
-    // physical set as displayLocations either way — nothing
-    // disappears.
-    const locsToShow = rankedLocations;
-    // CP3 v2 hotfix: `inVisibleBounds` only fires when the user
-    // has explicitly anchored to a map area (searchBoundsAnchor
-    // !== null). In default mode the snapshot isn't read; pins
-    // classify purely from rankIdx against the full result set.
-    // EID §3.5 documents this gating as load-bearing — passing
-    // inVisibleBounds unconditionally produced gray clusters in
-    // default mode and selection-time tier flicker on neighbors.
-    const visibleBounds = searchBoundsAnchor !== null ? map.getBounds() : null;
+    // CP3 v3: marker layer iterates displayLocations, NOT
+    // rankedLocations. Marker tier is filter-relevance-driven
+    // (Round 3 territory) and vehicle-compatibility-driven (today),
+    // never bounds-context-driven. Using displayLocations stabilizes
+    // marker creation against searchBoundsAnchor changes — the
+    // marker effect doesn't re-fire on tap, only the list renders
+    // re-order. rankedLocations is consumed by the list render
+    // (line ~2287) where ordering is the meaningful response.
+    const locsToShow = displayLocations;
 
     locsToShow.forEach((loc, rankIdx) => {
       if (loc.latitude == null || loc.longitude == null) return;
@@ -1337,15 +1364,16 @@ export default function FindAWash() {
       // compute price; route-mode labels wait on Round 4's real
       // detour endpoint.
       const incompatible = (loc as any).fitsActiveVehicle === false;
-      const inVisibleBounds = visibleBounds
-        ? visibleBounds.contains([loc.latitude, loc.longitude])
-        : undefined;
+      // CP3 v3: classifier no longer consumes inVisibleBounds; the
+      // rule was removed (see EID §3.5 "Why inVisibleBounds is
+      // reserved-but-unused"). rankIdx/totalRanked are kept
+      // forward-compat in the signature for Round 3's filter-match-
+      // strength scoring; today they don't drive tier selection.
       const tier = classifyPin({
         rankIdx,
         totalRanked: locsToShow.length,
         mode,
         fitsActiveVehicle: !incompatible,
-        inVisibleBounds,
       });
       const icon = buildWashPinDivIcon({ tier, isSelected: false });
       // Stash the tier on marker options so the cluster group's
@@ -1535,7 +1563,7 @@ export default function FindAWash() {
         map.setView([origin.lat, origin.lng], 10, { animate: true });
       }
     }
-  }, [route, origin, destination, nearbyLocations, initialLocations, displayLocations, rankedLocations, searchBoundsAnchor, setNavLocation, etas]);
+  }, [route, origin, destination, nearbyLocations, initialLocations, displayLocations, setNavLocation, etas]);
 
   // Build a location detail URL with optional return-to-route + user coords.
   // Uses URLSearchParams so separators (? vs &) are always correct, even when
@@ -1672,14 +1700,13 @@ export default function FindAWash() {
     ]);
   };
 
-  // Phase B CP3 v2 hotfix — empty-area "Show closest →" recovery.
-  // Clears the search-this-area anchor and pans the map to the
-  // closest provider's lat/lng. No zoom change (per EID §3.2);
-  // selection state is unchanged. The lastFitKeyRef is NOT
-  // pre-set here — clearing the anchor naturally allows the
-  // marker effect's fit-bounds gate to refire to the route /
-  // nearby key, but since we're explicitly panning before that
-  // re-render happens, the pan is what the user sees first.
+  // Phase B CP3 v3 — empty-area "Show closest →" recovery now
+  // **zooms-and-centers** at zoom 13. Earlier hotfix used
+  // panTo-only, which left the closest provider visible but
+  // sometimes buried at the edge of a too-zoomed-out viewport.
+  // Zoom 13 surfaces the provider with surrounding neighborhood
+  // context. Anchor clears, pill dismisses, selection state
+  // untouched.
   const handleShowClosest = () => {
     const map = mapInstanceRef.current;
     if (!map || !closestProvider) return;
@@ -1687,7 +1714,7 @@ export default function FindAWash() {
     if (loc.latitude == null || loc.longitude == null) return;
     setSearchBoundsAnchor(null);
     try {
-      map.panTo([loc.latitude, loc.longitude], { animate: true });
+      map.setView([loc.latitude, loc.longitude], 13, { animate: true });
     } catch {}
   };
 
@@ -1733,35 +1760,23 @@ export default function FindAWash() {
     // in sync with whatever the marker effect last produced. No
     // marker layer teardown — only `setIcon` swaps run here, which
     // is the Phase A invariant Phase B preserves.
-    // CP3 v2: selection-effect tier reclassification mirrors the
-    // marker effect's rank ordering. When search-this-area is
-    // active, rankedLocations sorts by distance from bounds
-    // center, so tier swaps on selection use the same rank context
-    // as the original render. Without this, tapping a pin would
-    // re-classify it via the origin-distance rank from
-    // displayLocations and inconsistently swap between top/mid.
-    const selLocs = rankedLocations;
-    // CP3 v2 hotfix: visibleBounds snapshot is only read when an
-    // explicit area anchor is set. In default mode, passing
-    // inVisibleBounds unconditionally caused selection to re-tier
-    // neighboring pins gray-to-blue as the user zoomed to find a
-    // tapped pin (the bounds snapshot at selection time differed
-    // from marker creation). EID §3.5 documents the gating.
-    const visibleBounds = searchBoundsAnchor !== null ? map.getBounds() : null;
+    // CP3 v3: selection-effect classification mirrors marker
+    // creation — vehicle-compat-only tier, no bounds context.
+    // selLocs uses displayLocations (not rankedLocations) so
+    // selection-time rank input is stable across "Search this
+    // area" taps. The bottom-sheet list re-orders independently
+    // via the rankedLocations consumer at line ~2287.
+    const selLocs = displayLocations;
     markersByIdRef.current.forEach((marker, id) => {
       const rankIdx = selLocs.findIndex((l) => l.id === id);
       const loc = rankIdx >= 0 ? selLocs[rankIdx] : null;
       if (!loc) return;
       const fits = (loc as any).fitsActiveVehicle !== false;
-      const inVisibleBounds = visibleBounds && loc.latitude != null && loc.longitude != null
-        ? visibleBounds.contains([loc.latitude, loc.longitude])
-        : undefined;
       const tier = classifyPin({
         rankIdx,
         totalRanked: selLocs.length,
         mode,
         fitsActiveVehicle: fits,
-        inVisibleBounds,
       });
       // Incompatible pins never get the selected ring — the visual
       // explainer modal handles "you tapped this and it's not
@@ -1832,7 +1847,7 @@ export default function FindAWash() {
     } else {
       finishSelection();
     }
-  }, [selectedLocationId, rankedLocations, mode, searchBoundsAnchor]);
+  }, [selectedLocationId, displayLocations, mode]);
 
   // Tap on empty map area → deselect. Leaflet's 'click' fires only
   // on tap (not drag), and individual marker clicks call
@@ -2282,9 +2297,16 @@ export default function FindAWash() {
             </Card>
           )}
 
-          {displayLocations.length > 0 && !isRouting && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
-              {displayLocations.map((loc, idx) => {
+          {/* CP3 v3: list iterates rankedLocations so closest-to-
+              bounds-center surfaces at the top after a "Search this
+              area" tap. The marker layer (above) iterates
+              displayLocations — same set, default ordering — so
+              pin colors stay stable through anchor changes. The
+              listAnchorRef is the scroll target for the
+              scroll-to-top effect on searchBoundsAnchor change. */}
+          {rankedLocations.length > 0 && !isRouting && (
+            <div ref={listAnchorRef} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+              {rankedLocations.map((loc, idx) => {
                 const incompatible = (loc as any).fitsActiveVehicle === false;
                 const minPrice = minPriceFor(loc);
                 const reviewCount: number = (loc as any).reviewCount ?? 0;

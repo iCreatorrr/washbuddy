@@ -39,11 +39,25 @@
 export type WashPinTier = "top" | "mid" | "low" | "incompatible";
 
 /**
- * Inputs to `classifyPin`. `detourMinutes` and `inVisibleBounds` are
- * optional — when absent (CP1 today), the corresponding 'low'-tier
- * rules from EID §3.5 don't fire and the classifier falls through to
- * 'mid'. CP3 wires `inVisibleBounds` (off-screen pins demote); Round
- * 4 wires `detourMinutes` (long-detour route-mode pins demote).
+ * Inputs to `classifyPin`. Per EID §3.5, default-mode tier
+ * classification today is **vehicle-compat-only** — incompatible vs
+ * mid. Top-tier and low-tier (and the optional inputs that fed
+ * them) are scaffolding for future rounds:
+ *
+ *  - `rankIdx` / `totalRanked` — reserved. Round 3 introduces
+ *    filter-match-strength scoring; rankIdx becomes the basis for
+ *    top-tier promotion (most filter-matches at this location → top).
+ *  - `detourMinutes` — reserved. Round 4 wires real per-location
+ *    OSRM detour values; the dormant rule body below activates then.
+ *  - `inVisibleBounds` — RESERVED but not consumed. CP1 introduced
+ *    it as an optional gate; CP3 v1, v2, and v2 Hotfix all attempted
+ *    to wire it for "pins outside the anchored area de-prioritize"
+ *    behavior; each attempt failed because the user mental model
+ *    treats viewport context as a list-ordering hint, not a map-
+ *    repainting trigger. CP3 v3 removed the rule entirely. Signature
+ *    retained for forward-compat — if a future round identifies a
+ *    use case where viewport demotion IS the right behavior, the
+ *    input is ready. Today: callers should not pass it.
  */
 export interface ClassifyPinInput {
   rankIdx: number;
@@ -56,13 +70,11 @@ export interface ClassifyPinInput {
 
 export function classifyPin(input: ClassifyPinInput): WashPinTier {
   if (!input.fitsActiveVehicle) return "incompatible";
-  // Top: top 3 by rank, capped at 25% of result set so a small list
-  // doesn't have everything-but-one as TOP. Per EID §3.5 reference
-  // implementation.
-  const topCutoff = Math.min(3, Math.ceil(input.totalRanked * 0.25));
-  if (input.rankIdx < topCutoff) return "top";
+  // Round 4 dormant rule — fires only once a caller starts passing
+  // real detour values from POST /api/locations/with-detour-times.
+  // No caller does today; rankIdx-based top-tier removed in CP3 v3
+  // alongside the inVisibleBounds rule.
   if (input.mode === "route" && input.detourMinutes != null && input.detourMinutes > 20) return "low";
-  if (input.inVisibleBounds === false) return "low";
   return "mid";
 }
 

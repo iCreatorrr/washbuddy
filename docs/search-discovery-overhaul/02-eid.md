@@ -212,23 +212,21 @@ Existing Leaflet map; this work doesn't change the underlying map library or til
 
 **"Search this area" button:**
 - Floating pill in upper-middle of map.
-- Visible only when user has panned/zoomed such that <50% of currently-listed locations are in visible bounds.
-- Tap **re-ranks** existing results relative to the visible map area — it does not filter or re-query. All providers stay visible on the map and in the list both before and after tapping. The ranking criterion shifts from distance-from-origin (or distance-along-route) to distance-from-bounds-center, which feeds `rankIdx` into `classifyPin`.
-- Pins that fall outside the current visible bounds render at low-tier (gray) via `classifyPin`'s `inVisibleBounds` rule, so the visual answers "what's most relevant for this area" without hiding anything. The user can still see and select gray pins; they just don't compete for top-tier.
-- Button hides on tap. The in-bounds ratio recomputes against the same set (now re-ordered) on the next moveend/zoomend; the button reappears only if the user pans/zooms enough to disagree with the new ranking again.
+- Visible only when user has panned/zoomed such that <50% of currently-listed locations are in visible bounds, AND there is at least one provider in the list.
+- Tap behavior: the bottom-sheet list re-orders so providers closest to the visible bounds center surface at the top. The list scrolls to top so the new ordering is visible. The button hides. **Pin colors and cluster colors do not change.** No map repaint at all — the map's only visual response is the button hiding.
 - Translucent white with backdrop-blur, soft drop shadow, ~40px tall.
 - Should NOT be visible by default — it earns its place by user interaction.
-- **Mental model:** "tell me about this area" (re-rank) — the standard map-discovery pattern across category-leading apps. Not "show only this area" (filter).
+- **Mental model:** "tell me about this area" (re-order the list) — not "show me only this area" (filter), not "highlight this area" (repaint). The user's pan + tap is a navigational hint about which providers they want to see first; the system uses it for list ordering only. Pin tier color is reserved for filter-relevance signals (Round 3) and vehicle compatibility (today).
 
 **Empty-area state:**
 When the user taps "Search this area" in a region containing zero providers from the current result set, an inline pill appears in the result list area of the bottom sheet:
 
-- **Trigger:** `searchBoundsAnchor !== null` AND zero pins from the full `displayLocations` set fall inside the anchored bounds. (Not against `rankedLocations` — same set, just re-ordered.)
-- **Copy:** "No providers in this area. Closest is **{N} {unit}** away." Distance is haversine from bounds center to the closest provider's lat/lng, rounded to whole units. Unit matches the active mode's card meta convention — `mi` in nearby mode, `km` in route mode — so the pill reads consistently with what the user is already seeing on cards.
-- **CTA:** "Show closest →" — tapping clears `searchBoundsAnchor` and pans the map to the closest provider's lat/lng (no zoom change). Selection state is unchanged.
+- **Trigger:** `searchBoundsAnchor !== null` AND zero pins from the full `displayLocations` set fall inside the anchored bounds.
+- **Copy:** "No providers in this area. Closest is **{N} {unit}** away." Distance is haversine from bounds center to the closest provider's lat/lng, rounded to whole units. Unit matches the active mode's card meta convention — `mi` in nearby mode (no destination set), `km` in route mode (destination set) — so the pill reads consistently with what the user is already seeing on cards.
+- **CTA:** "Show closest →" — tapping clears `searchBoundsAnchor` and **zooms-and-centers** on the closest provider's lat/lng (`map.setView([lat, lng], 13, { animate: true })`). Zoom 13 surfaces the provider with surrounding neighborhood context, not buried at the edge of a too-zoomed-in viewport. Selection state is unchanged.
 - **Placement:** inline in the bottom sheet's result-list area, above the cards. Not a floating toast.
 - **Dismissal:** the pill dismisses naturally when the user pans/zooms such that providers reappear in bounds, OR when they tap "Show closest →", OR when `searchBoundsAnchor` clears for any other reason (origin/destination/route change).
-- **No auto-pan on the original tap.** The user's panning is intentional; their tap is "tell me about this area," not "take me elsewhere." Auto-pan happens only when they explicitly tap "Show closest →" — recovery, not default.
+- **No auto-pan on the original "Search this area" tap.** The user's tap is "tell me about this area," not "take me elsewhere." Auto-zoom-and-center happens only when they explicitly tap "Show closest →" — recovery, not default.
 
 **Z-index hierarchy** (use CSS variables, not hardcoded values):
 
@@ -400,20 +398,34 @@ The pin is rendered as SVG. Leaflet integration uses `L.divIcon` with the SVG em
 ```ts
 type PinTier = 'top' | 'mid' | 'low' | 'incompatible';
 
-function classifyPin(location: Location, rankIdx: number, totalRanked: number, mode: 'nearby' | 'route'): PinTier {
+function classifyPin(location: Location, activeVehicle: Vehicle, mode: 'nearby' | 'route'): PinTier {
   if (!isBayCompatible(location, activeVehicle)) return 'incompatible';
-  if (rankIdx < Math.min(3, Math.ceil(totalRanked * 0.25))) return 'top';
-  if (mode === 'route' && location.detourMinutes > 20) return 'low';
-  if (!isInVisibleBounds(location, mapBounds)) return 'low';
   return 'mid';
 }
 ```
 
-**When `inVisibleBounds` fires:** only when the user has **explicitly anchored** the result list to a map area (Phase B CP3 v2's "Search this area" tap, which sets a `searchBoundsAnchor`). In default mode (no anchor), pin tier reflects `rankIdx` against the full result set, regardless of viewport — clusters across the full set still classify by their best member. Implementations should pass `inVisibleBounds: undefined` (or omit it) when no anchor is set; only pass a boolean computed from `bounds.contains([lat, lng])` when the user has tapped "Search this area."
+**Default-mode tier rules (current):**
+- Vehicle compatibility is the only filter signal today. Pins with no compatible bay for the active vehicle render at `incompatible` (gray with dashed outline). All vehicle-compatible providers render at `mid` (light blue).
+- **Top-tier and low-tier are deferred to Round 3** when filter UI ships. Round 3 introduces filter-match-strength scoring as the basis for top-tier promotion (most matches at this location → top); low-tier returns when filter mismatches dominate. Until Round 3, all compatible providers render at the same default tier.
 
-This gating is load-bearing: passing `inVisibleBounds` unconditionally on every viewport change produces two visible failures:
-1. Default-mode clusters render gray when most pins are off-screen, even if the cluster contains a top-tier provider.
-2. Selection re-runs the classifier against the current viewport (which has shifted since marker creation, e.g., the user zoomed in to find the pin); other pins' tier flickers between gray and blue on every selection change.
+**Forward-compat signature:**
+
+The runtime signature accepts optional `rankIdx`, `totalRanked`, `detourMinutes`, and `inVisibleBounds` inputs. None of them affect tier in default mode — they're scaffolding for future filter (Round 3) and detour (Round 4) wiring:
+
+```ts
+interface ClassifyPinInput {
+  rankIdx: number;            // reserved — Round 3 uses for filter-match-rank-based top-tier
+  totalRanked: number;        // reserved — Round 3 uses with rankIdx
+  mode: 'nearby' | 'route';
+  fitsActiveVehicle: boolean;
+  detourMinutes?: number;     // reserved — Round 4 wires real detour for route-mode demotion
+  inVisibleBounds?: boolean;  // RESERVED but not consumed; see below
+}
+```
+
+**Why `inVisibleBounds` is reserved-but-unused:**
+
+CP1 introduced the input as an optional gate for "pins outside the user's anchored area visually de-prioritize." CP3 v1, v2, and v2 Hotfix all attempted to wire it; each attempt failed because the user's mental model treats viewport context as a list-ordering hint, not a map-repainting trigger. CP3 v3 removed the rule entirely. The signature retains the input for forward-compatibility — if a future round identifies a use case where viewport demotion *is* the right behavior (which would require explicit user research), the input is ready. Today: callers should not pass it.
 
 **Pin sizes by tier:**
 - Top: 32×40px, drop shadow `0 3px 6px rgba(15,23,42,0.20)`.

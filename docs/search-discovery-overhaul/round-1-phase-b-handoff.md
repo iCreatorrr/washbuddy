@@ -538,3 +538,100 @@ Root cause: `inVisibleBounds` was treated as "modify tier when caller has the in
 5. **Anchored re-rank still works (CP3 v2 retained):** pan to a region with multiple providers, tap "Search this area." Pins inside bounds re-rank with the closest-to-center promoted to top-tier dark blue; pins outside dim to gray low-tier (the gating fires correctly when the anchor IS set). Cluster tier reflects the highest member, including the in-bounds top-tier pin if there is one.
 6. **Hotfix still holds:** set destination — no LatLngBounds-recursion crash.
 7. **Bug 1 acknowledgment** (deferred to CP4): scroll the page on mobile. The "no bottom" symptom from CP3 v2 testing is unchanged in this hotfix and is expected. CP4 addresses via layout restructure.
+
+---
+
+## CP3 v3 — list-reorder-only scope
+
+**Commit:** `<this commit>`. Single commit per CONTEXT.md — EID §3.2 + §3.5 spec rewrites and the code change ship as one logical unit ("describe what the user sees, not what the code does; remove the rule that didn't match the user's mental model").
+
+### What was actually wrong (CP3 v1 / v2 / v2 Hotfix retro)
+
+Three prior attempts at "Search this area" all failed at the same fundamental seam: assuming bounds context should affect map appearance.
+
+- **CP3 v1** (`a6ee2b9`) — implemented as a filter. Pins outside bounds disappeared. Empty-region taps produced ghost UI. Tier signal collapsed to "best of what's left."
+- **CP3 v2** (`27fd83b`) — re-implemented as a re-rank that *also* repainted pins. Pins outside bounds dimmed gray; pins inside re-ranked by bounds-center distance; top-tier promoted by proximity to the user's anchor.
+- **CP3 v2 Hotfix** (`9514e6a`) — gated `inVisibleBounds` behind explicit anchor. Selection-time bug fixed; default-mode cluster bug fixed. **Tap still changed pin colors** — light blue → dark blue, gray → dark blue. Visible map repaint on tap.
+
+The user's mental model, confirmed after the hotfix testing:
+
+> "Search this area" should never change pin colors or cluster colors. The button hides on tap, the bottom-sheet list re-orders so closest-to-bounds-center is at the top, and that's the entire visible response.
+
+Pin tier color is a function of **filter relevance** (Round 3) and **vehicle compatibility** (today). It is not a function of viewport, anchor proximity, distance from origin, or any other navigational signal. Bounds context is a list-ordering hint, not a map-repainting trigger.
+
+### What shipped
+
+**[02-eid.md §3.2](docs/search-discovery-overhaul/02-eid.md)** — full rewrite of the "Search this area" subsection. Drops the bounds-context tier behavior described in v2 / Hotfix. New text describes:
+- Trigger condition (in-bounds ratio < 0.5 AND `displayLocations.length > 0`).
+- Tap behavior: list re-orders, list scrolls to top, button hides. **Pin colors and cluster colors do not change.**
+- Empty-area pill — same trigger / copy / placement, but **"Show closest →" CTA now zooms-and-centers at zoom 13** (`map.setView([lat, lng], 13, { animate: true })`) instead of pan-only. Unit-phrasing tweak: "`mi` in nearby mode (no destination set), `km` in route mode (destination set)" so there's no guessing about what "active mode" means.
+- Mental model: "tell me about this area" (re-order the list) — not "show me only this area" (filter), not "highlight this area" (repaint).
+
+**[02-eid.md §3.5](docs/search-discovery-overhaul/02-eid.md)** — `classifyPin` reference implementation simplified to two rules:
+
+```ts
+function classifyPin(location, activeVehicle, mode): PinTier {
+  if (!isBayCompatible(location, activeVehicle)) return 'incompatible';
+  return 'mid';
+}
+```
+
+Top-tier and low-tier are deferred to **Round 3** when filter UI ships. Forward-compat signature documented (`rankIdx`, `totalRanked`, `detourMinutes`, `inVisibleBounds` reserved as scaffolding). New "Why `inVisibleBounds` is reserved-but-unused" subsection records the institutional reason: three implementation attempts each failed because the rule didn't match the user's mental model. Signature retained for future use cases that survive explicit user research; today, callers should not pass it.
+
+**[wash-pin.tsx](artifacts/washbuddy-web/src/components/customer/wash-pin.tsx)** — `classifyPin` body reduced to:
+
+```ts
+if (!input.fitsActiveVehicle) return "incompatible";
+if (input.mode === "route" && input.detourMinutes != null && input.detourMinutes > 20) return "low";
+return "mid";
+```
+
+`rankIdx`-based top-tier rule removed. `inVisibleBounds` rule removed. `detourMinutes` rule kept dormant for Round 4 forward-compat (no caller passes it today). JSDoc updated to document the reserved-but-unused pattern for all four optional inputs.
+
+**[find-a-wash.tsx](artifacts/washbuddy-web/src/pages/customer/find-a-wash.tsx)**:
+
+- Marker creation effect: `locsToShow` switched from `rankedLocations` → `displayLocations`. `inVisibleBounds` no longer passed to `classifyPin`. `visibleBounds` snapshot removed. Effect deps drop `rankedLocations` and `searchBoundsAnchor` — the marker layer is now stable across "Search this area" taps.
+- Selection effect: same — `selLocs` switched to `displayLocations`; `inVisibleBounds` removed. Effect deps drop `searchBoundsAnchor`.
+- List render at line 2287 (now 2295): switched from `displayLocations.map` to `rankedLocations.map`. The `<div>` gains `ref={listAnchorRef}`.
+- New `listAnchorRef = useRef<HTMLDivElement | null>(null)` near the other refs.
+- New scroll-to-top effect: on `searchBoundsAnchor` change (post-mount), `window.scrollTo({ top: rect.top + window.scrollY - 16, behavior: 'smooth' })`. Initial-mount transition gated by `hasScrollMountedRef`.
+- `handleShowClosest`: `panTo` → `setView([lat, lng], 13, { animate: true })`. Anchor clears, pill dismisses, selection state untouched.
+- `searchBoundsAnchor` declaration comment block updated with the CP3 v1 / v2 / v2 Hotfix retro and the list-reorder-only framing.
+
+### Spec sections governing
+- [02-eid.md §3.2](docs/search-discovery-overhaul/02-eid.md) — corrected in this commit.
+- [02-eid.md §3.5](docs/search-discovery-overhaul/02-eid.md) — corrected in this commit.
+- [05-visual-reference.md §4](docs/search-discovery-overhaul/05-visual-reference.md) — describes top-tier rendering as part of the target (post-Round-3) state. Needs a one-paragraph note acknowledging the simplified default-mode tier with a pointer to EID §3.5. **Carved out as a doc-only follow-up commit** immediately after this one lands. Tracked here as the next immediate task.
+
+### Verification
+- TypeScript: **21 errors**, baseline holds. Zero new in any of the 3 touched files.
+- Hotfix's Decimal coercion stays fixed — upstream of all this.
+
+### Decisions made
+- **Drop `rankIdx`-based top-tier from `classifyPin` body entirely**, not gate behind a sentinel. Cleaner intent: default mode means "no special ranking signal," and the body shouldn't pretend otherwise. `rankIdx` / `totalRanked` become reserved scaffolding for Round 3's filter-match-strength scoring; today they don't drive tier.
+- **`detourMinutes` rule body stays as forward-compat dead code.** No caller passes it today, but Round 4 will, and removing-then-re-adding the same code adds churn for no benefit. Mirrors the pattern adopted in CP1's audit for `inVisibleBounds` — accept the optional input now, light it up later.
+- **`inVisibleBounds` rule body removed entirely**, not just gated. The hotfix gated it; CP3 v3 removed it because gating wasn't enough. The rule shouldn't exist for default mode, AND "explicit anchor" isn't a sufficient trigger for visible repainting either. The signature retains the input — if a future round identifies a use case where viewport demotion *is* the right behavior (which would require explicit user research), it's ready. Today: callers should not pass it.
+- **Scroll-to-top via `window.scrollTo` (Option Scroll-A from audit), not a contained scroll container.** The current bottom-sheet list isn't inside a contained scroll element — it scrolls with page scroll. Adding a contained scroll container is CP4 territory (the bottom-sheet rebuild). CP3 v3 uses `window.scrollTo` to target `listAnchorRef`; CP4 will replace the mechanism (a contained ref + that container's `scrollTo`) while preserving the user-visible behavior. Documented in the inline comment at the ref declaration.
+- **Visual reference doc note carved out as a follow-up commit.** Editing §4 here would obscure the Round-3 destination it's already describing. A one-paragraph note at the top of §4 acknowledging the current simplified state with a pointer to EID §3.5 is a clean doc-only commit that doesn't muddle the visual-reference's role as target-state documentation.
+- **Bug 1 (page has no bottom) deferred to CP4.** Phase A interim chrome artifact; the layout restructure during header replacement naturally addresses page-bottom semantics. Tracked.
+
+### Open items for next round (Phase B CP4)
+- **Header replacement** per EID §3.1 — last and most structural CP of Phase B.
+- **Bug 1 (page has no bottom)** — tracked here, addressed by CP4's layout restructure.
+- **Visual reference §4 note** — doc-only follow-up commit immediately after this one. One paragraph at the top of §4: "Default-mode tier classification today is vehicle-compat-only — see EID §3.5. Top-tier and low-tier renderings described below are reserved for Round 3 when filter UI ships; until then all compatible providers render at mid-tier."
+- **Bottom-sheet scroll container** — CP4's bottom-sheet rebuild introduces a contained scrollable element. The CP3 v3 `window.scrollTo` mechanism gets replaced with that container's scroll API; user-visible behavior preserved.
+
+### Anything that surprised me
+- **Three failed attempts at the same feature, each failing at a different layer.** CP3 v1 failed at the data layer (filter narrowed the result set). CP3 v2 failed at the visual layer (re-rank repainted pins). CP3 v2 Hotfix failed at the default-mode-vs-anchored-mode boundary (gating fixed default mode, but anchored-mode still repainted on tap). Each fix was technically correct given the spec it was implementing — the spec itself didn't match the user's mental model until v3. Lesson: when a feature has three failed attempts at increasingly-specific levels of correctness, the failure is in the spec, not in the implementation.
+- **The "describe what the user sees, not what the code does" rule was load-bearing for the §3.2 rewrite.** v1 / v2 / Hotfix specs all described the system's internal behavior ("re-queries," "re-ranks," "fires `inVisibleBounds`"). v3 describes the user's experience ("list re-orders, button hides, pin colors don't change"). The latter framing makes the implementation drop out cleanly: the code that maps to "list re-orders" is one switched render source; the code that maps to "pin colors don't change" is the absence of `inVisibleBounds` wiring. The former framing led implementers (myself) to wire up the mechanism the spec described, which kept colliding with what the user actually wanted to see.
+- **Forward-compat signatures pay off when their dormant rules stay dormant.** `inVisibleBounds`'s history reads as a cautionary tale: optional-input scaffolding got wired prematurely (CP3 v1/v2), gated wrong (Hotfix), and finally removed entirely (v3). The signature stays for a hypothetical Round N use case, but the institutional record now documents that wiring it requires explicit user research, not just "we have the input available." Future optional inputs (`detourMinutes`, future filter-strength) should follow the same rule: don't wire until you have explicit user-validated trigger conditions.
+
+### Replit canary protocol
+1. **Default-mode pin colors:** load `/find-a-wash`. All vehicle-compatible pins are mid-tier light blue. No dark blue. No bounds-driven dimming. (If demo seed has no incompatible-vehicle scenarios, all pins read uniformly light blue — that's correct post-CP3-v3.)
+2. **Tapping "Search this area":** pan ~200km from results so the button appears. Tap. **Zero visible change to pin colors or cluster colors.** The button hides; the page scrolls down to bring the result list into view; the list re-orders (closest-to-bounds-center on top). Map looks identical before and after.
+3. **List re-ordering:** verify the top of the list contains providers nearest the bounds center.
+4. **Empty-area pill:** pan to a region with no providers, tap "Search this area." Pill appears with closest distance and "Show closest →" CTA.
+5. **Show-closest:** tap "Show closest →." Map zooms-and-centers at zoom 13 on the closest provider. Anchor clears, pill dismisses.
+6. **Selection model regression:** tap any pin. Gold ring + scale on the selected pin only; no other pins change tier.
+7. **Hotfix retained:** set destination — no LatLngBounds-recursion crash.
+8. **Bug 1 acknowledgment:** scroll the page on mobile — "no bottom" symptom unchanged. CP4 addresses.
